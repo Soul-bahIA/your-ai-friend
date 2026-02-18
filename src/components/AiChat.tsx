@@ -22,9 +22,10 @@ const AiChat = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const getAuthHeaders = async () => {
-    // Refresh session if needed
-    const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token || session?.access_token;
+    // Force a session refresh check
+    const { data: { session: freshSession } } = await supabase.auth.getSession();
+    const token = freshSession?.access_token || session?.access_token;
+    
     if (!token) {
       toast.error("Session expirée. Veuillez vous reconnecter.");
       throw new Error("No valid session");
@@ -37,11 +38,23 @@ const AiChat = () => {
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
+    
+    // Ensure session is fresh before loading
+    await supabase.auth.getSession();
+    
+    const { data, error } = await supabase
       .from("chat_conversations")
       .select("id, title, created_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
+      
+    if (error) {
+      console.error("Error loading conversations:", error);
+      if (error.message.includes("JWT expired")) {
+        // Session likely died completely, toast will be shown by getAuthHeaders if it happens again
+      }
+      return;
+    }
     if (data) setConversations(data);
   }, [user]);
 
@@ -65,13 +78,21 @@ const AiChat = () => {
 
   const createConversation = async (firstMessage: string) => {
     if (!user) return null;
+    
+    // Ensure we have a fresh session before creating
+    await supabase.auth.getSession();
+    
     const title = firstMessage.slice(0, 60) + (firstMessage.length > 60 ? "..." : "");
     const { data, error } = await supabase
       .from("chat_conversations")
       .insert({ user_id: user.id, title })
       .select("id, title, created_at")
       .single();
-    if (error || !data) { toast.error("Erreur création conversation"); return null; }
+    if (error || !data) { 
+      console.error("Conversation creation error:", error);
+      toast.error("Erreur création conversation"); 
+      return null; 
+    }
     setConversations(prev => [data, ...prev]);
     setActiveConversationId(data.id);
     return data.id;
