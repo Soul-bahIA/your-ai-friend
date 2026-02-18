@@ -9,11 +9,13 @@ import {
   Settings,
   Shield,
   LogOut,
+  MessageCircle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: MessageCircle, label: "Chat IA", path: "/chat" },
   { icon: GraduationCap, label: "Formations", path: "/formations" },
   { icon: AppWindow, label: "Applications", path: "/applications" },
   { icon: Monitor, label: "Automatisation", path: "/automation" },
