@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.manage-database]
 verify_jwt = false
+
+[functions.agent-tasks]
+verify_jwt = false
