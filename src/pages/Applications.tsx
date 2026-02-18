@@ -263,14 +263,26 @@ const Applications = () => {
                         {app.status}
                       </span>
                       {hasContent && (
-                        <button onClick={() => setPreviewApp(app)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Prévisualiser">
-                          <Eye className="h-4 w-4" />
-                        </button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[11px] gap-1 border-accent/30 text-accent hover:bg-accent/10"
+                          onClick={() => setPreviewApp(app)}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Visualiser
+                        </Button>
                       )}
                       {hasContent && (
-                        <button onClick={() => setExpandedId(expandedId === app.id ? null : app.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
-                          {expandedId === app.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[11px] gap-1 border-primary/30 text-primary hover:bg-primary/10"
+                          onClick={() => setExpandedId(expandedId === app.id ? null : app.id)}
+                        >
+                          <Code2 className="h-3.5 w-3.5" />
+                          Modifier
+                        </Button>
                       )}
                       <button onClick={() => handleDelete(app.id, app.title)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
                         <Trash2 className="h-4 w-4" />
