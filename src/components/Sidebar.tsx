@@ -34,7 +34,7 @@ const Sidebar = () => {
           <Brain className="h-5 w-5 text-primary" />
         </div>
         <div>
-          <h1 className="text-sm font-bold text-foreground tracking-tight">NEXUS AI</h1>
+          <h1 className="text-sm font-bold text-foreground tracking-tight">SOULBAH IA</h1>
           <p className="text-[10px] text-muted-foreground font-mono">v1.0.0 — Autonome</p>
         </div>
       </div>
