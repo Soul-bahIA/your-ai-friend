@@ -10,6 +10,7 @@ import Formations from "./pages/Formations";
 import Applications from "./pages/Applications";
 import Chat from "./pages/Chat";
 import KnowledgeBase from "./pages/KnowledgeBase";
+import DatabaseAdmin from "./pages/DatabaseAdmin";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/applications" element={<ProtectedRoute><Applications /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
+            <Route path="/database" element={<ProtectedRoute><DatabaseAdmin /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

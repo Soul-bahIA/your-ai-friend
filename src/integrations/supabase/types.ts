@@ -274,6 +274,41 @@ export type Database = {
         }
         Relationships: []
       }
+      user_migrations: {
+        Row: {
+          applied_at: string
+          id: string
+          migration_details: Json
+          migration_type: string
+          schema_id: string
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string
+          id?: string
+          migration_details?: Json
+          migration_type: string
+          schema_id: string
+          user_id: string
+        }
+        Update: {
+          applied_at?: string
+          id?: string
+          migration_details?: Json
+          migration_type?: string
+          schema_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_migrations_schema_id_fkey"
+            columns: ["schema_id"]
+            isOneToOne: false
+            referencedRelation: "user_schemas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -291,6 +326,71 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      user_schemas: {
+        Row: {
+          columns: Json
+          created_at: string
+          description: string | null
+          id: string
+          table_name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          table_name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          table_name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_table_data: {
+        Row: {
+          created_at: string
+          id: string
+          row_data: Json
+          schema_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          row_data?: Json
+          schema_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          row_data?: Json
+          schema_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_table_data_schema_id_fkey"
+            columns: ["schema_id"]
+            isOneToOne: false
+            referencedRelation: "user_schemas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
