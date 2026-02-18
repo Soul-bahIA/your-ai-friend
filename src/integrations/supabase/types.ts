@@ -14,16 +14,204 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      applications: {
+        Row: {
+          app_type: string | null
+          created_at: string
+          description: string | null
+          id: string
+          source_code: Json | null
+          status: string
+          tech_stack: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          app_type?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          source_code?: Json | null
+          status?: string
+          tech_stack?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          app_type?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          source_code?: Json | null
+          status?: string
+          tech_stack?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      formations: {
+        Row: {
+          content: Json | null
+          created_at: string
+          description: string | null
+          duration: string | null
+          id: string
+          lessons_count: number | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: Json | null
+          created_at?: string
+          description?: string | null
+          duration?: string | null
+          id?: string
+          lessons_count?: number | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: Json | null
+          created_at?: string
+          description?: string | null
+          duration?: string | null
+          id?: string
+          lessons_count?: number | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      modules_status: {
+        Row: {
+          id: string
+          last_active: string | null
+          module_name: string
+          stats: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          last_active?: string | null
+          module_name: string
+          stats?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          last_active?: string | null
+          module_name?: string
+          stats?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      system_logs: {
+        Row: {
+          created_at: string
+          details: Json | null
+          event: string
+          id: string
+          level: string
+          module: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          event: string
+          id?: string
+          level?: string
+          module: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          event?: string
+          id?: string
+          level?: string
+          module?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +338,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+    },
   },
 } as const

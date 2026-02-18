@@ -8,7 +8,9 @@ import {
   Video,
   Settings,
   Shield,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -22,6 +24,7 @@ const navItems = [
 
 const Sidebar = () => {
   const location = useLocation();
+  const { user, signOut } = useAuth();
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar flex flex-col">
@@ -57,8 +60,16 @@ const Sidebar = () => {
         })}
       </nav>
 
-      {/* Status */}
+      {/* User & Status */}
       <div className="px-4 py-4 border-t border-border">
+        {user && (
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-foreground truncate max-w-[160px]">{user.email}</span>
+            <button onClick={signOut} className="text-muted-foreground hover:text-destructive transition-colors">
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
           <span className="text-xs text-muted-foreground">Système opérationnel</span>
