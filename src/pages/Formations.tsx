@@ -3,7 +3,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { GraduationCap, Sparkles, Clock, BookOpen, Video, Trash2, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import FormationVideoPlayer from "@/components/FormationVideoPlayer";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +37,7 @@ const Formations = () => {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [videoFormation, setVideoFormation] = useState<Formation | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -250,9 +252,18 @@ const Formations = () => {
                       {course.status}
                     </span>
                     {course.content && Array.isArray(course.content) && course.content.length > 0 && (
-                      <button onClick={() => setExpandedId(expandedId === course.id ? null : course.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
-                        {expandedId === course.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setVideoFormation(course)}
+                          className="text-primary hover:text-primary/80 transition-colors p-1"
+                          title="Lire en vidéo"
+                        >
+                          <Play className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setExpandedId(expandedId === course.id ? null : course.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
+                          {expandedId === course.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </button>
+                      </>
                     )}
                     <button onClick={() => handleDelete(course.id, course.title)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
                       <Trash2 className="h-4 w-4" />
@@ -303,6 +314,16 @@ const Formations = () => {
               </div>
             ))}
           </div>
+        )}
+
+        {/* Video Player */}
+        {videoFormation && (
+          <FormationVideoPlayer
+            open={!!videoFormation}
+            onOpenChange={(open) => { if (!open) setVideoFormation(null); }}
+            title={videoFormation.title}
+            lessons={(videoFormation.content as Lesson[]) || []}
+          />
         )}
       </div>
     </DashboardLayout>
