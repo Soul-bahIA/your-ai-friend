@@ -33,6 +33,7 @@ const KnowledgeBase = () => {
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<Knowledge | null>(null);
+  const [viewing, setViewing] = useState<Knowledge | null>(null);
   const [form, setForm] = useState({ title: "", content: "", category: "general", source: "", tags: "" });
 
   const loadItems = async () => {
@@ -165,13 +166,13 @@ const KnowledgeBase = () => {
         <ScrollArea className="h-[calc(100vh-280px)]">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filtered.map(item => (
-              <Card key={item.id} className="p-4 flex flex-col gap-3 hover:border-primary/30 transition-colors">
+              <Card key={item.id} className="p-4 flex flex-col gap-3 hover:border-primary/30 transition-colors cursor-pointer" onClick={() => setViewing(item)}>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
                     <BookOpen className="h-4 w-4 text-primary" />
                     <h3 className="font-semibold text-sm text-foreground truncate">{item.title}</h3>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                     <button onClick={() => openEdit(item)} className="text-muted-foreground hover:text-primary transition-colors">
                       <Edit className="h-3.5 w-3.5" />
                     </button>
@@ -203,6 +204,40 @@ const KnowledgeBase = () => {
             </div>
           )}
         </ScrollArea>
+
+        {/* View Dialog */}
+        <Dialog open={!!viewing} onOpenChange={open => { if (!open) setViewing(null); }}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            {viewing && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <BookOpen className="h-5 w-5 text-primary" />
+                    {viewing.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="secondary">{viewing.category}</Badge>
+                    {viewing.tags?.map(tag => (
+                      <Badge key={tag} variant="outline" className="gap-1">
+                        <Tag className="h-3 w-3" />{tag}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="text-sm text-foreground whitespace-pre-wrap">{viewing.content}</div>
+                  {viewing.source && (
+                    <p className="text-xs text-muted-foreground">Source : {viewing.source}</p>
+                  )}
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Calendar className="h-3 w-3" />
+                    Mis à jour le {new Date(viewing.updated_at).toLocaleDateString("fr-FR")}
+                  </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );
