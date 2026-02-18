@@ -11,7 +11,7 @@ const toolSchema = {
   type: "function",
   function: {
     name: "create_application",
-    description: "Create or update a complete application architecture",
+    description: "Create or update a complete application architecture. Return the FULL updated architecture.",
     parameters: {
       type: "object",
       properties: {
@@ -53,6 +53,51 @@ const toolSchema = {
   }
 };
 
+function repairAndParseJson(raw: string): unknown {
+  // Step 1: Strip markdown
+  let cleaned = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
+
+  // Step 2: Find JSON boundaries
+  const jsonStart = cleaned.search(/\{/);
+  const jsonEnd = cleaned.lastIndexOf("}");
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+    throw new Error("No JSON object found in response");
+  }
+  cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+
+  // Step 3: Try direct parse
+  try {
+    return JSON.parse(cleaned);
+  } catch { /* continue to repair */ }
+
+  // Step 4: Fix common issues
+  cleaned = cleaned
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .replace(/\\'/g, "'");
+
+  try {
+    return JSON.parse(cleaned);
+  } catch { /* continue to repair brackets */ }
+
+  // Step 5: Repair unbalanced braces/brackets
+  let braces = 0, brackets = 0;
+  for (const char of cleaned) {
+    if (char === '{') braces++;
+    if (char === '}') braces--;
+    if (char === '[') brackets++;
+    if (char === ']') brackets--;
+  }
+  while (brackets > 0) { cleaned += ']'; brackets--; }
+  while (braces > 0) { cleaned += '}'; braces--; }
+
+  return JSON.parse(cleaned);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -83,26 +128,33 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // Build messages based on whether this is a new app or an improvement
     const isImprovement = !!conversationHistory?.length && !!existingArchitecture;
 
     const systemPrompt = isImprovement
-      ? `Tu es un architecte logiciel expert. Tu améliores des applications existantes. L'utilisateur te donne des instructions pour modifier l'application. Tu dois retourner l'architecture COMPLÈTE mise à jour (pas seulement les modifications). Voici l'architecture actuelle de l'application :\n\n${JSON.stringify(existingArchitecture, null, 2)}`
-      : `Tu es un architecte logiciel expert. Tu conçois des applications complètes. Retourne un JSON structuré décrivant l'architecture complète de l'application demandée.`;
+      ? `Tu es un architecte logiciel expert. L'utilisateur demande de modifier une application existante.
+RÈGLES IMPORTANTES:
+- Tu DOIS appliquer exactement la modification demandée (ajout, suppression, renommage, etc.)
+- Tu DOIS retourner l'architecture COMPLÈTE mise à jour, pas seulement les parties modifiées
+- Si l'utilisateur demande de SUPPRIMER un élément, retire-le complètement de l'architecture
+- Si l'utilisateur demande de MODIFIER un élément, change-le dans l'architecture
+- Si l'utilisateur demande d'AJOUTER un élément, ajoute-le à l'architecture existante
+
+Voici l'architecture ACTUELLE de l'application que tu dois modifier:
+${JSON.stringify(existingArchitecture, null, 2)}`
+      : `Tu es un architecte logiciel expert. Tu conçois des applications complètes.`;
 
     const messages: Array<{role: string; content: string}> = [
       { role: "system", content: systemPrompt }
     ];
 
     if (isImprovement) {
-      // Add conversation history for context
       for (const msg of conversationHistory) {
         messages.push({ role: msg.role, content: msg.content });
       }
     } else {
       messages.push({
         role: "user",
-        content: `Conçois l'architecture complète de l'application : "${appName}".${appDesc ? `\nDescription : ${appDesc}` : ""}\nInclus : architecture, composants frontend, API backend, schéma de base de données, et le code principal des composants clés.`
+        content: `Conçois l'architecture complète de l'application : "${appName}".${appDesc ? `\nDescription : ${appDesc}` : ""}\nInclus : composants frontend avec code, API backend, schéma de base de données.`
       });
     }
 
@@ -126,7 +178,7 @@ serve(async (req) => {
       const errText = await response.text();
       console.error("AI error:", response.status, errText);
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Trop de requêtes. Réessayez." }), {
+        return new Response(JSON.stringify({ error: "Trop de requêtes. Réessayez dans quelques secondes." }), {
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -135,65 +187,34 @@ serve(async (req) => {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      throw new Error("AI generation failed");
+      throw new Error("AI generation failed: " + response.status);
     }
 
     const aiData = await response.json();
-    console.log("AI response keys:", Object.keys(aiData));
     
     let appContent;
+    
+    // Try tool_calls first
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
+      console.log("Parsing tool call arguments, length:", toolCall.function.arguments.length);
       try {
         appContent = JSON.parse(toolCall.function.arguments);
-      } catch (parseErr) {
-        // Clean and retry
-        const cleaned = toolCall.function.arguments
-          .replace(/,\s*}/g, "}")
-          .replace(/,\s*]/g, "]")
-          .replace(/[\x00-\x1F\x7F]/g, "");
-        appContent = JSON.parse(cleaned);
+      } catch {
+        console.log("Direct parse failed, attempting repair...");
+        appContent = repairAndParseJson(toolCall.function.arguments);
       }
     } else {
+      // Fallback: parse from content
       const content = aiData.choices?.[0]?.message?.content || "";
-      console.log("AI content (first 500):", content.substring(0, 500));
-      
-      // Strip markdown code blocks
-      let cleaned = content
-        .replace(/```json\s*/gi, "")
-        .replace(/```\s*/g, "")
-        .trim();
-      
-      // Find JSON boundaries
-      const jsonStart = cleaned.search(/\{/);
-      const jsonEnd = cleaned.lastIndexOf("}");
-      
-      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
-        console.error("No JSON found in response:", content.substring(0, 200));
-        throw new Error("Could not parse AI response");
+      console.log("No tool call, parsing from content, length:", content.length);
+      if (!content) {
+        throw new Error("Empty AI response");
       }
-      
-      cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
-      
-      try {
-        appContent = JSON.parse(cleaned);
-      } catch {
-        // Fix common issues
-        cleaned = cleaned
-          .replace(/,\s*}/g, "}")
-          .replace(/,\s*]/g, "]")
-          .replace(/[\x00-\x1F\x7F]/g, "")
-          .replace(/\\'/g, "'");
-        try {
-          appContent = JSON.parse(cleaned);
-        } catch (finalErr) {
-          console.error("Final parse error:", finalErr, "Content:", cleaned.substring(0, 300));
-          throw new Error("Could not parse AI response");
-        }
-      }
+      appContent = repairAndParseJson(content);
     }
     
-    // Normalize: if the response has the architecture nested or flat
+    // Normalize structure
     if (!appContent.architecture && appContent.frontend) {
       appContent = {
         title: appContent.title || appName,
@@ -207,15 +228,22 @@ serve(async (req) => {
         }
       };
     }
+    
+    // Ensure required fields
+    appContent.title = appContent.title || appName;
+    appContent.description = appContent.description || "";
+    appContent.app_type = appContent.app_type || "Web App";
+    appContent.tech_stack = appContent.tech_stack || "React + TypeScript";
+    appContent.architecture = appContent.architecture || {};
 
     const { error: updateError } = await supabase
       .from("applications")
       .update({
-        title: appContent.title || appName,
+        title: appContent.title,
         description: appContent.description,
-        app_type: appContent.app_type || "Web App",
-        tech_stack: appContent.tech_stack || "React + TypeScript",
-        source_code: appContent.architecture || {},
+        app_type: appContent.app_type,
+        tech_stack: appContent.tech_stack,
+        source_code: appContent.architecture,
         status: "Généré",
       })
       .eq("id", applicationId)
