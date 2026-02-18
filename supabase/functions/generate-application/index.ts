@@ -139,18 +139,73 @@ serve(async (req) => {
     }
 
     const aiData = await response.json();
+    console.log("AI response keys:", Object.keys(aiData));
+    
     let appContent;
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
-      appContent = JSON.parse(toolCall.function.arguments);
+      try {
+        appContent = JSON.parse(toolCall.function.arguments);
+      } catch (parseErr) {
+        // Clean and retry
+        const cleaned = toolCall.function.arguments
+          .replace(/,\s*}/g, "}")
+          .replace(/,\s*]/g, "]")
+          .replace(/[\x00-\x1F\x7F]/g, "");
+        appContent = JSON.parse(cleaned);
+      }
     } else {
       const content = aiData.choices?.[0]?.message?.content || "";
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        appContent = JSON.parse(jsonMatch[0]);
-      } else {
+      console.log("AI content (first 500):", content.substring(0, 500));
+      
+      // Strip markdown code blocks
+      let cleaned = content
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      
+      // Find JSON boundaries
+      const jsonStart = cleaned.search(/\{/);
+      const jsonEnd = cleaned.lastIndexOf("}");
+      
+      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+        console.error("No JSON found in response:", content.substring(0, 200));
         throw new Error("Could not parse AI response");
       }
+      
+      cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+      
+      try {
+        appContent = JSON.parse(cleaned);
+      } catch {
+        // Fix common issues
+        cleaned = cleaned
+          .replace(/,\s*}/g, "}")
+          .replace(/,\s*]/g, "]")
+          .replace(/[\x00-\x1F\x7F]/g, "")
+          .replace(/\\'/g, "'");
+        try {
+          appContent = JSON.parse(cleaned);
+        } catch (finalErr) {
+          console.error("Final parse error:", finalErr, "Content:", cleaned.substring(0, 300));
+          throw new Error("Could not parse AI response");
+        }
+      }
+    }
+    
+    // Normalize: if the response has the architecture nested or flat
+    if (!appContent.architecture && appContent.frontend) {
+      appContent = {
+        title: appContent.title || appName,
+        description: appContent.description || "",
+        app_type: appContent.app_type || "Web App",
+        tech_stack: appContent.tech_stack || "React + TypeScript",
+        architecture: {
+          frontend: appContent.frontend,
+          backend: appContent.backend,
+          database: appContent.database,
+        }
+      };
     }
 
     const { error: updateError } = await supabase
