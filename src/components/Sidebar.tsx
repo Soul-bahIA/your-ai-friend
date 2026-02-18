@@ -10,6 +10,7 @@ import {
   Shield,
   LogOut,
   MessageCircle,
+  BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -18,6 +19,7 @@ const navItems = [
   { icon: MessageCircle, label: "Chat IA", path: "/chat" },
   { icon: GraduationCap, label: "Formations", path: "/formations" },
   { icon: AppWindow, label: "Applications", path: "/applications" },
+  { icon: BookOpen, label: "Connaissances", path: "/knowledge" },
   { icon: Monitor, label: "Automatisation", path: "/automation" },
   { icon: Video, label: "Vidéo", path: "/video" },
   { icon: Shield, label: "Sécurité", path: "/security" },

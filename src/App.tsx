@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Formations from "./pages/Formations";
 import Applications from "./pages/Applications";
 import Chat from "./pages/Chat";
+import KnowledgeBase from "./pages/KnowledgeBase";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/formations" element={<ProtectedRoute><Formations /></ProtectedRoute>} />
             <Route path="/applications" element={<ProtectedRoute><Applications /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+            <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
