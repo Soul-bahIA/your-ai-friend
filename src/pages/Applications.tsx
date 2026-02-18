@@ -151,21 +151,28 @@ const Applications = () => {
   };
 
   const handleAppUpdated = (appId: string, result: any) => {
-    setApps((prev) =>
-      prev.map((a) =>
-        a.id === appId
-          ? {
-              ...a,
-              title: result.title || a.title,
-              description: result.description,
-              app_type: result.app_type || a.app_type,
-              tech_stack: result.tech_stack || a.tech_stack,
-              source_code: result.architecture || a.source_code,
-              status: "Généré",
-            }
-          : a
-      )
-    );
+    const updater = (a: Application) =>
+      a.id === appId
+        ? {
+            ...a,
+            title: result.title || a.title,
+            description: result.description || a.description,
+            app_type: result.app_type || a.app_type,
+            tech_stack: result.tech_stack || a.tech_stack,
+            source_code: result.architecture || a.source_code,
+            status: "Généré",
+          }
+        : a;
+
+    setApps((prev) => prev.map(updater));
+
+    // Also update previewApp if it's the one being modified
+    setPreviewApp((prev) => {
+      if (prev && prev.id === appId) {
+        return updater(prev) as Application;
+      }
+      return prev;
+    });
   };
 
   const getStatusColor = (status: string) => {

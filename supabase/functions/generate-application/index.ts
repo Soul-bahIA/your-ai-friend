@@ -130,17 +130,19 @@ serve(async (req) => {
 
     const isImprovement = !!conversationHistory?.length && !!existingArchitecture;
 
+    // For improvements, keep architecture compact (no pretty print) to save tokens
+    const archStr = isImprovement ? JSON.stringify(existingArchitecture) : "";
+    
     const systemPrompt = isImprovement
-      ? `Tu es un architecte logiciel expert. L'utilisateur demande de modifier une application existante.
-RÈGLES IMPORTANTES:
-- Tu DOIS appliquer exactement la modification demandée (ajout, suppression, renommage, etc.)
-- Tu DOIS retourner l'architecture COMPLÈTE mise à jour, pas seulement les parties modifiées
-- Si l'utilisateur demande de SUPPRIMER un élément, retire-le complètement de l'architecture
-- Si l'utilisateur demande de MODIFIER un élément, change-le dans l'architecture
-- Si l'utilisateur demande d'AJOUTER un élément, ajoute-le à l'architecture existante
+      ? `Tu es un architecte logiciel. Modifie l'architecture selon la demande utilisateur.
+RÈGLES:
+- Applique EXACTEMENT la modification demandée (ajout/suppression/renommage)
+- Si SUPPRIMER: retire l'élément complètement
+- Si MODIFIER: change l'élément en place  
+- Si AJOUTER: ajoute à l'existant
+- Retourne TOUJOURS l'architecture COMPLÈTE mise à jour
 
-Voici l'architecture ACTUELLE de l'application que tu dois modifier:
-${JSON.stringify(existingArchitecture, null, 2)}`
+Architecture actuelle: ${archStr}`
       : `Tu es un architecte logiciel expert. Tu conçois des applications complètes.`;
 
     const messages: Array<{role: string; content: string}> = [
