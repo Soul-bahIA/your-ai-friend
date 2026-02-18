@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import AppChatPanel from "@/components/AppChatPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Eye, Code2, Database, Globe } from "lucide-react";
+import { Eye, Code2, Database, Globe, MessageSquare } from "lucide-react";
 
 interface AppArchitecture {
   frontend?: {
@@ -24,6 +25,9 @@ interface AppPreviewProps {
   appType: string | null;
   techStack: string | null;
   architecture: AppArchitecture | null;
+  applicationId?: string;
+  sourceCode?: any;
+  onAppUpdated?: (result: any) => void;
 }
 
 function buildPreviewHtml(title: string, architecture: AppArchitecture | null): string {
@@ -133,7 +137,7 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
-const AppPreview = ({ open, onOpenChange, title, description, appType, techStack, architecture }: AppPreviewProps) => {
+const AppPreview = ({ open, onOpenChange, title, description, appType, techStack, architecture, applicationId, sourceCode, onAppUpdated }: AppPreviewProps) => {
   const [tab, setTab] = useState("preview");
   const previewHtml = buildPreviewHtml(title, architecture);
 
@@ -175,6 +179,11 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
             <TabsTrigger value="api" className="text-xs gap-1.5">
               <Globe className="h-3.5 w-3.5" /> Architecture
             </TabsTrigger>
+            {applicationId && onAppUpdated && (
+              <TabsTrigger value="modify" className="text-xs gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" /> Modifier
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="preview" className="flex-1 m-0 p-4 min-h-0">
@@ -253,6 +262,16 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
               )}
             </div>
           </TabsContent>
+          {applicationId && onAppUpdated && (
+            <TabsContent value="modify" className="flex-1 m-0 min-h-0">
+              <AppChatPanel
+                applicationId={applicationId}
+                appTitle={title}
+                existingArchitecture={sourceCode}
+                onAppUpdated={onAppUpdated}
+              />
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

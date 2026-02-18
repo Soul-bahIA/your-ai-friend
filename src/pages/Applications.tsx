@@ -378,6 +378,9 @@ const Applications = () => {
             appType={previewApp.app_type}
             techStack={previewApp.tech_stack}
             architecture={getArchitecture(previewApp)}
+            applicationId={previewApp.id}
+            sourceCode={previewApp.source_code}
+            onAppUpdated={(result) => handleAppUpdated(previewApp.id, result)}
           />
         )}
       </div>
