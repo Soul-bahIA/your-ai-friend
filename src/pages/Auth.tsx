@@ -60,7 +60,7 @@ const Auth = () => {
             <Brain className="h-7 w-7 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground tracking-tight">NEXUS AI</h1>
+            <h1 className="text-xl font-bold text-foreground tracking-tight">SOULBAH IA</h1>
             <p className="text-[10px] text-muted-foreground font-mono">Plateforme IA Autonome</p>
           </div>
         </div>
@@ -71,7 +71,7 @@ const Auth = () => {
             {isLogin ? "Connexion" : "Inscription"}
           </h2>
           <p className="text-xs text-muted-foreground mb-6">
-            {isLogin ? "Accédez à votre centre de commande" : "Créez votre compte NEXUS"}
+            {isLogin ? "Accédez à votre centre de commande" : "Créez votre compte SOULBAH"}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
