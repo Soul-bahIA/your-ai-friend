@@ -13,6 +13,7 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import DatabaseAdmin from "./pages/DatabaseAdmin";
 import Settings from "./pages/Settings";
 import Security from "./pages/Security";
+import Video from "./pages/Video";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/database" element={<ProtectedRoute><DatabaseAdmin /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/security" element={<ProtectedRoute><Security /></ProtectedRoute>} />
+            <Route path="/video" element={<ProtectedRoute><Video /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
