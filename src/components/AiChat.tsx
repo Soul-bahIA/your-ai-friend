@@ -2,9 +2,11 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, CheckCircle, Sparkles } from "lucide-react";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, Sparkles, Menu } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -14,15 +16,16 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 const AiChat = () => {
   const { user, session } = useAuth();
+  const isMobile = useIsMobile();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showConversations, setShowConversations] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const getAuthHeaders = async () => {
-    // Force a session refresh check
     const { data: { session: freshSession } } = await supabase.auth.getSession();
     const token = freshSession?.access_token || session?.access_token;
     
@@ -38,21 +41,14 @@ const AiChat = () => {
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
-    
-    // Ensure session is fresh before loading
     await supabase.auth.getSession();
-    
     const { data, error } = await supabase
       .from("chat_conversations")
       .select("id, title, created_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
-      
     if (error) {
       console.error("Error loading conversations:", error);
-      if (error.message.includes("JWT expired")) {
-        // Session likely died completely, toast will be shown by getAuthHeaders if it happens again
-      }
       return;
     }
     if (data) setConversations(data);
@@ -78,10 +74,7 @@ const AiChat = () => {
 
   const createConversation = async (firstMessage: string) => {
     if (!user) return null;
-    
-    // Ensure we have a fresh session before creating
     await supabase.auth.getSession();
-    
     const title = firstMessage.slice(0, 60) + (firstMessage.length > 60 ? "..." : "");
     const { data, error } = await supabase
       .from("chat_conversations")
@@ -219,11 +212,7 @@ const AiChat = () => {
           try {
             const parsed = JSON.parse(jsonStr);
             const delta = parsed.choices?.[0]?.delta;
-            
-            // Handle text content
             if (delta?.content) upsert(delta.content);
-            
-            // Handle tool calls
             if (delta?.tool_calls) {
               for (const tc of delta.tool_calls) {
                 if (tc.index !== undefined) {
@@ -242,12 +231,10 @@ const AiChat = () => {
         }
       }
 
-      // Execute any tool calls
       for (const tc of pendingToolCalls) {
         if (tc && tc.name) {
           let args: any = {};
           try { args = JSON.parse(tc.arguments); } catch {}
-          
           upsert(`\n\n⚡ *Exécution : ${tc.name}...*\n\n`);
           const result = await executeAction(tc.name, args);
           upsert(result);
@@ -269,123 +256,162 @@ const AiChat = () => {
   const newChat = () => {
     setActiveConversationId(null);
     setMessages([]);
+    if (isMobile) setShowConversations(false);
   };
 
-  return (
-    <div className="flex h-[calc(100vh-120px)] gap-4">
-      {/* Sidebar conversations */}
-      <div className="w-64 flex-shrink-0 border border-border rounded-lg bg-card flex flex-col">
-        <div className="p-3 border-b border-border">
-          <Button onClick={newChat} variant="outline" size="sm" className="w-full gap-2">
-            <Plus className="h-4 w-4" /> Nouvelle conversation
-          </Button>
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
-            {conversations.map((c) => (
-              <div
-                key={c.id}
-                className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm cursor-pointer transition-colors ${
-                  activeConversationId === c.id
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                }`}
-                onClick={() => setActiveConversationId(c.id)}
+  const selectConversation = (id: string) => {
+    setActiveConversationId(id);
+    if (isMobile) setShowConversations(false);
+  };
+
+  const conversationList = (
+    <div className="flex flex-col h-full">
+      <div className="p-3 border-b border-border">
+        <Button onClick={newChat} variant="outline" size="sm" className="w-full gap-2">
+          <Plus className="h-4 w-4" /> Nouvelle conversation
+        </Button>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="p-2 space-y-1">
+          {conversations.map((c) => (
+            <div
+              key={c.id}
+              className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm cursor-pointer transition-colors ${
+                activeConversationId === c.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+              onClick={() => selectConversation(c.id)}
+            >
+              <MessageSquare className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate flex-1">{c.title}</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}
+                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
               >
-                <MessageSquare className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate flex-1">{c.title}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-            {conversations.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-8">Aucune conversation</p>
-            )}
-          </div>
-        </ScrollArea>
-      </div>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {conversations.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-8">Aucune conversation</p>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col max-w-3xl">
-        <ScrollArea className="flex-1 pr-4">
-          <div className="space-y-4 py-4">
-            {messages.length === 0 && (
-              <div className="text-center py-16 space-y-4">
-                <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-                  <Brain className="h-8 w-8 text-primary" />
-                </div>
-                <h3 className="text-lg font-semibold text-foreground">SOULBAH IA</h3>
-                <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Votre IA personnelle. Je peux créer des formations, des applications, 
-                  sauvegarder vos connaissances et répondre à toutes vos questions.
-                </p>
-                <div className="flex flex-wrap gap-2 justify-center mt-4">
-                  {["Crée une formation sur Python", "Développe une app de gestion", "Retiens cette info"].map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setInput(s)}
-                      className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
-                    >
-                      <Sparkles className="h-3 w-3 inline mr-1" />{s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                {msg.role === "assistant" && (
-                  <div className="flex-shrink-0 h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center mt-1">
-                    <Brain className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                )}
-                <div
-                  className={`max-w-[75%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-card border border-border text-foreground"
-                  }`}
-                >
-                  {msg.content}
-                </div>
-                {msg.role === "user" && (
-                  <div className="flex-shrink-0 h-7 w-7 rounded-full bg-secondary flex items-center justify-center mt-1">
-                    <User className="h-3.5 w-3.5 text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-            ))}
-            {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center mt-1">
-                  <Brain className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <div className="bg-card border border-border rounded-lg px-4 py-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                </div>
-              </div>
-            )}
-            <div ref={scrollRef} />
-          </div>
-        </ScrollArea>
-
-        <form onSubmit={send} className="flex gap-2 pt-4 border-t border-border">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Demandez n'importe quoi à SOULBAH IA..."
-            className="flex-1 bg-secondary border-border"
-            disabled={isLoading}
-          />
-          <Button type="submit" disabled={isLoading || !input.trim()} size="icon">
-            <Send className="h-4 w-4" />
+  const chatArea = (
+    <div className="flex-1 flex flex-col min-w-0">
+      {isMobile && (
+        <div className="flex items-center gap-2 pb-3 border-b border-border mb-2">
+          <Button variant="ghost" size="icon" onClick={() => setShowConversations(true)} className="h-8 w-8">
+            <Menu className="h-4 w-4" />
           </Button>
-        </form>
-      </div>
+          <span className="text-xs text-muted-foreground truncate flex-1">
+            {activeConversationId 
+              ? conversations.find(c => c.id === activeConversationId)?.title || "Conversation"
+              : "Nouvelle conversation"
+            }
+          </span>
+        </div>
+      )}
+
+      <ScrollArea className="flex-1 pr-2 md:pr-4">
+        <div className="space-y-4 py-4">
+          {messages.length === 0 && (
+            <div className="text-center py-8 md:py-16 space-y-4">
+              <div className="h-14 w-14 md:h-16 md:w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <Brain className="h-7 w-7 md:h-8 md:w-8 text-primary" />
+              </div>
+              <h3 className="text-base md:text-lg font-semibold text-foreground">SOULBAH IA</h3>
+              <p className="text-xs md:text-sm text-muted-foreground max-w-md mx-auto px-4">
+                Votre IA personnelle. Je peux créer des formations, des applications, 
+                sauvegarder vos connaissances et répondre à toutes vos questions.
+              </p>
+              <div className="flex flex-col sm:flex-row flex-wrap gap-2 justify-center mt-4 px-4">
+                {["Crée une formation sur Python", "Développe une app de gestion", "Retiens cette info"].map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setInput(s)}
+                    className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                  >
+                    <Sparkles className="h-3 w-3 inline mr-1" />{s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-2 md:gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              {msg.role === "assistant" && (
+                <div className="flex-shrink-0 h-6 w-6 md:h-7 md:w-7 rounded-full bg-primary/10 flex items-center justify-center mt-1">
+                  <Brain className="h-3 w-3 md:h-3.5 md:w-3.5 text-primary" />
+                </div>
+              )}
+              <div
+                className={`max-w-[85%] md:max-w-[75%] rounded-lg px-3 py-2 md:px-4 md:py-3 text-sm whitespace-pre-wrap ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card border border-border text-foreground"
+                }`}
+              >
+                {msg.content}
+              </div>
+              {msg.role === "user" && (
+                <div className="flex-shrink-0 h-6 w-6 md:h-7 md:w-7 rounded-full bg-secondary flex items-center justify-center mt-1">
+                  <User className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+          ))}
+          {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
+            <div className="flex gap-2 md:gap-3">
+              <div className="flex-shrink-0 h-6 w-6 md:h-7 md:w-7 rounded-full bg-primary/10 flex items-center justify-center mt-1">
+                <Brain className="h-3 w-3 md:h-3.5 md:w-3.5 text-primary" />
+              </div>
+              <div className="bg-card border border-border rounded-lg px-3 py-2 md:px-4 md:py-3">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            </div>
+          )}
+          <div ref={scrollRef} />
+        </div>
+      </ScrollArea>
+
+      <form onSubmit={send} className="flex gap-2 pt-3 md:pt-4 border-t border-border">
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={isMobile ? "Demandez à l'IA..." : "Demandez n'importe quoi à SOULBAH IA..."}
+          className="flex-1 bg-secondary border-border"
+          disabled={isLoading}
+        />
+        <Button type="submit" disabled={isLoading || !input.trim()} size="icon">
+          <Send className="h-4 w-4" />
+        </Button>
+      </form>
+    </div>
+  );
+
+  return (
+    <div className="flex h-[calc(100vh-120px)] md:h-[calc(100vh-120px)] gap-0 md:gap-4">
+      {!isMobile && (
+        <div className="w-64 flex-shrink-0 border border-border rounded-lg bg-card flex flex-col">
+          {conversationList}
+        </div>
+      )}
+
+      {isMobile && (
+        <Sheet open={showConversations} onOpenChange={setShowConversations}>
+          <SheetContent side="left" className="w-72 p-0">
+            <SheetTitle className="sr-only">Conversations</SheetTitle>
+            {conversationList}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {chatArea}
     </div>
   );
 };
