@@ -7,13 +7,59 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const toolSchema = {
+  type: "function",
+  function: {
+    name: "create_application",
+    description: "Create or update a complete application architecture",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        app_type: { type: "string" },
+        tech_stack: { type: "string" },
+        architecture: {
+          type: "object",
+          properties: {
+            frontend: {
+              type: "object",
+              properties: {
+                framework: { type: "string" },
+                components: { type: "array", items: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, code: { type: "string" } }, required: ["name", "description", "code"] } }
+              },
+              required: ["framework", "components"]
+            },
+            backend: {
+              type: "object",
+              properties: {
+                endpoints: { type: "array", items: { type: "object", properties: { method: { type: "string" }, path: { type: "string" }, description: { type: "string" } }, required: ["method", "path", "description"] } }
+              },
+              required: ["endpoints"]
+            },
+            database: {
+              type: "object",
+              properties: {
+                tables: { type: "array", items: { type: "object", properties: { name: { type: "string" }, columns: { type: "array", items: { type: "string" } }, description: { type: "string" } }, required: ["name", "columns"] } }
+              },
+              required: ["tables"]
+            }
+          },
+          required: ["frontend", "backend", "database"]
+        }
+      },
+      required: ["title", "description", "app_type", "tech_stack", "architecture"]
+    }
+  }
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { appName, appDesc, applicationId } = await req.json();
+    const { appName, appDesc, applicationId, conversationHistory, existingArchitecture } = await req.json();
 
     const authHeader = req.headers.get("Authorization")!;
     const supabase = createClient(
@@ -37,7 +83,30 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    console.log("Generating application for:", appName);
+    // Build messages based on whether this is a new app or an improvement
+    const isImprovement = !!conversationHistory?.length && !!existingArchitecture;
+
+    const systemPrompt = isImprovement
+      ? `Tu es un architecte logiciel expert. Tu améliores des applications existantes. L'utilisateur te donne des instructions pour modifier l'application. Tu dois retourner l'architecture COMPLÈTE mise à jour (pas seulement les modifications). Voici l'architecture actuelle de l'application :\n\n${JSON.stringify(existingArchitecture, null, 2)}`
+      : `Tu es un architecte logiciel expert. Tu conçois des applications complètes. Retourne un JSON structuré décrivant l'architecture complète de l'application demandée.`;
+
+    const messages: Array<{role: string; content: string}> = [
+      { role: "system", content: systemPrompt }
+    ];
+
+    if (isImprovement) {
+      // Add conversation history for context
+      for (const msg of conversationHistory) {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    } else {
+      messages.push({
+        role: "user",
+        content: `Conçois l'architecture complète de l'application : "${appName}".${appDesc ? `\nDescription : ${appDesc}` : ""}\nInclus : architecture, composants frontend, API backend, schéma de base de données, et le code principal des composants clés.`
+      });
+    }
+
+    console.log("Generating application for:", appName, isImprovement ? "(improvement)" : "(new)");
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -47,63 +116,8 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `Tu es un architecte logiciel expert. Tu conçois des applications complètes. Retourne un JSON structuré décrivant l'architecture complète de l'application demandée.`
-          },
-          {
-            role: "user",
-            content: `Conçois l'architecture complète de l'application : "${appName}".${appDesc ? `\nDescription : ${appDesc}` : ""}\nInclus : architecture, composants frontend, API backend, schéma de base de données, et le code principal des composants clés.`
-          }
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "create_application",
-              description: "Create a complete application architecture",
-              parameters: {
-                type: "object",
-                properties: {
-                  title: { type: "string" },
-                  description: { type: "string" },
-                  app_type: { type: "string" },
-                  tech_stack: { type: "string" },
-                  architecture: {
-                    type: "object",
-                    properties: {
-                      frontend: {
-                        type: "object",
-                        properties: {
-                          framework: { type: "string" },
-                          components: { type: "array", items: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, code: { type: "string" } }, required: ["name", "description", "code"] } }
-                        },
-                        required: ["framework", "components"]
-                      },
-                      backend: {
-                        type: "object",
-                        properties: {
-                          endpoints: { type: "array", items: { type: "object", properties: { method: { type: "string" }, path: { type: "string" }, description: { type: "string" } }, required: ["method", "path", "description"] } }
-                        },
-                        required: ["endpoints"]
-                      },
-                      database: {
-                        type: "object",
-                        properties: {
-                          tables: { type: "array", items: { type: "object", properties: { name: { type: "string" }, columns: { type: "array", items: { type: "string" } }, description: { type: "string" } }, required: ["name", "columns"] } }
-                        },
-                        required: ["tables"]
-                      }
-                    },
-                    required: ["frontend", "backend", "database"]
-                  }
-                },
-                required: ["title", "description", "app_type", "tech_stack", "architecture"]
-              }
-            }
-          }
-        ],
+        messages,
+        tools: [toolSchema],
         tool_choice: { type: "function", function: { name: "create_application" } }
       }),
     });
@@ -157,10 +171,11 @@ serve(async (req) => {
       throw new Error("Failed to save application");
     }
 
+    const eventLabel = isImprovement ? "améliorée" : "générée";
     await supabase.from("system_logs").insert({
       user_id: user.id,
       module: "Applications",
-      event: `Application « ${appContent.title} » générée par IA`,
+      event: `Application « ${appContent.title} » ${eventLabel} par IA`,
       level: "success",
     });
 
