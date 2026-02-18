@@ -3,8 +3,9 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown } from "lucide-react";
+import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown, Monitor } from "lucide-react";
 import FormationVideoPlayer from "@/components/FormationVideoPlayer";
+import AgentTasksPanel from "@/components/AgentTasksPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -38,6 +39,7 @@ const Formations = () => {
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [videoFormation, setVideoFormation] = useState<Formation | null>(null);
+  const [agentFormation, setAgentFormation] = useState<Formation | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -298,6 +300,13 @@ const Formations = () => {
                           <Play className="h-4 w-4" />
                         </button>
                         <button
+                          onClick={() => setAgentFormation(agentFormation?.id === course.id ? null : course)}
+                          className={`transition-colors p-1 ${agentFormation?.id === course.id ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
+                          title="Produire vidéo via agent local"
+                        >
+                          <Monitor className="h-4 w-4" />
+                        </button>
+                        <button
                           onClick={() => handleExportPdf(course)}
                           className="text-muted-foreground hover:text-foreground transition-colors p-1"
                           title="Exporter en fichier texte"
@@ -357,6 +366,17 @@ const Formations = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Agent Tasks Panel */}
+        {agentFormation && (
+          <div className="mt-6 opacity-0 animate-fade-in">
+            <AgentTasksPanel
+              formationId={agentFormation.id}
+              formationTitle={agentFormation.title}
+              formationScript={agentFormation.description || undefined}
+            />
           </div>
         )}
 

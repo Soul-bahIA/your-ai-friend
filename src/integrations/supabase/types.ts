@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_tasks: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          payload: Json
+          priority: number
+          result: Json | null
+          started_at: string | null
+          status: string
+          task_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          priority?: number
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          task_type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          priority?: number
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          task_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       applications: {
         Row: {
           app_type: string | null
