@@ -48,6 +48,23 @@ serve(async (req) => {
       });
     }
 
+    // Fetch user's knowledge base to inject as context
+    const { data: knowledgeItems } = await supabaseAdmin
+      .from("knowledge_base")
+      .select("title, content, category, tags")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(50);
+
+    let knowledgeContext = "";
+    if (knowledgeItems && knowledgeItems.length > 0) {
+      knowledgeContext = "\n\n--- BASE DE CONNAISSANCES DE L'UTILISATEUR ---\nUtilise ces informations pour répondre aux questions, fournir du code source, ou résoudre des problèmes :\n\n";
+      knowledgeContext += knowledgeItems.map((k: any, i: number) => 
+        `[${i + 1}] **${k.title}** (${k.category})${k.tags?.length ? ` [tags: ${k.tags.join(", ")}]` : ""}\n${k.content}`
+      ).join("\n\n---\n\n");
+      knowledgeContext += "\n--- FIN DE LA BASE DE CONNAISSANCES ---";
+    }
+
     // Normal chat with tool-calling capabilities
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -68,14 +85,17 @@ Tes capacités :
 - CRÉER des applications via l'outil create_application  
 - SAUVEGARDER des connaissances via l'outil save_knowledge
 - Donner des conseils en programmation et architecture
+- CONSULTER ta base de connaissances pour fournir des réponses précises basées sur les informations sauvegardées
 
 RÈGLES IMPORTANTES :
 - Tu travailles UNIQUEMENT pour cet utilisateur, personne d'autre
 - Quand l'utilisateur te demande de créer quelque chose, utilise les outils disponibles
 - Quand il te demande de retenir ou sauvegarder une info, utilise save_knowledge
+- **CONSULTE TOUJOURS ta base de connaissances ci-dessous** pour enrichir tes réponses avec les informations déjà sauvegardées (code source, notes, recherches)
+- Si une question porte sur un sujet couvert par la base de connaissances, cite et utilise ces informations en priorité
 - Sois proactif : propose des améliorations et pose des questions de clarification
 - Utilise le markdown pour formater tes réponses
-- Communique en français sauf si on te demande autrement`
+- Communique en français sauf si on te demande autrement${knowledgeContext}`
           },
           ...messages,
         ],
