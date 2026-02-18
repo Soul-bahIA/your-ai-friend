@@ -3,7 +3,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown } from "lucide-react";
 import FormationVideoPlayer from "@/components/FormationVideoPlayer";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -149,6 +149,43 @@ const Formations = () => {
     }
   };
 
+  const handleExportPdf = (course: Formation) => {
+    const lessons = (course.content as Lesson[]) || [];
+    const lines: string[] = [];
+    lines.push(course.title);
+    lines.push("=".repeat(course.title.length));
+    if (course.description) lines.push("", course.description);
+    lines.push("", `Durée : ${course.duration || "—"} | ${lessons.length} leçons`, "");
+
+    lessons.forEach((lesson, li) => {
+      lines.push("", `--- Leçon ${li + 1} : ${lesson.title} ---`, "");
+      if (lesson.objectives?.length) {
+        lines.push("Objectifs :");
+        lesson.objectives.forEach((o) => lines.push(`  • ${o}`));
+        lines.push("");
+      }
+      if (lesson.content) lines.push(lesson.content, "");
+      if (lesson.examples?.length) {
+        lines.push("Exemples :");
+        lesson.examples.forEach((ex) => lines.push(ex, ""));
+      }
+      if (lesson.exercises?.length) {
+        lines.push("Exercices :");
+        lesson.exercises.forEach((ex, ei) => lines.push(`  ${ei + 1}. ${ex}`));
+        lines.push("");
+      }
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${course.title.replace(/[^a-zA-Z0-9]/g, "_")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Export réussi", description: `Formation « ${course.title} » exportée.` });
+  };
+
   const getStatusColor = (status: string) => {
     if (status === "Terminé") return "bg-success/10 text-success";
     if (status === "Erreur") return "bg-destructive/10 text-destructive";
@@ -259,6 +296,13 @@ const Formations = () => {
                           title="Lire en vidéo"
                         >
                           <Play className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleExportPdf(course)}
+                          className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                          title="Exporter en fichier texte"
+                        >
+                          <FileDown className="h-4 w-4" />
                         </button>
                         <button onClick={() => setExpandedId(expandedId === course.id ? null : course.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
                           {expandedId === course.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

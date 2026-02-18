@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   Play, Pause, SkipForward, SkipBack, X, Volume2, VolumeX,
-  Maximize2, BookOpen, Target, Code, Dumbbell
+  BookOpen, Target, Code, Dumbbell
 } from "lucide-react";
 
 interface Lesson {
@@ -166,11 +166,42 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
   const [playing, setPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
   const [animKey, setAnimKey] = useState(0);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef(Date.now());
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const totalSlides = slides.current.length;
   const slide = slides.current[currentSlide];
+
+  const stopSpeech = useCallback(() => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }, []);
+
+  const speakSlide = useCallback((slide: Slide) => {
+    if (!ttsEnabled || !window.speechSynthesis) return;
+    stopSpeech();
+    const textParts: string[] = [];
+    if (slide.type === "title") textParts.push(slide.title === title ? slide.title : slide.body);
+    else if (slide.type === "end") textParts.push(slide.title, slide.body);
+    else {
+      if (slide.title) textParts.push(slide.title);
+      if (slide.body) textParts.push(slide.body);
+      if (slide.items) textParts.push(...slide.items);
+    }
+    const text = textParts.join(". ");
+    if (!text.trim()) return;
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = "fr-FR";
+    utt.rate = 1.0;
+    utt.onstart = () => setIsSpeaking(true);
+    utt.onend = () => setIsSpeaking(false);
+    utt.onerror = () => setIsSpeaking(false);
+    utteranceRef.current = utt;
+    window.speechSynthesis.speak(utt);
+  }, [ttsEnabled, title, stopSpeech]);
 
   const goTo = useCallback((idx: number) => {
     const clamped = Math.max(0, Math.min(totalSlides - 1, idx));
@@ -202,6 +233,13 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
     };
   }, [playing, currentSlide, open, totalSlides, goTo]);
 
+  // Speak on slide change
+  useEffect(() => {
+    if (open && playing) {
+      speakSlide(slides.current[currentSlide]);
+    }
+  }, [currentSlide, open, playing, speakSlide]);
+
   // Reset on open
   useEffect(() => {
     if (open) {
@@ -210,8 +248,10 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
       setPlaying(true);
       setProgress(0);
       setAnimKey(0);
+    } else {
+      stopSpeech();
     }
-  }, [open, title, lessons]);
+  }, [open, title, lessons, stopSpeech]);
 
   const globalProgress = ((currentSlide + progress / 100) / totalSlides) * 100;
 
@@ -366,6 +406,18 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
             >
               <SkipForward className="h-4 w-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => { setTtsEnabled(!ttsEnabled); if (ttsEnabled) stopSpeech(); }}
+              title={ttsEnabled ? "Désactiver la narration" : "Activer la narration"}
+            >
+              {ttsEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </Button>
+            {isSpeaking && (
+              <span className="text-[10px] text-primary font-medium animate-pulse">🔊</span>
+            )}
           </div>
 
           {/* Global progress */}
