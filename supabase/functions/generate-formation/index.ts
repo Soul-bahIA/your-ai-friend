@@ -132,20 +132,57 @@ Tu dois retourner un JSON valide avec cette structure exacte, sans markdown ni b
     const aiData = await response.json();
     console.log("AI response received");
 
-    // Extract structured data from tool call
+    // Extract structured data - try multiple approaches
     let formationContent;
+    
+    // Approach 1: Tool call
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
-      formationContent = JSON.parse(toolCall.function.arguments);
-    } else {
-      // Fallback: try parsing from content
-      const content = aiData.choices?.[0]?.message?.content || "";
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        formationContent = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("Could not parse AI response");
+      try {
+        formationContent = JSON.parse(toolCall.function.arguments);
+        console.log("Parsed from tool_calls");
+      } catch (e) {
+        console.error("Tool call parse failed:", e);
       }
+    }
+    
+    // Approach 2: Content field - extract JSON
+    if (!formationContent) {
+      const content = aiData.choices?.[0]?.message?.content || "";
+      console.log("Parsing from content, length:", content.length);
+      
+      // Remove markdown code blocks
+      let cleaned = content
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      
+      // Find JSON boundaries
+      const jsonStart = cleaned.indexOf("{");
+      const jsonEnd = cleaned.lastIndexOf("}");
+      
+      if (jsonStart !== -1 && jsonEnd > jsonStart) {
+        cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+        
+        // Fix common issues
+        cleaned = cleaned
+          .replace(/,\s*}/g, "}")
+          .replace(/,\s*]/g, "]")
+          .replace(/[\x00-\x1F\x7F]/g, " ");
+        
+        try {
+          formationContent = JSON.parse(cleaned);
+          console.log("Parsed from content");
+        } catch (e) {
+          console.error("Content JSON parse failed:", (e as Error).message);
+          console.error("First 500 chars:", cleaned.substring(0, 500));
+        }
+      }
+    }
+    
+    if (!formationContent) {
+      console.error("Full AI response:", JSON.stringify(aiData).substring(0, 1000));
+      throw new Error("Could not parse AI response");
     }
 
     // Update the formation in database with generated content
