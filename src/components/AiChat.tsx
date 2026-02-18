@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare } from "lucide-react";
+import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, CheckCircle, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ type Conversation = { id: string; title: string; created_at: string };
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 const AiChat = () => {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -21,7 +21,11 @@ const AiChat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Load conversations
+  const getAuthHeaders = () => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+  });
+
   const loadConversations = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
@@ -34,7 +38,6 @@ const AiChat = () => {
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  // Load messages for active conversation
   useEffect(() => {
     if (!activeConversationId || !user) { setMessages([]); return; }
     (async () => {
@@ -84,6 +87,38 @@ const AiChat = () => {
     }
   };
 
+  const executeAction = async (actionName: string, actionArgs: any): Promise<string> => {
+    try {
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          messages: [],
+          action: { name: actionName, arguments: actionArgs },
+        }),
+      });
+      const result = await resp.json();
+      if (result.success) {
+        switch (result.type) {
+          case "formation":
+            toast.success(`Formation "${result.title}" créée !`);
+            return `✅ Formation **"${result.title}"** créée avec succès${result.lessonsCount ? ` (${result.lessonsCount} leçons)` : ""}. Vous pouvez la consulter dans l'onglet Formations.`;
+          case "application":
+            toast.success(`Application "${result.title}" créée !`);
+            return `✅ Application **"${result.title}"** créée avec succès. Consultez-la dans l'onglet Applications.`;
+          case "knowledge":
+            toast.success(`Connaissance "${result.title}" sauvegardée !`);
+            return `✅ Connaissance **"${result.title}"** sauvegardée dans votre base de connaissances.`;
+          default:
+            return `✅ Action exécutée avec succès.`;
+        }
+      }
+      return `❌ Erreur : ${result.error || "Action échouée"}`;
+    } catch {
+      return "❌ Erreur de connexion lors de l'exécution de l'action.";
+    }
+  };
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !user) return;
@@ -117,16 +152,17 @@ const AiChat = () => {
     try {
       const resp = await fetch(CHAT_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ messages: allMessages }),
       });
 
       if (!resp.ok || !resp.body) {
         const err = await resp.json().catch(() => ({ error: "Erreur réseau" }));
-        upsert(err.error || "Erreur de connexion au service IA.");
+        if (resp.status === 401) {
+          upsert("🔒 Accès refusé. Vous devez être connecté pour utiliser l'IA.");
+        } else {
+          upsert(err.error || "Erreur de connexion au service IA.");
+        }
         setIsLoading(false);
         return;
       }
@@ -134,6 +170,7 @@ const AiChat = () => {
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let textBuffer = "";
+      let pendingToolCalls: { id: string; name: string; arguments: string }[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -151,22 +188,48 @@ const AiChat = () => {
           if (jsonStr === "[DONE]") break;
           try {
             const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) upsert(content);
+            const delta = parsed.choices?.[0]?.delta;
+            
+            // Handle text content
+            if (delta?.content) upsert(delta.content);
+            
+            // Handle tool calls
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                if (tc.index !== undefined) {
+                  if (!pendingToolCalls[tc.index]) {
+                    pendingToolCalls[tc.index] = { id: tc.id || "", name: "", arguments: "" };
+                  }
+                  if (tc.function?.name) pendingToolCalls[tc.index].name = tc.function.name;
+                  if (tc.function?.arguments) pendingToolCalls[tc.index].arguments += tc.function.arguments;
+                }
+              }
+            }
           } catch {
             textBuffer = line + "\n" + textBuffer;
             break;
           }
         }
       }
+
+      // Execute any tool calls
+      for (const tc of pendingToolCalls) {
+        if (tc && tc.name) {
+          let args: any = {};
+          try { args = JSON.parse(tc.arguments); } catch {}
+          
+          upsert(`\n\n⚡ *Exécution : ${tc.name}...*\n\n`);
+          const result = await executeAction(tc.name, args);
+          upsert(result);
+        }
+      }
+
     } catch {
       upsert("Erreur de connexion.");
     }
 
-    // Save assistant response
     if (assistantSoFar && convId) {
       await saveMessage(convId, "assistant", assistantSoFar);
-      // Update conversation title timestamp
       await supabase.from("chat_conversations").update({ updated_at: new Date().toISOString() }).eq("id", convId);
     }
 
@@ -227,8 +290,20 @@ const AiChat = () => {
                 </div>
                 <h3 className="text-lg font-semibold text-foreground">SOULBAH IA</h3>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Posez-moi n'importe quelle question. Vos conversations sont sauvegardées automatiquement.
+                  Votre IA personnelle. Je peux créer des formations, des applications, 
+                  sauvegarder vos connaissances et répondre à toutes vos questions.
                 </p>
+                <div className="flex flex-wrap gap-2 justify-center mt-4">
+                  {["Crée une formation sur Python", "Développe une app de gestion", "Retiens cette info"].map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setInput(s)}
+                      className="text-xs px-3 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+                    >
+                      <Sparkles className="h-3 w-3 inline mr-1" />{s}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((msg, i) => (
@@ -272,7 +347,7 @@ const AiChat = () => {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Posez votre question à SOULBAH IA..."
+            placeholder="Demandez n'importe quoi à SOULBAH IA..."
             className="flex-1 bg-secondary border-border"
             disabled={isLoading}
           />
