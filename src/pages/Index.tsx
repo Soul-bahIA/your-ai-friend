@@ -63,9 +63,9 @@ const Index = () => {
 
   return (
     <DashboardLayout>
-      <div className="px-8 py-8">
-        <div className="mb-8 opacity-0 animate-fade-in">
-          <h1 className="text-3xl font-bold tracking-tight">
+      <div className="px-4 py-6 md:px-8 md:py-8">
+        <div className="mb-6 md:mb-8 opacity-0 animate-fade-in">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
             Centre de <span className="text-gradient-primary">Commande</span>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -73,25 +73,25 @@ const Index = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
           <StatCard label="Formations" value={String(formationsCount)} change="Base de données" delay={100} />
           <StatCard label="Applications" value={String(appsCount)} change="Base de données" delay={150} />
           <StatCard label="Événements" value={String(logsCount)} change="Logs système" delay={200} />
           <StatCard label="Système" value="100%" change="Opérationnel" positive delay={250} />
         </div>
 
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8">
             <h2 className="text-sm font-semibold text-foreground mb-4 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
               Modules du Système
             </h2>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
               {defaultModules.map((mod, i) => (
                 <ModuleCard key={mod.title} {...mod} delay={350 + i * 50} />
               ))}
             </div>
           </div>
-          <div className="col-span-4">
+          <div className="lg:col-span-4">
             <h2 className="text-sm font-semibold text-foreground mb-4 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
               Journal Système
             </h2>

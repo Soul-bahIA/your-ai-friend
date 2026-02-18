@@ -3,7 +3,7 @@ import AiChat from "@/components/AiChat";
 
 const Chat = () => (
   <DashboardLayout>
-    <div className="px-8 py-8">
+    <div className="px-4 py-6 md:px-8 md:py-8">
       <div className="mb-6 opacity-0 animate-fade-in">
         <h1 className="text-3xl font-bold tracking-tight">
           Chat <span className="text-gradient-primary">IA</span>

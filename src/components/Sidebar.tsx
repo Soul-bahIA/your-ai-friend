@@ -26,12 +26,12 @@ const navItems = [
   { icon: Settings, label: "Paramètres", path: "/settings" },
 ];
 
-const Sidebar = () => {
+const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
   const location = useLocation();
   const { user, signOut } = useAuth();
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar flex flex-col">
+    <aside className="h-full w-64 border-r border-border bg-sidebar flex flex-col md:fixed md:left-0 md:top-0 md:z-40 md:h-screen">
       {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 glow-primary">
@@ -51,6 +51,7 @@ const Sidebar = () => {
             <Link
               key={item.path}
               to={item.path}
+              onClick={onNavigate}
               className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
                 isActive
                   ? "bg-primary/10 text-primary font-medium"
