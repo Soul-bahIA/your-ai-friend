@@ -3,7 +3,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { AppWindow, Sparkles, Globe, Database, Code2, Trash2, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { AppWindow, Sparkles, Globe, Database, Code2, Trash2, ChevronDown, ChevronUp, Loader2, Eye } from "lucide-react";
+import AppPreview from "@/components/AppPreview";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -42,6 +43,7 @@ const Applications = () => {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previewApp, setPreviewApp] = useState<Application | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -261,6 +263,11 @@ const Applications = () => {
                         {app.status}
                       </span>
                       {hasContent && (
+                        <button onClick={() => setPreviewApp(app)} className="text-muted-foreground hover:text-primary transition-colors p-1" title="Prévisualiser">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
+                      {hasContent && (
                         <button onClick={() => setExpandedId(expandedId === app.id ? null : app.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
                           {expandedId === app.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </button>
@@ -335,6 +342,18 @@ const Applications = () => {
               );
             })}
           </div>
+        )}
+
+        {previewApp && (
+          <AppPreview
+            open={!!previewApp}
+            onOpenChange={(open) => !open && setPreviewApp(null)}
+            title={previewApp.title}
+            description={previewApp.description}
+            appType={previewApp.app_type}
+            techStack={previewApp.tech_stack}
+            architecture={getArchitecture(previewApp)}
+          />
         )}
       </div>
     </DashboardLayout>
