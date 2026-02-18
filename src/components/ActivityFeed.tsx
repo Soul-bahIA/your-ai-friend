@@ -1,52 +1,110 @@
+import { useEffect, useState } from "react";
 import { Activity } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
-interface ActivityItem {
-  time: string;
-  message: string;
-  type: "info" | "success" | "warning" | "error";
+interface LogItem {
+  id: string;
+  module: string;
+  event: string;
+  level: string;
+  created_at: string;
 }
 
-const typeColors = {
+const levelColors: Record<string, string> = {
   info: "text-primary",
   success: "text-success",
   warning: "text-warning",
   error: "text-destructive",
 };
 
-const dotColors = {
+const dotColors: Record<string, string> = {
   info: "bg-primary",
   success: "bg-success",
   warning: "bg-warning",
   error: "bg-destructive",
 };
 
-const activities: ActivityItem[] = [
-  { time: "il y a 2m", message: "Formation « React Avancé » générée avec succès", type: "success" },
-  { time: "il y a 8m", message: "Module de montage vidéo en cours de traitement", type: "warning" },
-  { time: "il y a 15m", message: "Application e-commerce déployée automatiquement", type: "success" },
-  { time: "il y a 23m", message: "Auto-optimisation : amélioration de 12% des performances", type: "info" },
-  { time: "il y a 45m", message: "Sauvegarde cloud synchronisée", type: "info" },
-  { time: "il y a 1h", message: "Détection d'erreur corrigée dans le module de recherche", type: "error" },
-];
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours}h`;
+  return `il y a ${Math.floor(hours / 24)}j`;
+}
 
 const ActivityFeed = () => {
+  const { user } = useAuth();
+  const [logs, setLogs] = useState<LogItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchLogs = async () => {
+      const { data } = await supabase
+        .from("system_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (data) setLogs(data);
+      setLoading(false);
+    };
+
+    fetchLogs();
+
+    // Realtime subscription
+    const channel = supabase
+      .channel("system_logs_realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "system_logs" },
+        (payload) => {
+          setLogs((prev) => [payload.new as LogItem, ...prev].slice(0, 20));
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-5 opacity-0 animate-fade-in" style={{ animationDelay: "400ms" }}>
+        <div className="flex items-center gap-2 mb-4">
+          <Activity className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">Activité Récente</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">Chargement...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-5 opacity-0 animate-fade-in" style={{ animationDelay: "400ms" }}>
       <div className="flex items-center gap-2 mb-4">
         <Activity className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold text-foreground">Activité Récente</h3>
       </div>
-      <div className="space-y-3">
-        {activities.map((item, i) => (
-          <div key={i} className="flex items-start gap-3">
-            <div className={`mt-1.5 h-1.5 w-1.5 rounded-full ${dotColors[item.type]} shrink-0`} />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-foreground leading-relaxed">{item.message}</p>
-              <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{item.time}</p>
+      {logs.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Aucune activité pour le moment.</p>
+      ) : (
+        <div className="space-y-3">
+          {logs.map((item) => (
+            <div key={item.id} className="flex items-start gap-3">
+              <div className={`mt-1.5 h-1.5 w-1.5 rounded-full ${dotColors[item.level] || "bg-primary"} shrink-0`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground leading-relaxed">
+                  <span className="font-mono text-muted-foreground">[{item.module}]</span> {item.event}
+                </p>
+                <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{timeAgo(item.created_at)}</p>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
