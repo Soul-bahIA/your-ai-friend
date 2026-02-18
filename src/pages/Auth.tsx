@@ -40,9 +40,15 @@ const Auth = () => {
         });
       }
     } catch (error: any) {
+      let message = error.message;
+      if (error.message?.includes("User already registered")) {
+        message = "Ce compte existe déjà. Passez à la connexion.";
+      } else if (error.message?.includes("Email not confirmed")) {
+        message = "Email non confirmé. Réessayez de vous inscrire.";
+      }
       toast({
         title: "Erreur",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     } finally {
