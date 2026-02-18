@@ -158,7 +158,14 @@ ${JSON.stringify(existingArchitecture, null, 2)}`
       });
     }
 
+    // Add JSON instruction to last user message
+    const jsonInstruction = `\n\nRÉPONDS UNIQUEMENT avec un objet JSON valide (sans markdown, sans backticks) avec cette structure exacte:
+{"title":"...","description":"...","app_type":"...","tech_stack":"...","architecture":{"frontend":{"framework":"...","components":[{"name":"...","description":"...","code":"..."}]},"backend":{"endpoints":[{"method":"...","path":"...","description":"..."}]},"database":{"tables":[{"name":"...","columns":["..."],"description":"..."}]}}}`;
+    
+    messages[messages.length - 1].content += jsonInstruction;
+
     console.log("Generating application for:", appName, isImprovement ? "(improvement)" : "(new)");
+    console.log("Messages count:", messages.length, "System prompt length:", messages[0].content.length);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -167,10 +174,9 @@ ${JSON.stringify(existingArchitecture, null, 2)}`
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         messages,
-        tools: [toolSchema],
-        tool_choice: { type: "function", function: { name: "create_application" } }
+        max_tokens: 8192,
       }),
     });
 
@@ -191,6 +197,7 @@ ${JSON.stringify(existingArchitecture, null, 2)}`
     }
 
     const aiData = await response.json();
+    console.log("AI response finish_reason:", aiData.choices?.[0]?.finish_reason);
     
     let appContent;
     
@@ -205,11 +212,12 @@ ${JSON.stringify(existingArchitecture, null, 2)}`
         appContent = repairAndParseJson(toolCall.function.arguments);
       }
     } else {
-      // Fallback: parse from content
+      // Parse from content
       const content = aiData.choices?.[0]?.message?.content || "";
-      console.log("No tool call, parsing from content, length:", content.length);
-      if (!content) {
-        throw new Error("Empty AI response");
+      console.log("Parsing from content, length:", content.length);
+      if (!content || content.length < 10) {
+        console.error("Full AI response:", JSON.stringify(aiData).substring(0, 1000));
+        throw new Error("Réponse IA vide. Réessayez.");
       }
       appContent = repairAndParseJson(content);
     }
