@@ -21,10 +21,19 @@ const AiChat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const getAuthHeaders = () => ({
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-  });
+  const getAuthHeaders = async () => {
+    // Refresh session if needed
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token || session?.access_token;
+    if (!token) {
+      toast.error("Session expirée. Veuillez vous reconnecter.");
+      throw new Error("No valid session");
+    }
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+  };
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
@@ -91,7 +100,7 @@ const AiChat = () => {
     try {
       const resp = await fetch(CHAT_URL, {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           messages: [],
           action: { name: actionName, arguments: actionArgs },
@@ -152,7 +161,7 @@ const AiChat = () => {
     try {
       const resp = await fetch(CHAT_URL, {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ messages: allMessages }),
       });
 
