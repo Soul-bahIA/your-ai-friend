@@ -185,6 +185,7 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [editInput, setEditInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
 
   const previewHtml = buildPreviewHtml(title, architecture, editMode);
 
@@ -217,13 +218,31 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
     setEditInput("");
   }, [editMode]);
 
+  const buildInstruction = (userInput: string, element: SelectedElement | null): string => {
+    if (!element) return userInput;
+    
+    // Map element types to specific architecture paths for clarity
+    const typeMap: Record<string, string> = {
+      table: "dans la section database.tables",
+      endpoint: "dans la section backend.endpoints",
+      component: "dans la section frontend.components",
+      nav: "dans la navigation (frontend.components)",
+      title: "le titre de l'application",
+      heading: "le titre principal",
+      description: "la description de l'application",
+      stat: "les statistiques affichées",
+      section: "la section",
+    };
+    
+    const context = typeMap[element.type] || "";
+    return `ACTION DEMANDÉE sur "${element.name}" ${context}: ${userInput}. Applique cette modification EXACTEMENT et retourne l'architecture COMPLÈTE modifiée.`;
+  };
+
   const handleSendModification = useCallback(async () => {
     if (!editInput.trim() || !applicationId || !session || !onAppUpdated || sending) return;
     setSending(true);
 
-    const instruction = selectedElement
-      ? `Modifie l'élément "${selectedElement.name}" (type: ${selectedElement.type}). Voici ce que l'utilisateur veut : ${editInput}`
-      : editInput;
+    const instruction = buildInstruction(editInput, selectedElement);
 
     try {
       const response = await fetch(
@@ -250,6 +269,7 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
       onAppUpdated(result.application);
       setSelectedElement(null);
       setEditInput("");
+      setPreviewKey((k) => k + 1);
       toast({ title: "✅ Modification appliquée", description: `Votre modification a été appliquée avec succès.` });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -327,6 +347,7 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
           <TabsContent value="preview" className="flex-1 m-0 p-4 min-h-0 relative">
             <div className="w-full h-full rounded-lg overflow-hidden border border-border">
               <iframe
+                key={previewKey}
                 srcDoc={previewHtml}
                 className="w-full h-full bg-background"
                 sandbox="allow-scripts"
