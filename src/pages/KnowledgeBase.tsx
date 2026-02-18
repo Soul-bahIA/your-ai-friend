@@ -109,8 +109,8 @@ const KnowledgeBase = () => {
 
   return (
     <DashboardLayout>
-      <div className="px-8 py-8">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="px-4 py-6 md:px-8 md:py-8">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
               Base de <span className="text-gradient-primary">Connaissances</span>
@@ -147,8 +147,8 @@ const KnowledgeBase = () => {
         </div>
 
         {/* Filters */}
-        <div className="flex gap-3 mb-6">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-col gap-3 sm:flex-row mb-6">
+          <div className="relative flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
           </div>
