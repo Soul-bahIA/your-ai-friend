@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import os
 
+from ..config import fake_provider_enabled, is_lax_env, soulbah_env
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider
+from .fake import FakeProvider
 from .openai_compat import OpenAICompatProvider
 
 # id -> (famille, url de base, variable d'env de la clé, variable d'env du modèle, modèle par défaut)
@@ -75,6 +77,16 @@ LOCAL_KEY_ENV = "LOCAL_LLM_KEY"
 
 def build_providers() -> dict[str, LLMProvider]:
     providers: dict[str, LLMProvider] = {}
+
+    # LOT 3 : pile de dev sans clé → UNIQUEMENT le fournisseur factice (jamais hors dev/test,
+    # même garde que config.check_startup_config : défense en profondeur si le registre est
+    # construit sans passer par le démarrage de l'application).
+    if fake_provider_enabled():
+        if not is_lax_env():
+            raise RuntimeError(
+                f"LLM_FAKE_PROVIDER=1 interdit quand SOULBAH_ENV={soulbah_env()!r} (dev/test uniquement)."
+            )
+        return {"fake": FakeProvider("fake", vision=True)}
 
     for pid, spec in SPECS.items():
         key = os.getenv(spec["key_env"], "")

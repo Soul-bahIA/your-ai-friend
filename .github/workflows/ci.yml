@@ -33,8 +33,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - name: Typage (tsc, config de l'application)
-        run: npx tsc --noEmit -p tsconfig.app.json
+      # tsc racine (T35) : tsconfig.json référence tsconfig.app.json (src/) ET
+      # tsconfig.node.json (vite.config.ts) — les deux sont typés, sans émission (noEmit).
+      - name: Typage complet (tsc -b, projets référencés)
+        run: npx tsc -b
       - run: npm test
       - run: npm run build
 
@@ -144,20 +146,25 @@ jobs:
       - name: Tests
         run: agent/.venv/Scripts/python -m pytest agent/tests -q
 
-  # --- Base de données : migrations ×2 + assertions (pgvector réel) -------------
+  # --- Base de données : migrations ×2 + assertions (pgvector réel) + node-api sur pg ---
   # Le stub scripts/ci/auth_stub.sql reproduit auth.users / auth.uid() / rôles /
   # publication Realtime. psql et pg_dump sont ceux du conteneur (même version).
+  # LOT 3 : la même base sert ensuite aux tests d'INTÉGRATION node-api (Fastify inject
+  # contre Postgres : création, poll, claim, 409, final — test/integration/).
   db:
-    name: Base (migrations x2, schéma, policies)
+    name: Base (migrations x2, schéma, policies, node-api sur pg)
     runs-on: ubuntu-latest
     services:
       postgres:
         # À ÉPINGLER sur la version MAJEURE du Postgres Supabase dès qu'elle est connue
         # (`SHOW server_version;` juste après la reprise du projet — voir
-        # docs/SUPABASE_REPRISE.md). pg17 est une hypothèse provisoire.
+        # docs/SUPABASE_REPRISE.md §3). Au 2026-10-01 le projet est toujours en pause
+        # (tenant du pooler introuvable) : pg17 reste une hypothèse provisoire.
         image: pgvector/pgvector:pg17
         env:
           POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -178,6 +185,22 @@ jobs:
           PSQL: docker exec -i ${{ job.services.postgres.id }} psql -U postgres -d postgres
           PG_DUMP: docker exec ${{ job.services.postgres.id }} pg_dump -U postgres -d postgres
         run: bash scripts/ci/apply_migrations.sh --checks
+      - name: Version du serveur (à comparer à SHOW server_version sur Supabase)
+        run: docker exec ${{ job.services.postgres.id }} psql -U postgres -d postgres -Atc "SHOW server_version" -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+      # --- node-api : Fastify inject sur CE Postgres migré (LOT 3) ---
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/node-api/package-lock.json
+      - name: Dépendances node-api
+        working-directory: backend/node-api
+        run: npm ci
+      - name: Tests d'intégration node-api (poll / claim / 409 sur Postgres)
+        working-directory: backend/node-api
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: npm run test:pg
 
   # --- Scripts d'exploitation : sauvegardes (S30, S19) -------------------------------
   # Postgres 16 + client 16 du runner (pg_dump doit être ≥ serveur). Le rôle de test a un

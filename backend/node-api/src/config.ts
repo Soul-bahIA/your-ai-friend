@@ -53,6 +53,14 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? "",
 
+  // Authentification des routes JWT (LOT 3) : "supabase" (défaut : vérification via
+  // /auth/v1/user) ou "dev-local" (jeton de dev partagé, SANS Supabase). dev-local n'est
+  // accepté qu'en SOULBAH_ENV=dev|test, avec HOST en boucle locale, et seulement pour les
+  // requêtes venant de la boucle locale (lib/envChecks.ts refuse le démarrage sinon).
+  authMode: (process.env.AUTH_MODE ?? "supabase").trim().toLowerCase() || "supabase",
+  devLocalUserId: (process.env.DEV_LOCAL_USER_ID ?? "").trim(),
+  devLocalToken: (process.env.DEV_LOCAL_TOKEN ?? "").trim(),
+
   // Service IA Python. IA_SERVICE_TOKEN (obligatoire hors dev/test) est envoyé en x-ia-token.
   iaServiceUrl: process.env.IA_SERVICE_URL ?? "http://python-ia:8000",
   iaServiceToken: process.env.IA_SERVICE_TOKEN ?? "",

@@ -107,6 +107,8 @@ services:
       RUST_SERVICE_URL: http://rust-compute:8080
       LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-}
       LLM_ROUTING: ${LLM_ROUTING:-}
+      # Fournisseur factice (LOT 3) : dev/test uniquement (refus de démarrer sinon).
+      LLM_FAKE_PROVIDER: ${LLM_FAKE_PROVIDER:-}
       TTS_MODEL: ${TTS_MODEL:-tts-1}
       TTS_VOICE: ${TTS_VOICE:-alloy}
       OPENAI_TTS_URL: ${OPENAI_TTS_URL:-https://api.openai.com/v1/audio/speech}

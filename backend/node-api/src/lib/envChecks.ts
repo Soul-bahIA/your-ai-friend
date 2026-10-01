@@ -4,6 +4,27 @@ import fs from "node:fs";
 export const SOULBAH_ENVS = ["dev", "test", "staging", "production"] as const;
 export type SoulbahEnv = (typeof SOULBAH_ENVS)[number];
 
+/** AUTH_MODE (LOT 3) : vérification Supabase des JWT, ou jeton de dev partagé (hors Docker). */
+export const AUTH_MODES = ["supabase", "dev-local"] as const;
+export type AuthMode = (typeof AUTH_MODES)[number];
+export const DEV_LOCAL_TOKEN_MIN_LENGTH = 32;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Adresse d'un pair en boucle locale : 127.x.y.z, ::1, ou IPv4 locale mappée en IPv6. */
+export function isLoopbackAddress(ip: string | undefined | null): boolean {
+  const v = (ip ?? "").trim().toLowerCase();
+  if (!v) return false;
+  if (v === "::1") return true;
+  const v4 = v.startsWith("::ffff:") ? v.slice("::ffff:".length) : v;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
+}
+
+/** Hôte d'écoute en boucle locale (vide = défaut 127.0.0.1 de config.ts). */
+export function isLoopbackHost(host: string | undefined | null): boolean {
+  const v = (host ?? "").trim().toLowerCase();
+  return v === "" || v === "localhost" || isLoopbackAddress(v);
+}
+
 export interface EnvCheckResult {
   soulbahEnv: SoulbahEnv | string;
   /** Vrai hors dev/test : les erreurs ci-dessous empêchent le démarrage. */
@@ -45,6 +66,30 @@ export function checkStartupEnv(
     else warnings.push("DATABASE_SSL=true sans PG_SSL_CA : certificat Postgres non vérifié (toléré en dev/test)");
   }
   if (ca && !fileReadable(ca)) errors.push(`PG_SSL_CA illisible : ${ca.slice(0, 200)}`);
+
+  // AUTH_MODE (LOT 3) : dev-local = jeton de dev partagé à la place de Supabase. Jamais hors
+  // dev/test, jamais exposé au-delà de la boucle locale, jamais avec un jeton faible.
+  const authMode = (env.AUTH_MODE ?? "supabase").trim().toLowerCase() || "supabase";
+  if (!(AUTH_MODES as readonly string[]).includes(authMode)) {
+    errors.push(`AUTH_MODE invalide « ${authMode.slice(0, 40)} » (attendu : ${AUTH_MODES.join(" | ")})`);
+  } else if (authMode === "dev-local") {
+    if (strict) errors.push("AUTH_MODE=dev-local est interdit hors dev/test (jeton de dev partagé, aucune vérification Supabase)");
+    const listenHost = (env.HOST ?? "").trim() || "127.0.0.1";
+    if (!isLoopbackHost(listenHost)) {
+      errors.push(`AUTH_MODE=dev-local exige HOST en boucle locale (127.0.0.1, localhost ou ::1), pas « ${listenHost.slice(0, 60)} »`);
+    }
+    const devToken = (env.DEV_LOCAL_TOKEN ?? "").trim();
+    if (devToken.length < DEV_LOCAL_TOKEN_MIN_LENGTH) {
+      errors.push(
+        `DEV_LOCAL_TOKEN absent ou trop court (≥ ${DEV_LOCAL_TOKEN_MIN_LENGTH} caractères) : ` +
+          "généré par scripts/dev_db/dev_db.sh seed, ou node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+      );
+    }
+    if (!UUID_RE.test((env.DEV_LOCAL_USER_ID ?? "").trim())) {
+      errors.push("DEV_LOCAL_USER_ID doit être l'uuid de l'utilisateur de dev (créé par scripts/dev_db/dev_db.sh seed)");
+    }
+    warnings.push("AUTH_MODE=dev-local : vérification Supabase des JWT DÉSACTIVÉE — un seul utilisateur de dev, boucle locale uniquement");
+  }
 
   // TLS Postgres (S13) — jamais de DATABASE_URL dans les messages (mot de passe).
   const dbUrl = (env.DATABASE_URL ?? "").trim() || DEFAULT_DATABASE_URL;

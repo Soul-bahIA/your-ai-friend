@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { config } from "./config.js";
+import { isLoopbackAddress } from "./lib/envChecks.js";
 import { resolveAgentKey, hashKey } from "./services/agentKeys.js";
 import { TtlCache } from "./lib/ttlCache.js";
 import { logger } from "./lib/logger.js";
@@ -44,9 +45,26 @@ export function bearerToken(request: FastifyRequest): string {
   return typeof header === "string" ? header.replace(/^Bearer\s+/i, "").trim() : "";
 }
 
+// --- AUTH_MODE=dev-local (LOT 3) : jeton de dev partagé, un seul utilisateur, boucle locale ---
+export const DEV_LOCAL_EMAIL = "dev@soulbah.local";
+
+/** Le jeton présenté est le jeton de dev (comparaison en temps constant ; vide = jamais). */
+export function devLocalTokenMatches(token: string, expected = config.devLocalToken): boolean {
+  if (!token || !expected) return false;
+  const a = Buffer.from(token, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function devLocalUser(): AuthUser {
+  return { id: config.devLocalUserId, email: DEV_LOCAL_EMAIL };
+}
+
 /** Utilisateur déjà vérifié pour ce jeton (sans appel réseau) — utilisé par le rate-limit. */
 export function cachedUserForToken(token: string): AuthUser | undefined {
-  return token ? tokenCache.get(tokenHash(token)) : undefined;
+  if (!token) return undefined;
+  if (config.authMode === "dev-local") return devLocalTokenMatches(token) ? devLocalUser() : undefined;
+  return tokenCache.get(tokenHash(token));
 }
 
 /**
@@ -121,6 +139,19 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
   const token = bearerToken(request);
   if (!token) {
     await reply.status(401).send({ error: "Non authentifié" });
+    return;
+  }
+  if (config.authMode === "dev-local") {
+    // Jamais de vérification Supabase dans ce mode : jeton de dev, pair en boucle locale.
+    if (!isLoopbackAddress(request.ip)) {
+      await reply.status(403).send({ error: "Authentification de développement : requêtes locales uniquement" });
+      return;
+    }
+    if (!devLocalTokenMatches(token)) {
+      await reply.status(401).send({ error: "Non autorisé" });
+      return;
+    }
+    request.user = devLocalUser();
     return;
   }
   const result = await verifySupabaseToken(token);

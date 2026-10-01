@@ -31,6 +31,13 @@ def service_token() -> str:
     return os.getenv("IA_SERVICE_TOKEN", "")
 
 
+def fake_provider_enabled() -> bool:
+    """LLM_FAKE_PROVIDER=1 (LOT 3) : le registre ne contient QUE le fournisseur factice
+    (app/providers/fake.py) — pile de développement sans clé, sans réseau, sans coût.
+    Refusé hors dev/test (check_startup_config et registry.build_providers)."""
+    return (os.getenv("LLM_FAKE_PROVIDER") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def check_startup_config() -> list[str]:
     """Valide la configuration au démarrage.
 
@@ -53,5 +60,15 @@ def check_startup_config() -> list[str]:
         warnings.append(
             "IA_SERVICE_TOKEN non défini : le service python-ia accepte les requêtes "
             "SANS authentification (acceptable uniquement en développement local)."
+        )
+    if fake_provider_enabled():
+        if not is_lax_env():
+            raise RuntimeError(
+                f"LLM_FAKE_PROVIDER=1 est interdit quand SOULBAH_ENV={env!r} : fournisseur "
+                "factice réservé au développement et aux tests."
+            )
+        warnings.append(
+            "LLM_FAKE_PROVIDER=1 : fournisseur d'IA FACTICE (réponses déterministes, aucun "
+            "appel réel) — toutes les clés fournisseur sont ignorées."
         )
     return warnings

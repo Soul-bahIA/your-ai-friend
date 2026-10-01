@@ -35,7 +35,13 @@ SERVICES = {
 }
 
 # Variables volontairement NON transmises : (service, variable) → raison.
-EXCLUDED: dict[tuple[str, str], str] = {}
+EXCLUDED: dict[tuple[str, str], str] = {
+    # AUTH_MODE=dev-local exige HOST en boucle locale ; le conteneur écoute sur 0.0.0.0 :
+    # node-api refuserait de démarrer. Mode supabase imposé sous Docker (LOT 3).
+    ("node-api", "AUTH_MODE"): "auth de dev hors Docker uniquement (HOST=0.0.0.0 dans le conteneur)",
+    ("node-api", "DEV_LOCAL_USER_ID"): "auth de dev hors Docker uniquement",
+    ("node-api", "DEV_LOCAL_TOKEN"): "auth de dev hors Docker uniquement",
+}
 
 
 def documented_vars() -> set[str]:

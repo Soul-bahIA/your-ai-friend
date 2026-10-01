@@ -202,6 +202,15 @@ Pensez à renseigner les variables d'environnement (`DATABASE_URL`, `IA_SERVICE_
 `CORS_ORIGINS`…) pour pointer vers `localhost` au lieu des noms de services Docker — liste commentée dans
 `.env.example`. Hors Docker, node-api écoute sur `127.0.0.1` (définir `HOST=0.0.0.0` pour l'exposer).
 
+**Sans Supabase ni clé d'IA (LOT 3, `docs/LOT3_DEV_LOCAL.md`)** : `bash scripts/dev_db/dev_db.sh up` crée
+un PostgreSQL local jetable (`.dev_db/`, 127.0.0.1:54329) avec le schéma du dépôt appliqué ×2, un
+utilisateur de dev et une clé agent, puis écrit `.dev_db/dev.env` (`DATABASE_URL`, `AUTH_MODE=dev-local`,
+`DEV_LOCAL_TOKEN`, `LLM_FAKE_PROVIDER=1`, `SOULBAH_AGENT_KEY`…) à charger avant de lancer les services.
+`AUTH_MODE=dev-local` (jeton de dev à la place des JWT Supabase) n'est accepté qu'en `dev`/`test`, avec
+`HOST` en boucle locale et pour des requêtes locales ; `LLM_FAKE_PROVIDER=1` remplace tous les
+fournisseurs par un fournisseur factice déterministe. `bash scripts/dev_db/dev_db.sh test` lance les tests
+d'intégration node-api (Fastify inject sur ce Postgres : création, poll, claim, 409).
+
 **`SOULBAH_ENV`** (`dev` par défaut | `test` | `staging` | `production`) : hors `dev`/`test`, node-api
 refuse de démarrer sans `IA_SERVICE_TOKEN`, sans `PG_SSL_CA` quand `DATABASE_SSL=true`, avec une base
 distante sans `DATABASE_SSL=true`, ou si `DATABASE_URL` contient des paramètres TLS (`sslmode`…, qui

@@ -9,6 +9,8 @@ lerna-debug.log*
 
 node_modules
 dist
+# Caches de tsc -b (frontend : tsconfig.app.json / tsconfig.node.json)
+*.tsbuildinfo
 dist-ssr
 *.local
 
@@ -26,6 +28,9 @@ dist-ssr
 # Env
 .env
 !.env.example
+
+# Base PostgreSQL locale jetable + jetons de dev (scripts/dev_db/dev_db.sh) — jamais versionnés
+.dev_db/
 
 # Sauvegardes de la base (scripts/backup_db.*) — ne jamais versionner
 backups/
