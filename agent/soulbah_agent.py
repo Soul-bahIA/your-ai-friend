@@ -423,6 +423,19 @@ def build_executor(cfg: Config) -> tuple[Executor | None, int]:
              soulbah_settings.mode_label(central["settings"]), soulbah_settings.effective_max_agents(central["settings"]),
              "oui" if central["settings"]["computer_control"] else "non",
              "oui" if central["settings"]["recording"] else "non")
+    # V3 : NetworkGuard (refus réel des connexions vers Internet en mode OFFLINE, dans ce
+    # processus et dans les processus enfants lancés par les skills).
+    import network_guard
+    from urllib.parse import urlsplit
+
+    api_host = urlsplit(cfg.api_url).hostname or ""
+    api_refusal = network_guard.refusal(central["settings"], api_host) if api_host else None
+    if api_refusal:
+        log.error("✖ Mode %s : le plan de contrôle SOULBAH_API_URL (%s) est sur Internet — %s",
+                  central["settings"]["mode"], api_host, api_refusal)
+        log.error("Démarrage refusé : utilisez un node-api local, ou déclarez sa machine dans network.allow_hosts.")
+        return None, 2
+    network_guard.install(central["settings"])
     gate = PermissionGate(
         cfg.permission_mode, cfg.allowed_dirs, cfg.dry_run, cfg.allow_input_control,
         confirm_timeout=cfg.confirm_timeout, approval_mode=cfg.approval_mode,

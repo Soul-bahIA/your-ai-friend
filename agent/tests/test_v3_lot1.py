@@ -71,8 +71,14 @@ def test_agent_refuses_to_start_on_invalid_config(monkeypatch, tmp_path):
     executor, code = soulbah_agent.build_executor(cfg)
     assert executor is None and code == 2
     monkeypatch.setenv("SOULBAH_MODE", "offline")
-    executor, code = soulbah_agent.build_executor(cfg)
-    assert code == 0 and executor.gate.settings["mode"] == "OFFLINE"
+    import network_guard
+
+    try:
+        executor, code = soulbah_agent.build_executor(cfg)
+        assert code == 0 and executor.gate.settings["mode"] == "OFFLINE"
+        assert network_guard.status()["active"], "build_executor installe NetworkGuard"
+    finally:
+        network_guard.install(S.resolve({})["settings"])  # le processus de test repasse en HYBRID
 
 
 # --- profil matériel ---------------------------------------------------------------

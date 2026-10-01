@@ -137,27 +137,31 @@ def _physical_cores() -> int | None:
 
 
 def _cpu_features() -> dict[str, bool | None]:
+    """AVX / AVX2 / AVX-512 : API Windows (instantané) ou /proc/cpuinfo ; numpy en dernier recours
+    seulement (son import coûte plusieurs secondes sur une machine chargée). FMA3 n'est pas exposé
+    par l'API Windows : None = inconnu."""
     feats: dict[str, bool | None] = {"avx": None, "avx2": None, "fma3": None, "avx512f": None}
+    if IS_WIN:
+        import ctypes
+
+        present = ctypes.windll.kernel32.IsProcessorFeaturePresent
+        # PF_AVX_INSTRUCTIONS_AVAILABLE = 39, PF_AVX2 = 40, PF_AVX512F = 41 (Windows 10+).
+        feats.update(avx=bool(present(39)), avx2=bool(present(40)), avx512f=bool(present(41)))
+        return feats
+    try:
+        with open("/proc/cpuinfo", encoding="ascii", errors="ignore") as fh:
+            flags = next((line.split(":")[1].split() for line in fh if line.startswith("flags")), [])
+        if flags:
+            return {"avx": "avx" in flags, "avx2": "avx2" in flags, "fma3": "fma" in flags, "avx512f": "avx512f" in flags}
+    except OSError:
+        pass
     try:
         from numpy._core._multiarray_umath import __cpu_features__ as f  # type: ignore[attr-defined]
 
         return {"avx": bool(f.get("AVX")), "avx2": bool(f.get("AVX2")), "fma3": bool(f.get("FMA3")),
                 "avx512f": bool(f.get("AVX512F"))}
     except Exception:  # noqa: BLE001 - numpy absent ou interne différent
-        pass
-    if IS_WIN:
-        import ctypes
-
-        present = ctypes.windll.kernel32.IsProcessorFeaturePresent
-        feats.update(avx=bool(present(39)), avx2=bool(present(40)), avx512f=bool(present(41)))
-    else:
-        try:
-            with open("/proc/cpuinfo", encoding="ascii", errors="ignore") as fh:
-                flags = next((line.split(":")[1].split() for line in fh if line.startswith("flags")), [])
-            feats.update(avx="avx" in flags, avx2="avx2" in flags, fma3="fma" in flags, avx512f="avx512f" in flags)
-        except OSError:
-            pass
-    return feats
+        return feats
 
 
 def _cpu() -> dict[str, Any]:
@@ -243,13 +247,26 @@ def _tools() -> dict[str, str | None]:
             found["ffmpeg"] = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception:  # noqa: BLE001
             pass
-    try:
-        from skills.vscode import find_vscode
-
-        found["vscode"] = find_vscode()
-    except Exception:  # noqa: BLE001
-        found["vscode"] = None
+    found["vscode"] = _find_vscode()
     return found
+
+
+def _find_vscode() -> str | None:
+    """Mêmes emplacements que skills/vscode.find_vscode, sans importer le paquet skills (qui
+    charge pyautogui, OpenCV… : plusieurs secondes)."""
+    override = os.environ.get("SOULBAH_VSCODE_EXE", "").strip()
+    if override:
+        return override if os.path.isfile(override) else None
+    candidates = []
+    if os.environ.get("LOCALAPPDATA"):
+        candidates.append(os.path.join(os.environ["LOCALAPPDATA"], "Programs", "Microsoft VS Code", "Code.exe"))
+    for var in ("ProgramFiles", "ProgramFiles(x86)"):
+        if os.environ.get(var):
+            candidates.append(os.path.join(os.environ[var], "Microsoft VS Code", "Code.exe"))
+    cli = shutil.which("code.cmd") if IS_WIN else shutil.which("code")
+    if cli:
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(cli)), "Code.exe") if IS_WIN else cli)
+    return next((c for c in candidates if os.path.isfile(c)), None)
 
 
 def _packages() -> dict[str, str | None]:

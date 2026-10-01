@@ -220,6 +220,15 @@ def popen_in_job(
     job (`job.close()`) quand le processus est terminé — la fermeture tue les
     survivants (KILL_ON_JOB_CLOSE)."""
     job = _Job.create(breakaway_ok=breakaway_ok) if use_job else None
+    if env is None:
+        # V3 : en mode OFFLINE, l'enfant hérite de NetworkGuard (PYTHONPATH, NODE_OPTIONS,
+        # mandataires inaccessibles). Hors OFFLINE : environnement hérité tel quel.
+        try:
+            import network_guard
+
+            env = network_guard.child_env()
+        except ImportError:  # module absent (outil isolé) : pas de garde à transmettre
+            env = None
     kwargs: dict = dict(cwd=cwd, env=env, shell=False)
     kwargs.update(popen_kwargs)
     if _IS_WIN:

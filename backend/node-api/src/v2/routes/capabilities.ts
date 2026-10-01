@@ -11,6 +11,7 @@ import { pool } from "../../db.js";
 import { requireUser } from "../../auth.js";
 import { modelsStatus, type ModelsStatus } from "../../clients/iaClient.js";
 import { cloudModelsAllowed, currentResolution, internetAllowed, publicView, type SoulbahSettings } from "../../lib/soulbahSettings.js";
+import { networkGuardStatus } from "../../lib/networkGuard.js";
 import { resolveChatProvider } from "../../services/chatProvider.js";
 import { getWebSearchProvider } from "../../services/research/webSearch.js";
 
@@ -60,6 +61,12 @@ export function serviceCapabilities(settings: SoulbahSettings, models: ModelsSta
 
   caps["voice.tts.server"] = cloudModelsAllowed(settings) && env.OPENAI_API_KEY ? ok("cloud:openai") : no("synthèse vocale locale : LOT 11 V3");
   caps["voice.stt"] = no("reconnaissance vocale locale : LOT 11 V3");
+  const guard = networkGuardStatus();
+  caps["network.guard"] = !guard.installed
+    ? no("NetworkGuard non installé dans ce processus")
+    : guard.active
+      ? ok(`actif : connexions vers Internet refusées (${guard.blocked} refus)`)
+      : ok(`installé, inactif en mode ${settings.mode} (Internet autorisé)`);
   return caps;
 }
 

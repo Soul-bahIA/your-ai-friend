@@ -1,0 +1,36 @@
+{
+  "description": "Cas communs de NetworkGuard (V3) : décision au niveau des connexions réseau, exécutés par shared/config/network_guard.py (agent, python-ia), guard_site/network_guard_child.cjs (processus Node enfants) et backend/node-api/src/lib/networkGuard.ts. true = connexion permise. Au niveau réseau, une adresse IP non publique (réseau local) est permise ; la couche des outils (gate) reste plus stricte (hôtes déclarés seulement).",
+  "offline": {
+    "allow_hosts": ["192.168.1.20", "serveur-ia.local"],
+    "expect": {
+      "127.0.0.1": true,
+      "localhost": true,
+      "::1": true,
+      "python-ia": true,
+      "postgres": true,
+      "serveur-ia.local": true,
+      "192.168.1.20": true,
+      "192.168.1.21": true,
+      "10.0.0.5": true,
+      "172.20.0.3": true,
+      "169.254.1.1": true,
+      "fe80::1": true,
+      "fd00::1": true,
+      "::ffff:10.0.0.1": true,
+      "example.com": false,
+      "api.anthropic.com": false,
+      "aws-0-eu-west-3.pooler.supabase.com": false,
+      "93.184.216.34": false,
+      "8.8.8.8": false,
+      "1.1.1.1": false,
+      "2606:4700:4700::1111": false,
+      "::ffff:8.8.8.8": false
+    }
+  },
+  "hybrid": {
+    "expect": { "example.com": true, "8.8.8.8": true, "api.anthropic.com": true }
+  },
+  "local_internet": {
+    "expect": { "example.com": true, "github.com": true }
+  }
+}

@@ -18,7 +18,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import request_context
 from .agents import AGENTS, route_request
-from .config import check_startup_config, service_token, soulbah_env
+from . import network_guard
+from .config import check_startup_config, service_token, soulbah_env, soulbah_settings_now
 from .formation import analyze_request, build_module, build_program
 from .generation import generate_application, generate_formation
 from .llm import LLMError
@@ -39,6 +40,9 @@ async def _lifespan(_app: FastAPI):
     # (RuntimeError -> uvicorn s'arrête avec un message explicite).
     for warning in check_startup_config():
         logger.warning(warning)
+    # V3 : NetworkGuard (refus réel des connexions vers Internet en mode OFFLINE).
+    guard = network_guard.install(soulbah_settings_now())
+    logger.info("NetworkGuard : %s (mode %s)", "actif" if guard["active"] else "inactif", guard["mode"])
     logger.info("python-ia démarré (SOULBAH_ENV=%s)", soulbah_env())
     yield
 

@@ -97,5 +97,8 @@ def registration_payload(settings: Mapping[str, Any], profile: Mapping[str, Any]
     """Champs ajoutés à `capabilities` lors de l'enregistrement du runtime (POST /register)."""
     import hardware
 
+    import network_guard
+
+    guard = {k: v for k, v in network_guard.status().items() if k != "recent"}
     return {"mode": settings.get("mode"), "hardware": hardware.summary(dict(profile)),
-            "local": local_capabilities(settings, profile)}
+            "local": local_capabilities(settings, profile), "network_guard": guard}

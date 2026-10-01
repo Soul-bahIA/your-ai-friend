@@ -50,7 +50,7 @@ from typing import Any
 from .. import request_context
 from .base import CompletionResult, LLMError, LLMProvider
 from .circuit import CircuitBreaker  # noqa: F401 — réexporté (compatibilité LOT 1)
-from .. import soulbah_settings
+from .. import network_guard, soulbah_settings
 from ..config import soulbah_settings_now
 from .registry import BLOCKED_BY_MODE, build_providers
 from .usage import UsageMeter, estimate_cost, price_for
@@ -460,6 +460,7 @@ class Orchestrator:
             "reasoning_available": bool(provs),
             "vision_available": vision,
             "local_configured": "local" in provs,
+            "network_guard": {k: v for k, v in network_guard.status().items() if k != "recent"},
             "providers": [p.describe() for p in provs.values()],
             "configured": list(provs.keys()),
             "default": self._default_provider_id(),
