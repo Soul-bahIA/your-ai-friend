@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchBackendHealth, fetchDeepHealth } from "@/lib/healthProbe";
 import { computeOverallStatus, deepCheck, type OverallStatus, type ServiceState } from "@/lib/systemStatus";
+import { devLocalAuth } from "@/lib/localAuth";
 
 const REFRESH_MS = 30_000;
 
@@ -33,6 +34,7 @@ export function useBackendHealth() {
 
 /** Supabase joignable : requête minimale (son propre profil, RLS), rafraîchie toutes les 60 s. */
 async function fetchSupabaseHealth(): Promise<ServiceState> {
+  if (devLocalAuth()) return "unknown"; // connexion locale : Supabase n'est pas utilisé
   try {
     const { error } = await supabase.from("profiles").select("id", { count: "exact", head: true });
     return error ? "down" : "ok";

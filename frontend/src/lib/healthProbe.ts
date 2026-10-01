@@ -6,6 +6,7 @@
 import { apiUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { parseDeepHealth, type DeepHealth, type ServiceState } from "@/lib/systemStatus";
+import { devLocalAuth } from "@/lib/localAuth";
 
 export const PROBE_TIMEOUT_MS = 5000;
 
@@ -33,6 +34,8 @@ export async function fetchBackendHealth(): Promise<ServiceState> {
 
 /** Jeton d'accès de la session courante, ou null (pas de session / client indisponible). */
 async function sessionToken(): Promise<string | null> {
+  const local = devLocalAuth();
+  if (local) return local.token;
   try {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;

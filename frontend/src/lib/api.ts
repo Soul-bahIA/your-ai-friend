@@ -4,6 +4,7 @@
 // - Erreurs normalisées (messages en français)
 import { supabase } from "@/integrations/supabase/client";
 import { sanitizeMediaUrl } from "@/lib/url";
+import { devLocalAuth } from "@/lib/localAuth";
 
 const DEFAULT_API_URL = "http://localhost:3000";
 
@@ -90,6 +91,8 @@ export async function toApiError(resp: Response): Promise<ApiError> {
 
 /** Jeton d'accès Supabase courant ; lève ApiError(401) s'il n'y a pas de session. */
 export async function getAccessToken(): Promise<string> {
+  const local = devLocalAuth();
+  if (local) return local.token; // V3 : connexion locale (serveur de développement)
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new ApiError(SESSION_EXPIRED_MESSAGE, 401);

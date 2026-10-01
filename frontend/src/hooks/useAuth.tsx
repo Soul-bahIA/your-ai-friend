@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase } from "@/integrations/supabase/client";
 import { sessionChanged } from "@/lib/authState";
 import { notifyServerLogout } from "@/lib/agentApi";
+import { devLocalAuth, devLocalSession } from "@/lib/localAuth";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextType {
@@ -25,6 +26,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     let active = true;
+
+    // V3 : connexion locale (serveur de développement, sans Supabase) — session immédiate.
+    const local = devLocalAuth();
+    if (local) {
+      const s = devLocalSession(local);
+      sessionRef.current = s;
+      setSession(s);
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
 
     // Ne remplace l'état que si la session a réellement changé (utilisateur ou jeton) :
     // Supabase réémet SIGNED_IN à chaque retour sur l'onglet avec de nouveaux objets.
@@ -61,6 +74,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Connexion locale : pas de compte Supabase à fermer ; la session locale reste active.
+    if (devLocalAuth()) return;
     // Invalide d'abord le cache JWT du backend (S26) ; les erreurs sont ignorées.
     await notifyServerLogout();
     await supabase.auth.signOut();
