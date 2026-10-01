@@ -23,6 +23,69 @@ const COLUMN_TYPES = [
   { value: "json", label: "JSON" },
 ] as const;
 
+const addColumn = (cols: Column[], setCols: (c: Column[]) => void) => {
+  setCols([...cols, { name: "", type: "text", required: false }]);
+};
+
+const removeColumn = (cols: Column[], setCols: (c: Column[]) => void, idx: number) => {
+  setCols(cols.filter((_, i) => i !== idx));
+};
+
+const updateColumn = (
+  cols: Column[],
+  setCols: (c: Column[]) => void,
+  idx: number,
+  field: keyof Column,
+  value: any,
+) => {
+  const next = cols.map((c, i) => (i === idx ? { ...c, [field]: value } : c));
+  setCols(next);
+};
+
+// Défini au niveau module : si on l'imbrique dans DatabaseAdmin, sa référence
+// change à chaque rendu et React démonte/remonte les <Input>, ce qui fait
+// perdre le focus après chaque frappe.
+function ColumnEditor({ columns, setColumns }: { columns: Column[]; setColumns: (c: Column[]) => void }) {
+  return (
+    <div className="space-y-2">
+      {columns.map((col, i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <Input
+            placeholder="Nom colonne"
+            value={col.name}
+            onChange={(e) => updateColumn(columns, setColumns, i, "name", e.target.value)}
+            className="flex-1"
+          />
+          <Select
+            value={col.type}
+            onValueChange={(v) => updateColumn(columns, setColumns, i, "type", v)}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLUMN_TYPES.map((t) => (
+                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Checkbox
+            checked={col.required}
+            onCheckedChange={(v) => updateColumn(columns, setColumns, i, "required", !!v)}
+          />
+          <span className="text-xs text-muted-foreground w-12">Requis</span>
+          <Button size="icon" variant="ghost" onClick={() => removeColumn(columns, setColumns, i)}>
+            <Trash2 className="h-3 w-3 text-destructive" />
+          </Button>
+        </div>
+      ))}
+      <Button size="sm" variant="outline" onClick={() => addColumn(columns, setColumns)}>
+        <Plus className="h-3 w-3 mr-1" /> Colonne
+      </Button>
+    </div>
+  );
+}
+
 export default function DatabaseAdmin() {
   const db = useDatabase();
   const { toast } = useToast();
@@ -102,59 +165,6 @@ export default function DatabaseAdmin() {
     setSelectedRows(new Set());
     toast({ title: `${selectedRows.size} ligne(s) supprimée(s)` });
   };
-
-  const addColumn = (cols: Column[], setCols: (c: Column[]) => void) => {
-    setCols([...cols, { name: "", type: "text", required: false }]);
-  };
-
-  const removeColumn = (cols: Column[], setCols: (c: Column[]) => void, idx: number) => {
-    setCols(cols.filter((_, i) => i !== idx));
-  };
-
-  const updateColumn = (cols: Column[], setCols: (c: Column[]) => void, idx: number, field: keyof Column, value: any) => {
-    const next = [...cols];
-    (next[idx] as any)[field] = value;
-    setCols(next);
-  };
-
-  const ColumnEditor = ({ columns, setColumns }: { columns: Column[]; setColumns: (c: Column[]) => void }) => (
-    <div className="space-y-2">
-      {columns.map((col, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <Input
-            placeholder="Nom colonne"
-            value={col.name}
-            onChange={(e) => updateColumn(columns, setColumns, i, "name", e.target.value)}
-            className="flex-1"
-          />
-          <Select
-            value={col.type}
-            onValueChange={(v) => updateColumn(columns, setColumns, i, "type", v)}
-          >
-            <SelectTrigger className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {COLUMN_TYPES.map((t) => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Checkbox
-            checked={col.required}
-            onCheckedChange={(v) => updateColumn(columns, setColumns, i, "required", !!v)}
-          />
-          <span className="text-xs text-muted-foreground w-12">Requis</span>
-          <Button size="icon" variant="ghost" onClick={() => removeColumn(columns, setColumns, i)}>
-            <Trash2 className="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
-      ))}
-      <Button size="sm" variant="outline" onClick={() => addColumn(columns, setColumns)}>
-        <Plus className="h-3 w-3 mr-1" /> Colonne
-      </Button>
-    </div>
-  );
 
   return (
     <DashboardLayout>

@@ -25,7 +25,7 @@ const Auth = () => {
         if (error) throw error;
         navigate("/");
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -34,17 +34,47 @@ const Auth = () => {
           },
         });
         if (error) throw error;
-        toast({
-          title: "Compte créé !",
-          description: "Vérifiez votre email pour confirmer votre inscription.",
-        });
+
+        // Supabase renvoie un user sans identités quand l'email existe déjà
+        if (data.user && data.user.identities && data.user.identities.length === 0) {
+          throw new Error("User already registered");
+        }
+
+        if (data.session) {
+          // Confirmation email désactivée : l'utilisateur est connecté immédiatement
+          toast({
+            title: "Compte créé !",
+            description: "Bienvenue sur SOULBAH IA.",
+          });
+          navigate("/");
+        } else {
+          // Confirmation email activée : tenter une connexion directe au cas où,
+          // sinon inviter à confirmer l'email
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (!signInError) {
+            navigate("/");
+          } else {
+            toast({
+              title: "Compte créé !",
+              description:
+                "Vérifiez votre email pour confirmer votre inscription, puis connectez-vous.",
+            });
+            setIsLogin(true);
+          }
+        }
       }
     } catch (error: any) {
       let message = error.message;
       if (error.message?.includes("User already registered")) {
         message = "Ce compte existe déjà. Passez à la connexion.";
       } else if (error.message?.includes("Email not confirmed")) {
-        message = "Email non confirmé. Réessayez de vous inscrire.";
+        message =
+          "Email non confirmé. Cliquez sur le lien reçu par email avant de vous connecter.";
+      } else if (error.message?.includes("Invalid login credentials")) {
+        message = "Email ou mot de passe incorrect.";
       }
       toast({
         title: "Erreur",

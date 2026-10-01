@@ -1,0 +1,14 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+httpx==0.28.1
+pydantic==2.10.3
+anthropic>=0.40.0
+
+# Production vidéo des formations (narration TTS + diapos + montage MP4)
+moviepy==1.0.3
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+numpy>=1.26
+
+# Supports PDF des formations
+fpdf2==2.8.7

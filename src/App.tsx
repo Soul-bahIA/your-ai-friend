@@ -3,22 +3,31 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
-import Formations from "./pages/Formations";
-import Applications from "./pages/Applications";
-import Chat from "./pages/Chat";
-import KnowledgeBase from "./pages/KnowledgeBase";
-import DatabaseAdmin from "./pages/DatabaseAdmin";
-import Settings from "./pages/Settings";
-import Security from "./pages/Security";
-import Video from "./pages/Video";
-import Automation from "./pages/Automation";
 import Auth from "./pages/Auth";
-import NotFound from "./pages/NotFound";
+
+const Formations = lazy(() => import("./pages/Formations"));
+const Applications = lazy(() => import("./pages/Applications"));
+const Chat = lazy(() => import("./pages/Chat"));
+const KnowledgeBase = lazy(() => import("./pages/KnowledgeBase"));
+const DatabaseAdmin = lazy(() => import("./pages/DatabaseAdmin"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Security = lazy(() => import("./pages/Security"));
+const Video = lazy(() => import("./pages/Video"));
+const Automation = lazy(() => import("./pages/Automation"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
+
+const PageLoader = () => (
+  <div className="flex min-h-screen items-center justify-center">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -27,6 +36,8 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <ErrorBoundary>
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
@@ -41,6 +52,8 @@ const App = () => (
             <Route path="/automation" element={<ProtectedRoute><Automation /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BookOpen, Plus, Search, Trash2, Edit, Tag, Calendar } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import { toast } from "sonner";
 
 type Knowledge = {
@@ -30,6 +31,7 @@ const KnowledgeBase = () => {
   const { user } = useAuth();
   const [items, setItems] = useState<Knowledge[]>([]);
   const [search, setSearch] = useState("");
+  useCommandPrefill(setSearch);
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<Knowledge | null>(null);
@@ -79,7 +81,8 @@ const KnowledgeBase = () => {
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from("knowledge_base").delete().eq("id", id);
+    const { error } = await supabase.from("knowledge_base").delete().eq("id", id);
+    if (error) { toast.error("Erreur suppression"); return; }
     toast.success("Supprimé");
     loadItems();
   };

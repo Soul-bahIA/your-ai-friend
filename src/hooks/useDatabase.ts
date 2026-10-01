@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { apiUrl, apiAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 export interface Column {
@@ -37,10 +36,13 @@ export interface Migration {
 }
 
 async function callDb(action: string, params: Record<string, any> = {}) {
-  const { data, error } = await supabase.functions.invoke("manage-database", {
-    body: { action, ...params },
+  const res = await fetch(apiUrl("/api/database"), {
+    method: "POST",
+    headers: await apiAuthHeaders(),
+    body: JSON.stringify({ action, ...params }),
   });
-  if (error) throw new Error(error.message);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Erreur ${res.status}`);
   if (data?.error) throw new Error(data.error);
   return data;
 }

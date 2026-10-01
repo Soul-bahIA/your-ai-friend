@@ -8,6 +8,7 @@ import AppChatPanel from "@/components/AppChatPanel";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import type { Json } from "@/integrations/supabase/types";
 
 interface AppArchitecture {
@@ -38,6 +39,7 @@ const Applications = () => {
   const { user, session } = useAuth();
   const { toast } = useToast();
   const [appName, setAppName] = useState("");
+  useCommandPrefill(setAppName);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -87,13 +89,12 @@ const Applications = () => {
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-application`,
+        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/application`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({ appName, applicationId }),
         }

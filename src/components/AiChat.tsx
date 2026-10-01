@@ -12,7 +12,7 @@ import { toast } from "sonner";
 type Msg = { role: "user" | "assistant"; content: string };
 type Conversation = { id: string; title: string; created_at: string };
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const CHAT_URL = `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/chat`;
 
 const AiChat = () => {
   const { user, session } = useAuth();
@@ -24,6 +24,10 @@ const AiChat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Quand on crée une conversation localement pendant l'envoi, on ne veut PAS
+  // que le changement d'activeConversationId recharge les messages depuis la DB
+  // (ce fetch peut se résoudre en plein streaming et écraser la réponse).
+  const skipReloadRef = useRef(false);
 
   const getAuthHeaders = async () => {
     const { data: { session: freshSession } } = await supabase.auth.getSession();
@@ -58,6 +62,11 @@ const AiChat = () => {
 
   useEffect(() => {
     if (!activeConversationId || !user) { setMessages([]); return; }
+    if (skipReloadRef.current) {
+      // Conversation créée localement pendant l'envoi : les messages sont déjà à l'écran.
+      skipReloadRef.current = false;
+      return;
+    }
     (async () => {
       const { data } = await supabase
         .from("chat_messages")
@@ -87,6 +96,7 @@ const AiChat = () => {
       return null; 
     }
     setConversations(prev => [data, ...prev]);
+    skipReloadRef.current = true;
     setActiveConversationId(data.id);
     return data.id;
   };

@@ -18,19 +18,22 @@ const Settings = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      supabase
+    if (!user) return;
+    (async () => {
+      const { data, error } = await supabase
         .from("profiles")
         .select("display_name, bio")
         .eq("user_id", user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data) {
-            setDisplayName(data.display_name || "");
-            setBio(data.bio || "");
-          }
-        });
-    }
+        .maybeSingle();
+      if (error) {
+        console.error("[Settings] Chargement du profil échoué:", error.message);
+        return;
+      }
+      if (data) {
+        setDisplayName(data.display_name || "");
+        setBio(data.bio || "");
+      }
+    })();
   }, [user]);
 
   const handleSave = async () => {

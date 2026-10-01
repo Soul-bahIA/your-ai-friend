@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import Sidebar from "./Sidebar";
+import CommandBar from "./CommandBar";
 
 const DashboardLayout = ({ children }: { children: ReactNode }) => {
   const isMobile = useIsMobile();
@@ -25,7 +26,7 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
             </SheetContent>
           </Sheet>
           <main className="min-h-[calc(100vh-53px)]">
-            <div className="bg-grid min-h-[calc(100vh-53px)]">
+            <div className="bg-grid min-h-[calc(100vh-53px)] pb-28">
               {children}
             </div>
           </main>
@@ -34,12 +35,13 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
         <>
           <Sidebar />
           <main className="ml-64 min-h-screen">
-            <div className="bg-grid min-h-screen">
+            <div className="bg-grid min-h-screen pb-28">
               {children}
             </div>
           </main>
         </>
       )}
+      <CommandBar />
     </div>
   );
 };

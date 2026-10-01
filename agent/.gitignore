@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Screenshots / recordings produced by the agent
+*.png
+*.mp4
+*.avi

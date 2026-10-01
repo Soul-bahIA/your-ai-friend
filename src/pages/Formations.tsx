@@ -3,12 +3,14 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown, Monitor } from "lucide-react";
+import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown, Monitor, Film } from "lucide-react";
 import FormationVideoPlayer from "@/components/FormationVideoPlayer";
 import AgentTasksPanel from "@/components/AgentTasksPanel";
+import { apiUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 
 interface Lesson {
   title: string;
@@ -27,6 +29,7 @@ interface Formation {
   status: string;
   created_at: string;
   content: unknown;
+  video_url?: string | null;
 }
 
 const Formations = () => {
@@ -34,12 +37,46 @@ const Formations = () => {
   const { toast } = useToast();
   const [topic, setTopic] = useState("");
   const [details, setDetails] = useState("");
+  useCommandPrefill(setTopic);
   const [formations, setFormations] = useState<Formation[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [videoFormation, setVideoFormation] = useState<Formation | null>(null);
   const [agentFormation, setAgentFormation] = useState<Formation | null>(null);
+  const [videoGenId, setVideoGenId] = useState<string | null>(null);
+
+  const handleGenerateVideo = async (course: Formation) => {
+    if (!session || videoGenId) return;
+    setVideoGenId(course.id);
+    toast({
+      title: "Production de la vidéo lancée",
+      description: "Narration + montage MP4 — cela peut prendre plusieurs minutes. Laissez l'onglet ouvert.",
+    });
+    try {
+      const resp = await fetch(apiUrl(`/api/formations/${course.id}/video`), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.error || "Échec de la production vidéo");
+      setFormations((prev) =>
+        prev.map((f) => (f.id === course.id ? { ...f, video_url: data.video_url } : f)),
+      );
+      toast({
+        title: "🎬 Vidéo MP4 produite !",
+        description: `${data.slides} diapos · ${Math.round(data.duration_s)}s de narration.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Erreur vidéo", description: err.message, variant: "destructive" });
+    } finally {
+      setVideoGenId(null);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -52,6 +89,20 @@ const Formations = () => {
       setLoading(false);
     };
     fetchFormations();
+
+    // Temps réel : la génération asynchrone met à jour la formation en base
+    // (statut, contenu) ; on rafraîchit la liste dès qu'une ligne change.
+    const channel = supabase
+      .channel("formations-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "formations", filter: `user_id=eq.${user.id}` },
+        () => fetchFormations(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -83,13 +134,12 @@ const Formations = () => {
     // Step 2: Call AI generation edge function
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-formation`,
+        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/formation`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({ topic, details, formationId }),
         }
@@ -101,28 +151,14 @@ const Formations = () => {
         throw new Error(result.error || "Échec de la génération");
       }
 
-      // Update local state with generated content
-      setFormations((prev) =>
-        prev.map((f) =>
-          f.id === formationId
-            ? {
-                ...f,
-                title: result.formation.title || topic,
-                description: result.formation.description,
-                duration: result.formation.duration,
-                lessons_count: result.formation.lessons?.length || 0,
-                content: result.formation.lessons || [],
-                status: "Terminé",
-              }
-            : f
-        )
-      );
-
+      // Génération asynchrone : elle continue en arrière-plan (analyse → recherche →
+      // programme → modules). La carte se met à jour toute seule via le temps réel.
       setTopic("");
       setDetails("");
       toast({
-        title: "Formation générée !",
-        description: `« ${result.formation.title} » — ${result.formation.lessons?.length} leçons créées par IA.`,
+        title: "Génération lancée",
+        description:
+          "La formation se construit en arrière-plan (analyse, recherche, modules). La carte se mettra à jour automatiquement une fois prête.",
       });
     } catch (err: any) {
       toast({ title: "Erreur IA", description: err.message, variant: "destructive" });
@@ -292,10 +328,34 @@ const Formations = () => {
                     </span>
                     {course.content && Array.isArray(course.content) && course.content.length > 0 && (
                       <>
+                        {course.video_url ? (
+                          <a
+                            href={apiUrl(course.video_url)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-success hover:text-success/80 transition-colors p-1"
+                            title="Voir / télécharger la vidéo MP4"
+                          >
+                            <Film className="h-4 w-4" />
+                          </a>
+                        ) : (
+                          <button
+                            onClick={() => handleGenerateVideo(course)}
+                            disabled={!!videoGenId}
+                            className="text-muted-foreground hover:text-primary transition-colors p-1 disabled:opacity-40"
+                            title="Produire une vraie vidéo MP4 (narration + montage)"
+                          >
+                            {videoGenId === course.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            ) : (
+                              <Film className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
                         <button
                           onClick={() => setVideoFormation(course)}
                           className="text-primary hover:text-primary/80 transition-colors p-1"
-                          title="Lire en vidéo"
+                          title="Aperçu diaporama (navigateur)"
                         >
                           <Play className="h-4 w-4" />
                         </button>

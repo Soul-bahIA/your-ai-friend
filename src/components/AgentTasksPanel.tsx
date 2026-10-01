@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw } from "lucide-react";
+import { Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, Sparkles } from "lucide-react";
 
 interface AgentTask {
   id: string;
@@ -17,7 +19,7 @@ interface AgentTask {
   completed_at: string | null;
 }
 
-const TASK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-tasks`;
+const TASK_URL = `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/agent-tasks`;
 
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   pending: { label: "En attente", color: "bg-warning/10 text-warning", icon: Clock },
@@ -35,7 +37,10 @@ const taskTypeLabels: Record<string, string> = {
   demo_execution: "🎯 Démonstration",
   video_production: "🎞️ Production vidéo",
   full_training_video: "🎬 Vidéo de formation",
+  goal: "🧠 Objectif (plan IA)",
 };
+
+const GOAL_URL = `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/agent/goal`;
 
 interface AgentTasksPanelProps {
   formationId?: string;
@@ -48,6 +53,37 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [goal, setGoal] = useState("");
+  useCommandPrefill(setGoal);
+  const [planning, setPlanning] = useState(false);
+  const [goalFeedback, setGoalFeedback] = useState<string | null>(null);
+
+  const sendGoal = async () => {
+    if (!session || !goal.trim() || planning) return;
+    setPlanning(true);
+    setGoalFeedback(null);
+    try {
+      const resp = await fetch(GOAL_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ goal: goal.trim() }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        setGoalFeedback(`✅ Plan créé (${data.steps.length} étapes) : ${data.understanding}`);
+        setGoal("");
+        fetchTasks();
+      } else {
+        setGoalFeedback(`❌ ${data.reason || data.error || "Échec de la planification"}`);
+      }
+    } catch {
+      setGoalFeedback("❌ Backend injoignable");
+    }
+    setPlanning(false);
+  };
 
   const fetchTasks = async () => {
     if (!session) return;
@@ -116,7 +152,11 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
   };
 
   const deleteTask = async (taskId: string) => {
-    await supabase.from("agent_tasks").delete().eq("id", taskId);
+    const { error } = await supabase.from("agent_tasks").delete().eq("id", taskId);
+    if (error) {
+      console.error("Error deleting task:", error);
+      return;
+    }
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
 
@@ -140,14 +180,38 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
         </div>
       </div>
 
+      {/* Moteur de raisonnement : objectif en langage naturel → plan → agent */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); sendGoal(); }}
+        className="space-y-2"
+      >
+        <div className="flex gap-2">
+          <Input
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="Objectif (ex: Ouvre le bloc-notes et écris Bonjour)"
+            className="bg-secondary border-border text-xs h-8"
+            disabled={planning}
+          />
+          <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={planning || !goal.trim()}>
+            {planning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Sparkles className="h-3.5 w-3.5 mr-1" /> Planifier</>}
+          </Button>
+        </div>
+        {goalFeedback && (
+          <p className="text-[10px] text-muted-foreground">{goalFeedback}</p>
+        )}
+      </form>
+
       {loading ? (
         <p className="text-xs text-muted-foreground">Chargement...</p>
       ) : tasks.length === 0 ? (
         <div className="text-center py-6">
           <Monitor className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
-          <p className="text-xs text-muted-foreground">Aucune tâche envoyée à l'agent local</p>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            Téléchargez l'agent sur <code className="bg-secondary px-1 rounded">/soulbah-agent/</code>
+          <p className="text-xs text-muted-foreground">Aucune tâche pour le moment</p>
+          <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-xs mx-auto">
+            Décrivez un objectif ci-dessus, puis lancez l'agent sur votre poste :{" "}
+            <code className="bg-secondary px-1 rounded">python soulbah_agent.py</code>{" "}
+            (dossier <code className="bg-secondary px-1 rounded">agent/</code> du projet)
           </p>
         </div>
       ) : (
@@ -171,6 +235,17 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
                     )}
                     {task.result?.file && (
                       <p className="text-[10px] text-success mt-0.5">📁 {task.result.file}</p>
+                    )}
+                    {task.payload?.goal_meta?.goal && (
+                      <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">
+                        🎯 {task.payload.goal_meta.goal}
+                        {task.payload.goal_meta.attempt > 1 && ` (tentative ${task.payload.goal_meta.attempt})`}
+                      </p>
+                    )}
+                    {task.result?.evaluation && (
+                      <p className={`text-[10px] mt-0.5 ${task.result.evaluation.verdict === "success" ? "text-success" : task.result.evaluation.verdict === "retry" ? "text-warning" : "text-destructive"}`}>
+                        🧠 {task.result.evaluation.verdict === "success" ? "Objectif atteint" : task.result.evaluation.verdict === "retry" ? "Correction lancée" : "Abandonné"} — {task.result.evaluation.reason}
+                      </p>
                     )}
                   </div>
                   <Badge variant="outline" className={`text-[9px] ${config.color}`}>

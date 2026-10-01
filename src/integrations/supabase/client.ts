@@ -5,12 +5,47 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  // Échoue tôt avec un message clair plutôt qu'une erreur cryptique au runtime
+  throw new Error(
+    "[Supabase] Variables d'environnement manquantes. Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY dans .env, puis redémarrez le serveur."
+  );
+}
+
+// Stockage résilient : si localStorage est indisponible (mode privé, cookies/site
+// data bloqués, extension de confidentialité...), on bascule sur un stockage mémoire
+// pour que l'authentification ne casse pas silencieusement.
+const memoryStore = new Map<string, string>();
+const memoryStorage = {
+  getItem: (key: string) => (memoryStore.has(key) ? memoryStore.get(key)! : null),
+  setItem: (key: string, value: string) => {
+    memoryStore.set(key, value);
+  },
+  removeItem: (key: string) => {
+    memoryStore.delete(key);
+  },
+};
+
+const getSafeStorage = () => {
+  try {
+    const testKey = "__supabase_storage_test__";
+    window.localStorage.setItem(testKey, "1");
+    window.localStorage.removeItem(testKey);
+    return window.localStorage;
+  } catch {
+    console.warn(
+      "[Supabase] localStorage indisponible — bascule sur un stockage mémoire (session non persistée)."
+    );
+    return memoryStorage;
+  }
+};
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
+    storage: getSafeStorage(),
     persistSession: true,
     autoRefreshToken: true,
   }
