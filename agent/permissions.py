@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable
 
 from skills.base import Skill
+from skills.manifests import confirm_step_types, path_param_names
 from skills.safety import canonical_path, deny_reason, workspace_errors  # noqa: F401 - réexporté
 
 log = logging.getLogger("soulbah.permissions")
@@ -23,23 +24,18 @@ INPUT_CONTROL_CATEGORIES = frozenset({"mouse", "keyboard", "window", "app_launch
 # mode (auto inclus) et même avec allow_input_control : exécution de commandes.
 ALWAYS_CONFIRM_CATEGORIES = frozenset({"shell"})
 
-# S21 : étapes « à effet réel » — miroir de SENSITIVE_STEP_TYPES côté serveur
-# (backend/node-api/src/lib/agentSteps.ts, à garder synchronisé). Le serveur pose
-# payload.requires_confirmation=true dès qu'une tâche en contient une (le client ne
-# peut pas l'abaisser) : ces étapes sont alors TOUJOURS confirmées sur le PC, même
-# en mode auto et même avec allow_input_control. Le drapeau n'ajoute que des
+# S21 : étapes « à effet réel » — manifestes `requires_confirmation` (LOT 2 : même
+# source que SENSITIVE_STEP_TYPES côté serveur, via shared/tools/catalog.json). Le
+# serveur pose payload.requires_confirmation=true dès qu'une tâche en contient une (le
+# client ne peut pas l'abaisser) : ces étapes sont alors TOUJOURS confirmées sur le PC,
+# même en mode auto et même avec allow_input_control. Le drapeau n'ajoute que des
 # confirmations : il ne dispense jamais d'une vérification locale.
-SERVER_CONFIRM_STEP_TYPES = frozenset({
-    "run_command", "run_script", "shell",
-    "write_file", "move_file", "move",
-    "type_text", "type", "keyboard",
-    "hotkey", "press", "key",
-    "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
-})
+SERVER_CONFIRM_STEP_TYPES = confirm_step_types()
 SERVER_CONFIRM_REASON = "confirmation exigée par le serveur pour cette action à effet réel (requires_confirmation)"
 
-# Champs de chemin vérifiés (whitelist + deny-list) quelle que soit la catégorie.
-_PATH_KEYS = ("src", "dest", "path", "cwd", "output", "audio")
+# Champs de chemin vérifiés (whitelist + deny-list) quelle que soit la catégorie : tous
+# les paramètres `is_path` des manifestes (texte, ou liste de chemins comme `clips`).
+_PATH_KEYS, _PATH_LIST_KEYS = path_param_names()
 
 DEFAULT_CONFIRM_TIMEOUT = 120.0
 # Réponse exigée pour une action de niveau L3 (risquée / irréversible).
@@ -177,11 +173,13 @@ class PermissionGate:
             err = self.path_refusal(p)
             if err:
                 return err
-        clips = step.get("clips")
-        if clips is not None:
-            if not isinstance(clips, list):
-                return "champ 'clips' invalide (liste de chemins attendue)"
-            for p in clips:
+        for key in _PATH_LIST_KEYS:
+            items = step.get(key)
+            if items is None:
+                continue
+            if not isinstance(items, list):
+                return f"champ '{key}' invalide (liste de chemins attendue)"
+            for p in items:
                 err = self.path_refusal(p)
                 if err:
                     return err

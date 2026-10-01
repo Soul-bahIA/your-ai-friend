@@ -44,6 +44,7 @@ _DEFAULT_API = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Develo
 _DEFAULT_LIB = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
 
 _RENDER_TIMEOUT = 1800  # 30 min max pour un rendu
+_MAX_CLIPS = 200  # manifeste resolve_montage : clips.max_items (= borne des tableaux côté serveur)
 _POLL_SECONDS = 3.0
 
 
@@ -124,6 +125,11 @@ class ResolveMontageSkill(Skill):
         return f"montage DaVinci Resolve de {n} clip(s) -> {step.get('output', '?')}"
 
     def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        clips = step.get("clips")
+        if not isinstance(clips, list) or not clips or not all(isinstance(c, str) and c for c in clips):
+            return "champ 'clips' (liste de medias) requis"
+        if len(clips) > _MAX_CLIPS:
+            return f"trop de medias (max {_MAX_CLIPS})"
         output = step.get("output")
         if not isinstance(output, str) or not output.lower().endswith(".mp4"):
             return "champ 'output' invalide (fichier .mp4 attendu)"

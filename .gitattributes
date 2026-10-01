@@ -1,0 +1,5 @@
+# Catalogue d'outils généré par scripts/gen_catalog.py (LOT 2) : toujours en LF, quel que
+# soit core.autocrlf, pour que le contenu reste identique aux sorties du générateur.
+shared/tools/catalog.json text eol=lf
+backend/node-api/src/generated/tool_catalog.json text eol=lf
+backend/python-ia/app/generated/tool_catalog.json text eol=lf

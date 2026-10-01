@@ -1,10 +1,10 @@
-// T3 (table unique des skills, compactStep, cwd), S21 (chemins confinés) et agent_key_id.
+// T3 (catalogue d'outils unique — LOT 2 —, compactStep, cwd), S21 (chemins confinés) et agent_key_id.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_SKILLS,
+  AGENT_STEP_TYPES,
   REQUIRED_FIELDS,
   STEP_PARAMS,
   compactStep,
@@ -74,9 +74,10 @@ describe("findInvalidStep (T3)", () => {
 });
 
 // Lecture SEULE des skills de l'agent : toute dérive (paramètre ou type ajouté côté agent
-// sans mise à jour de la table) fait échouer ces tests.
+// sans manifeste, donc absent du catalogue généré) fait échouer ces tests.
 const SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../agent/skills");
 const skillsAvailable = fs.existsSync(SKILLS_DIR);
+const NOT_SKILLS = new Set(["__init__.py", "base.py", "manifests.py"]);
 
 function parseSkillFile(src: string): { types: string[]; params: string[] } {
   const types = new Set<string>();
@@ -90,27 +91,25 @@ function parseSkillFile(src: string): { types: string[]; params: string[] } {
   return { types: [...types], params: [...params] };
 }
 
-describe.skipIf(!skillsAvailable)("dérive table node ↔ agent/skills (T3)", () => {
+describe.skipIf(!skillsAvailable)("dérive catalogue ↔ agent/skills (T3, LOT 2)", () => {
   const files = skillsAvailable
-    ? fs.readdirSync(SKILLS_DIR).filter((f) => f.endsWith(".py") && f !== "__init__.py" && f !== "base.py")
+    ? fs.readdirSync(SKILLS_DIR).filter((f) => f.endsWith(".py") && !NOT_SKILLS.has(f))
     : [];
   const parsed = new Map(files.map((f) => [f, parseSkillFile(fs.readFileSync(path.join(SKILLS_DIR, f), "utf8"))]));
 
-  it("chaque skill de l'agent a une entrée dans AGENT_SKILLS (et inversement)", () => {
-    const withTypes = files.filter((f) => parsed.get(f)!.types.length > 0);
-    expect(AGENT_SKILLS.map((s) => s.file).sort()).toEqual(withTypes.sort());
+  it("chaque type d'étape d'un skill de l'agent est dans le catalogue (et inversement)", () => {
+    const skillTypes = [...parsed.values()].flatMap((p) => p.types);
+    expect([...AGENT_STEP_TYPES].sort()).toEqual(skillTypes.sort());
   });
 
-  it("aucun type d'étape ni paramètre lu par un skill n'est absent de la table", () => {
+  it("paramètres lus par chaque fichier de skill = paramètres déclarés pour ses types", () => {
     for (const [f, p] of parsed) {
       if (p.types.length === 0) continue;
-      const spec = AGENT_SKILLS.find((s) => s.file === f)!;
-      expect([...spec.types].sort(), `types de ${f}`).toEqual([...p.types].sort());
-      for (const t of p.types) {
-        for (const param of p.params) {
-          expect(STEP_PARAMS[t], `${f} : « ${t} » perdrait le paramètre « ${param} »`).toContain(param);
-        }
+      const declared = new Set(p.types.flatMap((t) => STEP_PARAMS[t] ?? []));
+      for (const param of p.params) {
+        expect(declared.has(param), `${f} lit « ${param} », absent du catalogue (compactStep le perdrait)`).toBe(true);
       }
+      expect([...declared].sort(), `${f} : paramètre déclaré jamais lu`).toEqual([...p.params].sort());
     }
   });
 

@@ -56,6 +56,23 @@ jobs:
       # `build` = tsc --noEmit && vite build
       - run: npm run build
 
+  # --- Catalogue d'outils unique (LOT 2) ----------------------------------------------
+  # Source : agent/skills/manifests.py. shared/tools/catalog.json et ses copies node-api
+  # (src/generated/) et python-ia (app/generated/) doivent être régénérés
+  # (`python scripts/gen_catalog.py`) et versionnés : --check vaut 0 si tout est à jour,
+  # 1 en cas de dérive (diff affiché), 2 si les manifestes ou le schéma sont invalides.
+  # Bibliothèque standard uniquement (aucune dépendance de l'agent requise).
+  catalog:
+    name: Catalogue d'outils (gen_catalog --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Manifestes → catalogue généré à jour (shared/tools + copies des services)
+        run: python scripts/gen_catalog.py --check
+
   # --- API Node (Fastify / TypeScript) ---------------------------------------------
   node-api:
     name: Backend node-api

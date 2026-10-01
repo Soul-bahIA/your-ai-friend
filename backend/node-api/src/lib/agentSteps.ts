@@ -1,114 +1,62 @@
 // Validation stricte des étapes de tâches agent (côté serveur).
 //
-// TABLE UNIQUE des skills de l'agent local (agent/skills/*.py) : types d'étapes et
-// paramètres lus par chaque skill. Elle alimente :
-//  - AGENT_STEP_TYPES (actions autorisées),
-//  - compactStep (nettoyage des plans générés : ne garde QUE les paramètres connus),
-//  - REQUIRED_FIELDS / findInvalidStep (plan incomplet refusé avant la mise en file).
-// test/agentSteps.test.ts relit agent/skills/*.py et ÉCHOUE si un skill lit un paramètre
-// absent de cette table (dérive planner → agent, cf. audit T3) ou si un type manque.
+// LOT 2 — contrat d'outils unique : types d'étapes et paramètres viennent du CATALOGUE
+// généré (src/generated/tool_catalog.json ← shared/tools/catalog.json ←
+// agent/skills/manifests.py, `python scripts/gen_catalog.py --check` en CI). Plus aucune
+// liste tenue à la main ici. Le catalogue alimente :
+//  - AGENT_STEP_TYPES (actions autorisées : noms canoniques + alias),
+//  - compactStep (nettoyage des plans générés : ne garde QUE les paramètres déclarés),
+//  - REQUIRED_FIELDS / findInvalidStep (plan incomplet refusé avant la mise en file),
+//  - PATH_KEYS / PATH_LIST_KEYS (chemins confinés aux dossiers autorisés de l'agent),
+//  - SENSITIVE_STEP_TYPES (actions à effet réel : confirmation sur le PC).
 import { isPlainObject, unknownKeys, isUuid } from "./sanitize.js";
 import { isAbsoluteAnyOs, isPathAllowed } from "./paths.js";
+import { TOOL_CATALOG, type ToolManifest } from "./toolCatalog.js";
 
-export interface SkillSpec {
-  /** Fichier du skill dans agent/skills/. */
-  file: string;
-  /** Types d'étapes (step_types) du skill. */
-  types: readonly string[];
-  /** Paramètres lus par le skill (step.get(...)), hors `type`. */
-  params: readonly string[];
-}
-
-export const AGENT_SKILLS: readonly SkillSpec[] = [
-  { file: "open_app.py", types: ["open_app", "open_software", "launch"], params: ["app", "software", "name"] },
-  { file: "screenshot.py", types: ["screenshot", "capture"], params: ["path"] },
-  { file: "type_text.py", types: ["type_text", "type", "keyboard"], params: ["text", "method", "interval", "window_title"] },
-  { file: "wait.py", types: ["wait", "sleep"], params: ["seconds"] },
-  { file: "move_file.py", types: ["move_file", "move"], params: ["src", "dest"] },
-  {
-    file: "mouse.py",
-    types: ["mouse", "click", "move_mouse", "drag", "scroll", "double_click", "right_click"],
-    params: ["x", "y", "dy", "button", "clicks"],
-  },
-  { file: "hotkey.py", types: ["hotkey", "press", "key"], params: ["keys"] },
-  {
-    file: "window.py",
-    types: ["window", "focus_window", "minimize_window", "maximize_window", "close_window"],
-    params: ["action", "window_title", "title", "match"],
-  },
-  { file: "run_command.py", types: ["run_command", "run_script", "shell"], params: ["program", "args", "cwd", "timeout", "allow_scripts"] },
-  { file: "filesystem.py", types: ["write_file", "read_file", "list_dir", "make_dir"], params: ["path", "content"] },
-  { file: "record_screen.py", types: ["record_screen", "start_recording"], params: ["path", "duration", "fps", "monitor"] },
-  { file: "record_bg.py", types: ["start_recording_bg", "stop_recording_bg"], params: ["path", "fps", "monitor"] },
-  { file: "edit_video.py", types: ["edit_video", "montage"], params: ["clips", "output", "title"] },
-  { file: "resolve_montage.py", types: ["resolve_montage"], params: ["clips", "audio", "output", "project"] },
-  {
-    file: "phone.py",
-    types: [
-      "phone_list_devices", "phone_tap", "phone_swipe", "phone_type", "phone_key",
-      "phone_open_app", "phone_screenshot",
-    ],
-    params: ["device_id", "x", "y", "x1", "y1", "x2", "y2", "duration_ms", "text", "keycode", "package", "path"],
-  },
-];
+/** Outil du catalogue par type d'étape (nom canonique ou alias). */
+export const TOOL_BY_TYPE: ReadonlyMap<string, ToolManifest> = new Map(
+  TOOL_CATALOG.tools.flatMap((t) => [t.name, ...t.aliases].map((type) => [type, t] as const)),
+);
 
 /** Champs descriptifs conservés sur toute étape (ignorés par l'agent, affichés à l'utilisateur). */
-export const COMMON_STEP_FIELDS: readonly string[] = ["type", "note", "description"];
+export const COMMON_STEP_FIELDS: readonly string[] = TOOL_CATALOG.common_fields;
 
-export const AGENT_STEP_TYPES: readonly string[] = AGENT_SKILLS.flatMap((s) => s.types);
+export const AGENT_STEP_TYPES: readonly string[] = [...TOOL_BY_TYPE.keys()];
 
-/** Paramètres autorisés par type d'étape (dérivés de AGENT_SKILLS). */
+/** Paramètres déclarés par type d'étape (hors champs communs). */
 export const STEP_PARAMS: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
-  AGENT_SKILLS.flatMap((s) => s.types.map((t) => [t, s.params] as const)),
+  [...TOOL_BY_TYPE].map(([type, t]) => [type, t.params.map((p) => p.name)] as const),
 );
 
 /**
- * Champs obligatoires par type (« a|b » = au moins l'un des deux). Un plan qui en omet
- * un échouerait forcément côté agent : on le rejette AVANT de le mettre en file.
- * run_command exige `cwd` (l'agent refuse une commande sans répertoire de travail).
+ * Champs obligatoires par type (« a|b » = au moins l'un des deux, groupes `required_any`).
+ * Un plan qui en omet un échouerait forcément côté agent : on le rejette AVANT de le
+ * mettre en file. run_command exige `cwd` (l'agent refuse une commande sans répertoire).
  */
-const REQUIRED_BY_SKILL: Record<string, Record<string, readonly string[]>> = {
-  "open_app.py": { "*": ["app|software|name"] },
-  "type_text.py": { "*": ["text"] },
-  "move_file.py": { "*": ["src", "dest"] },
-  "hotkey.py": { "*": ["keys"] },
-  "window.py": { "*": ["window_title|title"] },
-  "run_command.py": { "*": ["program", "cwd"] },
-  "filesystem.py": { "*": ["path"] },
-  "record_screen.py": { "*": ["path"] },
-  "record_bg.py": { "*": ["path"] },
-  "edit_video.py": { "*": ["clips", "output"] },
-  "resolve_montage.py": { "*": ["clips", "output"] },
-  "phone.py": {
-    phone_tap: ["x", "y"],
-    phone_swipe: ["x1", "y1", "x2", "y2"],
-    phone_type: ["text"],
-    phone_key: ["keycode"],
-    phone_open_app: ["package"],
-    phone_screenshot: ["path"],
-  },
-};
-
 export const REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
-  AGENT_SKILLS.flatMap((s) =>
-    s.types.map((t) => {
-      const spec = REQUIRED_BY_SKILL[s.file] ?? {};
-      return [t, spec[t] ?? spec["*"] ?? []] as const;
-    }),
-  ),
+  [...TOOL_BY_TYPE].map(([type, t]) => [
+    type,
+    [...t.params.filter((p) => p.required).map((p) => p.name), ...t.required_any.map((g) => g.join("|"))],
+  ] as const),
 );
 
-/** Clés de chemin contrôlées (miroir de agent/permissions.py _PATH_KEYS) + `clips`. */
-export const PATH_KEYS: readonly string[] = ["src", "dest", "path", "cwd", "output", "audio"];
+const pathParams = (kind: "string" | "array"): string[] =>
+  [
+    ...new Set(TOOL_CATALOG.tools.flatMap((t) => t.params.filter((p) => p.is_path && p.type === kind).map((p) => p.name))),
+  ].sort();
+
+/**
+ * Clés de chemin contrôlées, tous outils confondus (paramètres `is_path` du catalogue,
+ * mêmes clés que le gate de l'agent) : texte simple…
+ */
+export const PATH_KEYS: readonly string[] = pathParams("string");
+/** … et listes de chemins (`clips`). */
+export const PATH_LIST_KEYS: readonly string[] = pathParams("array");
 
 /** Actions à effet réel (commande, écriture, saisie, touches, téléphone) : confirmation requise. */
-export const SENSITIVE_STEP_TYPES: readonly string[] = [
-  "run_command", "run_script", "shell",
-  "write_file", "move_file", "move",
-  "type_text", "type", "keyboard",
-  "hotkey", "press", "key",
-  "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
-];
+export const SENSITIVE_STEP_TYPES: readonly string[] = [...TOOL_BY_TYPE]
+  .filter(([, t]) => t.requires_confirmation)
+  .map(([type]) => type);
 
 export const MAX_STEPS = 50;
 export const MAX_STEP_KEYS = 30;
@@ -164,7 +112,8 @@ export function clampAndValidatePlanSteps(steps: Record<string, unknown>[]): Res
 
 /**
  * Nettoie une étape générée par le planificateur : ne garde que `type`, les champs
- * descriptifs et les paramètres RÉELLEMENT lus par le skill (table AGENT_SKILLS).
+ * descriptifs et les paramètres DÉCLARÉS par l'outil dans le catalogue (tous, y compris
+ * facultatifs : path/fps de start_recording_bg, timeout de run_command…).
  * Les valeurs absentes (undefined/null) sont omises. Type inconnu → seulement {type}
  * (validateSteps le refusera ensuite).
  */
@@ -201,14 +150,17 @@ export function findInvalidStep(steps: Record<string, unknown>[]): string | null
   return null;
 }
 
-/** Chemins portés par une étape (clés de chemin + clips). */
+/** Chemins portés par une étape (clés de chemin + listes de chemins du catalogue). */
 export function stepPaths(step: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const k of PATH_KEYS) {
     const v = step[k];
     if (typeof v === "string" && v !== "") out.push(v);
   }
-  if (Array.isArray(step.clips)) for (const c of step.clips) if (typeof c === "string" && c) out.push(c);
+  for (const k of PATH_LIST_KEYS) {
+    const list = step[k];
+    if (Array.isArray(list)) for (const c of list) if (typeof c === "string" && c) out.push(c);
+  }
   return out;
 }
 

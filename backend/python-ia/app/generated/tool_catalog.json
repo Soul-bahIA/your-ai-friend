@@ -1,0 +1,2020 @@
+{
+  "catalog_version": "1.0.0",
+  "categories": [
+    {
+      "id": "app_launch",
+      "label": "Applications",
+      "planner_note": "uniquement les applications de l'allowlist du PC (jamais de shell ni d'hôte de script)"
+    },
+    {
+      "id": "keyboard",
+      "label": "Clavier",
+      "planner_note": "agit sur la fenêtre au premier plan : précise window_title quand c'est possible"
+    },
+    {
+      "id": "generic",
+      "label": "Attente",
+      "planner_note": "interruptible par un arrêt"
+    },
+    {
+      "id": "screen",
+      "label": "Écran",
+      "planner_note": "la capture est jointe au rapport : l'évaluateur VOIT le résultat"
+    },
+    {
+      "id": "mouse",
+      "label": "Souris",
+      "planner_note": "coordonnées en pixels de l'écran"
+    },
+    {
+      "id": "window",
+      "label": "Fenêtres",
+      "planner_note": "plusieurs fenêtres correspondantes = refus : donne un titre précis"
+    },
+    {
+      "id": "filesystem",
+      "label": "Fichiers",
+      "planner_note": "chemins absolus, restreints aux dossiers autorisés du PC"
+    },
+    {
+      "id": "shell",
+      "label": "Commandes de développement",
+      "planner_note": "programmes en allowlist, exécutés SANS shell, toujours confirmés sur le PC"
+    },
+    {
+      "id": "phone",
+      "label": "Téléphone Android",
+      "planner_note": "adb + appareil connecté ; commence TOUJOURS par phone_list_devices ; iOS non supporté"
+    },
+    {
+      "id": "video",
+      "label": "Démonstrations vidéo",
+      "planner_note": "chemins dans les dossiers autorisés"
+    }
+  ],
+  "common_fields": [
+    "description",
+    "note",
+    "type"
+  ],
+  "generated_from": "agent/skills/manifests.py",
+  "security_levels": {
+    "L0": "lecture sans effet (fichiers du workspace, appareils connectés, attente) — automatique",
+    "L1": "réversible et confiné au workspace (écriture, captures, enregistrements, montage simple) — automatique après approbation de la session",
+    "L2": "effet réel (souris, clavier, fenêtres, applications, téléphone, commandes, logiciels tiers) — grant de session ou approbation par action avec le contenu complet",
+    "L3": "irréversible (suppression, scripts d'installation, secrets, promotion) — approbation par action, payload complet, jamais en lot"
+  },
+  "tools": [
+    {
+      "aliases": [
+        "mouse"
+      ],
+      "category": "mouse",
+      "description": "Clic de souris en (x, y), ou à la position actuelle sans x/y.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "type": "click",
+          "x": 640,
+          "y": 360
+        },
+        {
+          "button": "left",
+          "clicks": 1,
+          "type": "click",
+          "x": 100,
+          "y": 200
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champs 'x' et 'y' : les deux ou aucun",
+        "coordonnées hors bornes",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "click",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse en pixels (avec y ; sans x/y : position actuelle du curseur).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "x",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée en pixels (avec x).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "y",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "default": "left",
+          "deprecated": false,
+          "description": "Bouton de la souris.",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "button",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 1,
+          "deprecated": false,
+          "description": "Nombre de clics.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 3,
+          "min": 1,
+          "name": "clicks",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "mouse",
+      "description": "Double-clic en (x, y), ou à la position actuelle sans x/y.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "type": "double_click",
+          "x": 200,
+          "y": 150
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champs 'x' et 'y' : les deux ou aucun",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "double_click",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse en pixels (avec y ; sans x/y : position actuelle du curseur).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "x",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée en pixels (avec x).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "y",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "default": "left",
+          "deprecated": false,
+          "description": "Bouton de la souris.",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "button",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "mouse",
+      "description": "Glisse (bouton gauche maintenu) de la position actuelle jusqu'à (x, y).",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "type": "drag",
+          "x": 800,
+          "y": 400
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "drag nécessite x et y",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "drag",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse cible en pixels.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "x",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée cible en pixels.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "y",
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "montage"
+      ],
+      "category": "video",
+      "description": "Montage simple et rapide sans logiciel externe : titre facultatif puis concaténation des clips (audio conservé), export .mp4 vérifié par une sonde.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Sonde de l'export (taille, fps, images, dimensions, durée).",
+          "field": "probe",
+          "kind": "video_probe"
+        }
+      ],
+      "examples": [
+        {
+          "clips": [
+            "<dossier autorisé>/a.mp4",
+            "<dossier autorisé>/b.mp4"
+          ],
+          "output": "<dossier autorisé>/final.mp4",
+          "title": "Ma démo",
+          "type": "edit_video"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "clip introuvable",
+        "dépendance 'moviepy' non installée",
+        "export invalide (sonde)"
+      ],
+      "name": "edit_video",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Clips vidéo, dans l'ordre.",
+          "is_path": true,
+          "is_secret_text": false,
+          "items": {
+            "type": "string"
+          },
+          "max_items": 200,
+          "name": "clips",
+          "required": true,
+          "type": "array"
+        },
+        {
+          "deprecated": false,
+          "description": "Fichier .mp4 de sortie.",
+          "extensions": [
+            ".mp4"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "output",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Titre affiché 2 s en ouverture.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 200,
+          "name": "title",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": 1800,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "key",
+        "press"
+      ],
+      "category": "keyboard",
+      "description": "Envoie une touche ou un raccourci clavier (touches d'une liste fermée). Un raccourci qui ouvre un terminal, la palette de commandes ou utilise la touche Windows reste confirmé sur le PC.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "keys": [
+            "ctrl",
+            "s"
+          ],
+          "type": "hotkey"
+        },
+        {
+          "keys": [
+            "enter"
+          ],
+          "type": "hotkey"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "touche inconnue",
+        "trop de touches (5 au plus)",
+        "touche répétée"
+      ],
+      "name": "hotkey",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Touches : liste (ex. [\"ctrl\", \"s\"], [\"enter\"], [\"alt\", \"tab\"]) ou chaîne « ctrl+s ».",
+          "is_path": false,
+          "is_secret_text": false,
+          "items": {
+            "type": "string"
+          },
+          "max_items": 5,
+          "name": "keys",
+          "required": true,
+          "type": [
+            "array",
+            "string"
+          ]
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "filesystem",
+      "description": "Liste le contenu d'un dossier.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Entrées du dossier, triées.",
+          "field": "entries",
+          "kind": "dir_listing"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>",
+          "type": "list_dir"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "dossier introuvable",
+        "chemin hors liste blanche ou interdit"
+      ],
+      "name": "list_dir",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Chemin absolu dans un dossier autorisé.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L0",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "filesystem",
+      "description": "Crée un dossier (et ses parents) ; sans effet s'il existe déjà.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Dossier prêt (détail seulement).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/projet",
+          "type": "make_dir"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "écriture refusée dans un dossier .git",
+        "chemin hors liste blanche ou interdit"
+      ],
+      "name": "make_dir",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Chemin absolu dans un dossier autorisé.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "move"
+      ],
+      "category": "filesystem",
+      "description": "Déplace ou renomme un fichier (dossiers de destination créés au besoin). Jamais rejoué à l'aveugle après un crash.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Chemin final après le déplacement.",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "dest": "<dossier autorisé>/archives/brouillon.txt",
+          "src": "<dossier autorisé>/brouillon.txt",
+          "type": "move_file"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "source introuvable",
+        "déplacement refusé depuis/vers un dossier .git",
+        "chemin hors liste blanche ou interdit"
+      ],
+      "name": "move_file",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Fichier source.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "src",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Destination.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "dest",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "mouse",
+      "description": "Déplace le curseur en (x, y).",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "type": "move_mouse",
+          "x": 500,
+          "y": 300
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "move_mouse nécessite x et y",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "move_mouse",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse cible en pixels.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "x",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée cible en pixels.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "y",
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "launch",
+        "open_software"
+      ],
+      "category": "app_launch",
+      "description": "Ouvre une application installée et autorisée sur le PC. Ajoute ensuite un wait de 2-3 s (4-5 s pour un gros logiciel) avant d'agir dans sa fenêtre.",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Exécutable lancé (ne prouve pas que la fenêtre est prête).",
+          "field": "exe",
+          "kind": "process"
+        }
+      ],
+      "examples": [
+        {
+          "app": "notepad",
+          "type": "open_app"
+        },
+        {
+          "app": "chrome",
+          "type": "open_app"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "application non autorisée : l'ajouter à SOULBAH_ALLOWED_APPS sur le PC",
+        "application interdite (shell ou hôte de script)",
+        "application introuvable sur ce poste",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "open_app",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Nom simple de l'application, jamais un chemin (ex. « notepad », « chrome », « code », « explorer », « calc »).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "app",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": true,
+          "description": "Ancien synonyme de app.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "software",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": true,
+          "description": "Ancien synonyme de app.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "name",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [
+        [
+          "app",
+          "software",
+          "name"
+        ]
+      ],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Appuie sur une touche système du téléphone.",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Code de retour d'adb : la commande est partie, son effet n'est pas vérifié.",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "keycode": "KEYCODE_HOME",
+          "type": "phone_key"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champ 'keycode' invalide",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_key",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Code Android : KEYCODE_BACK, KEYCODE_HOME, KEYCODE_ENTER… ou un nombre.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "keycode",
+          "pattern": "^(KEYCODE_[A-Z0-9_]{1,40}|[0-9]{1,3})$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Liste les téléphones Android connectés (adb devices). À appeler AVANT toute autre action téléphone.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Identifiants des appareils connectés.",
+          "field": "devices",
+          "kind": "device_list"
+        }
+      ],
+      "examples": [
+        {
+          "type": "phone_list_devices"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "délai dépassé"
+      ],
+      "name": "phone_list_devices",
+      "params": [],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L0",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Lance une application du téléphone par son package.",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Code de retour d'adb : la commande est partie, son effet n'est pas vérifié.",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "package": "com.android.chrome",
+          "type": "phone_open_app"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "champ 'package' invalide",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_open_app",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Package Android, ex. « com.android.chrome ».",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "package",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Capture l'écran du téléphone dans un fichier .png.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Fichier .png enregistré.",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/telephone.png",
+          "type": "phone_screenshot"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "champ 'path' invalide (fichier .png attendu)",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_screenshot",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Fichier .png de destination.",
+          "extensions": [
+            ".png"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Glisse sur l'écran du téléphone de (x1, y1) à (x2, y2).",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Code de retour d'adb : la commande est partie, son effet n'est pas vérifié.",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "duration_ms": 300,
+          "type": "phone_swipe",
+          "x1": 540,
+          "x2": 540,
+          "y1": 1600,
+          "y2": 400
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champs 'x1','y1','x2','y2' requis (nombres)",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_swipe",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse de départ.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "x1",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée de départ.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "y1",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Abscisse d'arrivée.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "x2",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée d'arrivée.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "y2",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "default": 300,
+          "deprecated": false,
+          "description": "Durée du geste en millisecondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 10000,
+          "min": 1,
+          "name": "duration_ms",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Touche l'écran du téléphone en (x, y).",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Code de retour d'adb : la commande est partie, son effet n'est pas vérifié.",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "type": "phone_tap",
+          "x": 540,
+          "y": 1200
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champs 'x' et 'y' requis (nombres)",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_tap",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse en pixels de l'écran du téléphone.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "x",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée en pixels de l'écran du téléphone.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "y",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "phone",
+      "description": "Tape du texte dans le champ actif du téléphone (masqué dans les journaux).",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Code de retour d'adb : la commande est partie, son effet n'est pas vérifié.",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "text": "bonjour",
+          "type": "phone_type"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "texte trop long (1000 caractères au plus)",
+        "adb introuvable : installer Android Platform Tools et l'ajouter au PATH",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "phone_type",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Texte à saisir.",
+          "is_path": false,
+          "is_secret_text": true,
+          "max_length": 1000,
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Identifiant adb du téléphone (facultatif si un seul appareil est connecté).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "device_id",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "filesystem",
+      "description": "Lit un fichier texte (8000 premiers caractères).",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Contenu lu (masqué avant tout envoi au LLM).",
+          "field": "content",
+          "kind": "file_content"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/notes.txt",
+          "type": "read_file"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "fichier introuvable",
+        "chemin hors liste blanche ou interdit"
+      ],
+      "name": "read_file",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Chemin absolu dans un dossier autorisé.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L0",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "start_recording"
+      ],
+      "category": "video",
+      "description": "Enregistre l'écran pendant une durée fixe (bloquant, 120 s au plus). Pour filmer des actions, préfère start_recording_bg / stop_recording_bg.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Images écrites, durée réelle, fps capturé et codec.",
+          "field": "frames",
+          "kind": "video_stats"
+        }
+      ],
+      "examples": [
+        {
+          "duration": 8,
+          "fps": 10,
+          "path": "<dossier autorisé>/demo.mp4",
+          "type": "record_screen"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "dossier de sortie introuvable",
+        "dépendance manquante (cv2, mss, numpy)",
+        "codec H.264 indisponible : repli mp4v (avertissement)"
+      ],
+      "name": "record_screen",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Fichier vidéo de sortie (.mp4 ou .avi) dans un dossier autorisé existant.",
+          "extensions": [
+            ".mp4",
+            ".avi"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "clamped": true,
+          "default": 5,
+          "deprecated": false,
+          "description": "Durée en secondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 120,
+          "min": 1,
+          "name": "duration",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "clamped": true,
+          "default": 10,
+          "deprecated": false,
+          "description": "Images par seconde.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 30,
+          "min": 1,
+          "name": "fps",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": 1,
+          "deprecated": false,
+          "description": "Écran filmé : 1 = écran principal, 0 = tous les écrans.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 16,
+          "min": 0,
+          "name": "monitor",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "video",
+      "description": "Montage PROFESSIONNEL via DaVinci Resolve installé et OUVERT sur le PC (import des médias, timeline, narration, export .mp4 local vérifié). À privilégier pour un rendu professionnel.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Sonde du rendu (fichier récent, non vide, décodable).",
+          "field": "probe",
+          "kind": "video_probe"
+        }
+      ],
+      "examples": [
+        {
+          "audio": "<dossier autorisé>/narration.mp3",
+          "clips": [
+            "<dossier autorisé>/intro.png",
+            "<dossier autorisé>/demo.mp4"
+          ],
+          "output": "<dossier autorisé>/formation.mp4",
+          "project": "Formation",
+          "type": "resolve_montage"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "DaVinci Resolve fermé ou scripting externe désactivé (Préférences > Système > Général)",
+        "médias introuvables",
+        "export Resolve invalide"
+      ],
+      "name": "resolve_montage",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Images ou vidéos, dans l'ordre.",
+          "is_path": true,
+          "is_secret_text": false,
+          "items": {
+            "type": "string"
+          },
+          "max_items": 200,
+          "name": "clips",
+          "required": true,
+          "type": "array"
+        },
+        {
+          "deprecated": false,
+          "description": "Fichier .mp4 de sortie.",
+          "extensions": [
+            ".mp4"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "output",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Narration (.mp3, .wav) posée au début d'une piste dédiée.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "audio",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": "SoulBah Formation",
+          "deprecated": false,
+          "description": "Nom du projet Resolve.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 100,
+          "name": "project",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": 1920,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "mouse",
+      "description": "Clic droit en (x, y), ou à la position actuelle sans x/y.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "type": "right_click",
+          "x": 200,
+          "y": 150
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champs 'x' et 'y' : les deux ou aucun",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "right_click",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Abscisse en pixels (avec y ; sans x/y : position actuelle du curseur).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "x",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "deprecated": false,
+          "description": "Ordonnée en pixels (avec x).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 100000,
+          "min": -100000,
+          "name": "y",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "default": 1,
+          "deprecated": false,
+          "description": "Nombre de clics.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 3,
+          "min": 1,
+          "name": "clicks",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "run_script",
+        "shell"
+      ],
+      "category": "shell",
+      "description": "Exécute un programme de développement SANS shell. Allowlist stricte : git (status, diff, log, show, branch, add, commit, init), npm (test, ci, install, run <script>), python/node <script>, pytest. Jamais d'opérateur shell (&&, |, ;) dans args.",
+      "escalation": {
+        "level": "L3",
+        "when": "npm ci/install avec allow_scripts=true, ou git branch -d"
+      },
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Code de sortie du programme.",
+          "field": "returncode",
+          "kind": "exit_code"
+        },
+        {
+          "confidence": "medium",
+          "description": "Sortie standard (4000 caractères au plus).",
+          "field": "stdout",
+          "kind": "command_output"
+        },
+        {
+          "confidence": "medium",
+          "description": "Sortie d'erreur (4000 caractères au plus).",
+          "field": "stderr",
+          "kind": "command_output"
+        }
+      ],
+      "examples": [
+        {
+          "args": [
+            "status"
+          ],
+          "cwd": "<dossier autorisé>/app",
+          "program": "git",
+          "type": "run_command"
+        },
+        {
+          "args": [
+            "test"
+          ],
+          "cwd": "<dossier autorisé>/app",
+          "program": "npm",
+          "timeout": 300,
+          "type": "run_command"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "programme non autorisé",
+        "champ 'cwd' obligatoire",
+        "argument suspect refusé (opérateur shell)",
+        "interpréteur Python introuvable (raccourci Microsoft Store)",
+        "délai dépassé : arbre de processus arrêté"
+      ],
+      "name": "run_command",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Programme à lancer.",
+          "enum": [
+            "git",
+            "npm",
+            "python",
+            "python3",
+            "node",
+            "pytest"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "program",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Arguments, ex. [\"status\"], [\"run\", \"build\"], [\"script.py\"].",
+          "is_path": false,
+          "is_secret_text": false,
+          "items": {
+            "type": "string"
+          },
+          "max_items": 64,
+          "name": "args",
+          "required": false,
+          "type": "array"
+        },
+        {
+          "deprecated": false,
+          "description": "Dossier de travail (obligatoire).",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "cwd",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "clamped": true,
+          "default": 120,
+          "deprecated": false,
+          "description": "Délai maximal en secondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 600,
+          "min": 1,
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "default": false,
+          "deprecated": false,
+          "description": "npm ci/install : autorise les scripts d'installation (action L3).",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "allow_scripts",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": 630,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "capture"
+      ],
+      "category": "screen",
+      "description": "Capture l'écran entier. Termine un plan par une capture quand le résultat est visible à l'écran (texte tapé, fenêtre ouverte…) : l'évaluateur vérifie sur l'image.",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Image de l'écran jointe au rapport (jugement visuel).",
+          "field": "image_b64",
+          "kind": "screenshot"
+        },
+        {
+          "confidence": "medium",
+          "description": "Fichier .png enregistré.",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "type": "screenshot"
+        },
+        {
+          "path": "<dossier autorisé>/capture.png",
+          "type": "screenshot"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "la capture doit être un fichier .png",
+        "dépendance 'mss' non installée"
+      ],
+      "name": "screenshot",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Fichier .png de destination ; sans path : fichier temporaire.",
+          "extensions": [
+            ".png"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "mouse",
+      "description": "Molette de la souris à la position actuelle.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Aucune preuve : seul le compte rendu de l'agent (vérifier par une capture).",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "dy": -5,
+          "type": "scroll"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "champ 'dy' invalide (entier)",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "scroll",
+      "params": [
+        {
+          "default": 0,
+          "deprecated": false,
+          "description": "Crans de molette : positif = vers le haut, négatif = vers le bas.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 10000,
+          "min": -10000,
+          "name": "dy",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "video",
+      "description": "Démarre l'enregistrement de l'écran EN ARRIÈRE-PLAN puis rend la main : enchaîne les actions à filmer (open_app, click, type_text…) puis stop_recording_bg avec le MÊME path. À privilégier pour les démonstrations (arrêt automatique après 600 s).",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Fichier vidéo ouvert (démarrage annoncé seulement une fois ouvert).",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "fps": 10,
+          "path": "<dossier autorisé>/demo.mp4",
+          "type": "start_recording_bg"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "un enregistrement est déjà en cours pour ce chemin",
+        "dossier de sortie introuvable",
+        "dépendance manquante (cv2, mss)"
+      ],
+      "name": "start_recording_bg",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Fichier vidéo de sortie (.mp4 ou .avi) dans un dossier autorisé existant.",
+          "extensions": [
+            ".mp4",
+            ".avi"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "clamped": true,
+          "default": 10,
+          "deprecated": false,
+          "description": "Images par seconde.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 30,
+          "min": 1,
+          "name": "fps",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": 1,
+          "deprecated": false,
+          "description": "Écran filmé : 1 = écran principal, 0 = tous les écrans.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 16,
+          "min": 0,
+          "name": "monitor",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "video",
+      "description": "Arrête l'enregistrement démarré par start_recording_bg (même path) et finalise la vidéo.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Images, durée réelle, fps capturé et codec.",
+          "field": "frames",
+          "kind": "video_stats"
+        },
+        {
+          "confidence": "medium",
+          "description": "Fichier vidéo finalisé, non vide.",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/demo.mp4",
+          "type": "stop_recording_bg"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "aucun enregistrement en cours pour ce chemin",
+        "fichier vidéo absent ou vide"
+      ],
+      "name": "stop_recording_bg",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Même fichier que pour start_recording_bg.",
+          "extensions": [
+            ".mp4",
+            ".avi"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "keyboard",
+        "type"
+      ],
+      "category": "keyboard",
+      "description": "Tape du texte dans la fenêtre au premier plan (collage par le presse-papier, restauré ensuite ; fiable quel que soit le clavier). Le texte est masqué dans les journaux.",
+      "evidence": [
+        {
+          "confidence": "none",
+          "description": "Nombre de caractères saisis ; le texte n'est jamais renvoyé.",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "text": "Bonjour !",
+          "type": "type_text",
+          "window_title": "Bloc-notes"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "fenêtre cible inconnue ou différente de window_title : confirmation exigée sur le PC",
+        "presse-papier indisponible",
+        "fenêtre protégée (lancée en administrateur) : saisie refusée"
+      ],
+      "name": "type_text",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Texte à saisir.",
+          "is_path": false,
+          "is_secret_text": true,
+          "max_length": 20000,
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Titre (ou partie du titre) de la fenêtre attendue au premier plan.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 200,
+          "name": "window_title",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": "clipboard",
+          "deprecated": false,
+          "description": "clipboard (défaut), unicode (Windows, sans presse-papier) ou typewrite (ASCII, touche par touche).",
+          "enum": [
+            "clipboard",
+            "unicode",
+            "typewrite"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "method",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Délai entre deux caractères en secondes (unicode, typewrite).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 1,
+          "min": 0,
+          "name": "interval",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "sleep"
+      ],
+      "category": "generic",
+      "description": "Attend N secondes. À placer après open_app (2-3 s) ou avant une capture.",
+      "evidence": [],
+      "examples": [
+        {
+          "seconds": 3,
+          "type": "wait"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "champ 'seconds' invalide",
+        "attente interrompue (arrêt demandé)"
+      ],
+      "name": "wait",
+      "params": [
+        {
+          "clamped": true,
+          "default": 1,
+          "deprecated": false,
+          "description": "Durée en secondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 300,
+          "min": 0,
+          "name": "seconds",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L0",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [
+        "close_window",
+        "focus_window",
+        "maximize_window",
+        "minimize_window"
+      ],
+      "category": "window",
+      "description": "Agit sur une fenêtre par son titre : focus, minimize, maximize ou close (les alias focus_window, minimize_window, maximize_window et close_window fixent l'action).",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Titre de la fenêtre effectivement ciblée (dans le détail).",
+          "kind": "window_title"
+        }
+      ],
+      "examples": [
+        {
+          "action": "focus",
+          "type": "window",
+          "window_title": "Bloc-notes"
+        },
+        {
+          "action": "close",
+          "match": "exact",
+          "type": "window",
+          "window_title": "Sans titre - Bloc-notes"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "aucune fenêtre ne correspond",
+        "fenêtre ambiguë : plusieurs fenêtres correspondent",
+        "close : correspondance exact ou regex requise",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "window",
+      "params": [
+        {
+          "default": "focus",
+          "deprecated": false,
+          "description": "Action sur la fenêtre.",
+          "enum": [
+            "focus",
+            "minimize",
+            "maximize",
+            "close"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "action",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Titre de la fenêtre.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 256,
+          "name": "window_title",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Correspondance du titre : contains (défaut, sauf close), exact (défaut pour close) ou regex ; close exige exact ou regex.",
+          "enum": [
+            "contains",
+            "exact",
+            "regex"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": true,
+          "description": "Ancien synonyme de window_title.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 256,
+          "name": "title",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [
+        [
+          "window_title",
+          "title"
+        ]
+      ],
+      "requires_confirmation": false,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "filesystem",
+      "description": "Écrit (ou remplace) un fichier texte UTF-8 ; dossiers parents créés au besoin. Le contenu est masqué dans les journaux et affiché en entier à la confirmation.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Fichier écrit (nombre de caractères dans le détail).",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "content": "Bonjour",
+          "path": "<dossier autorisé>/notes.txt",
+          "type": "write_file"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "écriture refusée dans un dossier .git",
+        "chemin hors liste blanche ou interdit (.env, clés, code de l'agent…)"
+      ],
+      "name": "write_file",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Chemin absolu dans un dossier autorisé.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": "",
+          "deprecated": false,
+          "description": "Contenu texte du fichier.",
+          "is_path": false,
+          "is_secret_text": true,
+          "name": "content",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": null,
+      "version": "1.0.0"
+    }
+  ],
+  "workspace_placeholder": "<dossier autorisé>"
+}

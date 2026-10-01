@@ -27,6 +27,7 @@ from config import Config, default_workspace, load_config
 from executor import Executor
 from pending import PendingUpdates
 from permissions import PermissionGate, workspace_errors
+import skills
 from skills.base import CancelToken
 
 # Console Windows : force l'UTF-8 pour que les symboles des logs (▶ ✔ →)
@@ -453,6 +454,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _setup_logging()
+    # LOT 2 : contrat d'outils unique — registre des skills et manifestes cohérents.
+    problems = skills.manifest_errors()
+    if problems:
+        for problem in problems:
+            log.error("✖ Catalogue d'outils : %s", problem)
+        log.error("Démarrage refusé : le registre des skills et agent/skills/manifests.py divergent "
+                  "(voir docs/CATALOGUE_OUTILS.md).")
+        return 2
     env_dry = os.environ.get("SOULBAH_DRY_RUN", "").strip().lower() in _TRUE
     dry = bool(args.dry_run or args.plan or env_dry)
     cfg = load_config(require_key=not dry)

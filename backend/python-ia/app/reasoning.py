@@ -16,71 +16,127 @@ import re
 
 from .llm import text_generate_json, vision_generate_json
 from .parsing import parse_bool
+from .tool_catalog import load_catalog, path_params, tool_names
 
-# Types d'étapes reconnus par l'agent (doit refléter agent/skills/).
-VALID_STEP_TYPES = {
-    "open_app", "type_text", "hotkey", "wait", "screenshot",
-    "click", "double_click", "right_click", "move_mouse", "drag", "scroll",
-    "window",
-    "move_file", "write_file", "read_file", "list_dir", "make_dir",
-    "run_command",
-    "record_screen", "start_recording_bg", "stop_recording_bg", "edit_video", "resolve_montage",
-    "phone_list_devices", "phone_tap", "phone_swipe", "phone_type", "phone_key",
-    "phone_open_app", "phone_screenshot",
-}
+# --- Catalogue d'outils (LOT 2) ----------------------------------------------------
+# Les types d'étapes et leurs champs viennent du catalogue GÉNÉRÉ depuis les manifestes
+# de l'agent (app/generated/tool_catalog.json ← shared/tools/catalog.json ←
+# agent/skills/manifests.py) : plus aucune liste tenue à la main ici.
+_TYPE_LABELS = {"string": "texte", "integer": "entier", "number": "nombre", "boolean": "booléen", "array": "liste"}
+_ITEM_LABELS = {"string": "textes", "integer": "entiers", "number": "nombres", "boolean": "booléens"}
 
-SKILLS_CATALOG = """SKILLS DISPONIBLES (les seuls types d'étapes autorisés) :
-Applications & saisie :
-- open_app    : ouvre une application installée. Champ : app (ex. "notepad", "chrome", "code").
-- type_text   : tape du texte au clavier dans la fenêtre active. Champ : text.
-- hotkey      : raccourci clavier. Champ : keys (liste, ex. ["ctrl","s"], ["enter"], ["alt","tab"]).
-- wait        : attend N secondes (max 300). Champ : seconds. À placer après open_app (2-3 s).
-- screenshot  : capture l'écran. Champ optionnel : path (.png).
 
-Souris (coordonnées en pixels) :
-- click / double_click / right_click : clic. Champs optionnels : x, y (sinon position actuelle).
-- move_mouse  : déplace le curseur. Champs : x, y.
-- drag        : glisse jusqu'à x, y.
-- scroll      : molette. Champ : dy (positif=haut, négatif=bas).
+def _num(value) -> str:
+    return str(int(value)) if isinstance(value, (int, float)) and float(value).is_integer() else str(value)
 
-Fenêtres :
-- window      : gère une fenêtre. Champs : action ("focus"|"minimize"|"maximize"|"close"), window_title.
 
-Fichiers (chemins absolus, restreints à la whitelist utilisateur) :
-- move_file   : déplace un fichier. Champs : src, dest.
-- write_file  : écrit un fichier. Champs : path, content.
-- read_file   : lit un fichier. Champ : path.
-- list_dir    : liste un dossier. Champ : path.
-- make_dir    : crée un dossier. Champ : path.
+def _param_kind(p: dict) -> str:
+    types = p["type"] if isinstance(p["type"], list) else [p["type"]]
+    if p.get("is_path"):
+        return "liste de chemins absolus" if types == ["array"] else "chemin absolu"
+    labels = []
+    for t in types:
+        item = (p.get("items") or {}).get("type")
+        labels.append(f"liste de {_ITEM_LABELS.get(item, item)}" if t == "array" and item else _TYPE_LABELS.get(t, t))
+    return " ou ".join(labels)
 
-Commandes de développement (Git, compile, tests — programmes en allowlist) :
-- run_command : exécute un programme SANS shell. Champs : program (git|npm|node|python|pytest|cargo|dotnet|go|tsc|make…), args (liste), cwd (dossier whitelisté), timeout (optionnel).
-                Exemples : {"program":"git","args":["init"]} ; {"program":"npm","args":["test"]}.
 
-Téléphone Android (nécessite adb + un appareil connecté — commence TOUJOURS par phone_list_devices) :
-- phone_list_devices : liste les téléphones connectés. Aucun champ.
-- phone_tap          : tape à l'écran. Champs : x, y.
-- phone_swipe        : glisse. Champs : x1, y1, x2, y2, duration_ms (optionnel).
-- phone_type         : tape du texte. Champ : text.
-- phone_key          : touche système. Champ : keycode (ex. "KEYCODE_BACK", "KEYCODE_HOME", "KEYCODE_ENTER").
-- phone_open_app     : lance une app par son package. Champ : package (ex. "com.android.chrome").
-- phone_screenshot   : capture l'écran du téléphone. Champ : path (.png).
-                       iOS n'est PAS supporté par ces skills.
+def _param_line(p: dict, required: bool) -> str:
+    details = []
+    if p.get("enum"):
+        details.append("∈ " + "|".join(p["enum"]))
+    lo, hi = p.get("min"), p.get("max")
+    if lo is not None and hi is not None:
+        details.append(f"de {_num(lo)} à {_num(hi)}" + (", valeur hors bornes ramenée" if p.get("clamped") else ""))
+    elif lo is not None:
+        details.append(f"≥ {_num(lo)}")
+    elif hi is not None:
+        details.append(f"≤ {_num(hi)}")
+    if p.get("extensions"):
+        details.append("fichier " + " ou ".join(p["extensions"]))
+    if p.get("max_length"):
+        details.append(f"≤ {p['max_length']} car.")
+    if p.get("max_items"):
+        details.append(f"{p['max_items']} éléments max")
+    if "default" in p:
+        details.append("défaut " + json.dumps(p["default"], ensure_ascii=False))
+    kind = ", ".join([_param_kind(p), *details])
+    return f"    · {p['name']}{'*' if required else ''} ({kind}) : {p['description']}"
 
-Démonstrations vidéo (chemins whitelistés, durée bornée) :
-- record_screen  : enregistre l'écran pendant N secondes (max 120). Champs : path (.mp4, obligatoire), duration (secondes), fps (optionnel, def. 10).
-- start_recording_bg / stop_recording_bg : enregistrement en ARRIÈRE-PLAN pour filmer une démo PENDANT qu'on agit. Démarre (path .mp4), puis fais les actions (open_app, click, type_text…), puis arrête (même path). À privilégier pour les démonstrations réelles.
-- edit_video     : montage SIMPLE et rapide (concaténation + titre) sans logiciel externe. Champs : clips (liste .mp4), title (optionnel), output (.mp4).
-- resolve_montage: montage PROFESSIONNEL via DaVinci Resolve installe sur le poste (import medias, timeline, export MP4 local). Champs : clips (liste d'images/videos dans l'ordre), audio (narration .mp3, optionnel), output (.mp4), project (nom optionnel).
-                   A privilegier quand l'utilisateur veut un rendu professionnel. Necessite Resolve installe et OUVERT.
 
-CONTRAINTES :
-- Utilise UNIQUEMENT ces types. Pas d'opérateurs shell (&&, |, ;) dans args.
-- Chaque étape a un champ note : courte explication de son but.
-- Chemins : si le contexte fournit des DOSSIERS AUTORISÉS, chaque chemin (path, src,
-  dest, cwd, output, clips, audio) doit être un chemin ABSOLU strictement à l'intérieur
-  de l'un d'eux — recopie leur orthographe EXACTE, n'invente JAMAIS un autre dossier
-  (pas de C:\\Users\\Public, pas de %USERNAME%, pas de nom d'utilisateur deviné)."""
+def _tool_block(tool: dict, examples: bool) -> list[str]:
+    level = tool["security_level"]
+    esc = tool.get("escalation")
+    if esc:
+        level += f" ; {esc['level']} si {esc['when']}"
+    lines = [f"- {tool['name']} [{level}] : {tool['description']}"]
+    # Groupes « au moins l'un de » : le premier paramètre courant est présenté comme obligatoire.
+    starred = set()
+    for group in tool.get("required_any", []):
+        current = [g for g in group if not any(p["name"] == g and p["deprecated"] for p in tool["params"])]
+        if current:
+            starred.add(current[0])
+        if len(current) > 1:
+            lines.append(f"    · au moins l'un de : {', '.join(current)}")
+    shown = [p for p in tool["params"] if not p["deprecated"]]
+    if not shown:
+        lines.append("    · aucun champ")
+    for p in shown:
+        lines.append(_param_line(p, p["required"] or p["name"] in starred))
+    if examples and tool.get("examples"):
+        ex = tool["examples"][0]
+        ordered = {"type": ex.get("type"), **{k: v for k, v in ex.items() if k != "type"}}
+        lines.append("    Ex. : " + json.dumps(ordered, ensure_ascii=False))
+    return lines
+
+
+def build_skills_catalog(catalog: dict, examples: bool = True) -> str:
+    """Section « skills disponibles » des prompts, construite depuis le catalogue :
+    noms canoniques (jamais les alias), champs (* = obligatoire, types, bornes, enum),
+    niveaux de sécurité L0–L3, puis les contraintes communes."""
+    levels = catalog.get("security_levels", {})
+    out = [
+        f"SKILLS DISPONIBLES — les seuls types d'étapes autorisés (catalogue d'outils "
+        f"v{catalog.get('catalog_version', '?')}, généré depuis les manifestes de l'agent).",
+        "Chaque outil : son nom, [son niveau de sécurité], son rôle, puis un champ par ligne (* = obligatoire).",
+        "Niveaux : " + " ; ".join(f"{k} = {v}" for k, v in sorted(levels.items())) + ".",
+        f"Dans les exemples, « {catalog.get('workspace_placeholder', '')} » désigne l'un des DOSSIERS "
+        "AUTORISÉS du contexte.",
+    ]
+    tools = list(catalog["tools"])
+    categories = list(catalog.get("categories", []))
+    known = {c["id"] for c in categories}
+    orphans = [t for t in tools if t["category"] not in known]
+    if orphans:
+        categories.append({"id": None, "label": "Autres", "planner_note": ""})
+    for cat in categories:
+        members = [t for t in tools if t["category"] == cat["id"]] if cat["id"] is not None else orphans
+        if not members:
+            continue
+        note = f" — {cat['planner_note']}" if cat.get("planner_note") else ""
+        out.append("")
+        out.append(f"{cat['label']}{note} :")
+        for tool in members:
+            out.extend(_tool_block(tool, examples))
+    paths = ", ".join(path_params(catalog))
+    out += [
+        "",
+        "CONTRAINTES :",
+        "- Utilise UNIQUEMENT ces types, sous ces noms exacts. Pas d'opérateurs shell (&&, |, ;) dans args.",
+        "- Chaque étape a un champ note : courte explication de son but.",
+        f"- Chemins : si le contexte fournit des DOSSIERS AUTORISÉS, chaque chemin ({paths}) doit être un "
+        "chemin ABSOLU strictement à l'intérieur de l'un d'eux — recopie leur orthographe EXACTE, n'invente "
+        "JAMAIS un autre dossier (pas de C:\\Users\\Public, pas de %USERNAME%, pas de nom d'utilisateur deviné).",
+    ]
+    return "\n".join(out)
+
+
+_CATALOG = load_catalog()
+
+# Types d'étapes acceptés dans un plan : noms canoniques du catalogue (ceux du prompt).
+VALID_STEP_TYPES = tool_names(_CATALOG)
+
+SKILLS_CATALOG = build_skills_catalog(_CATALOG)
 
 _PLAN_SHAPE = (
     "Reponds UNIQUEMENT avec un objet JSON (sans texte autour, sans balises markdown) "

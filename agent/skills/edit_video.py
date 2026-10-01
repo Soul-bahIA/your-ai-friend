@@ -16,6 +16,8 @@ import os
 from skills.base import PathCheck, Skill, SkillResult
 from skills.media_probe import probe_video
 
+_MAX_CLIPS = 200  # manifeste edit_video : clips.max_items (= borne des tableaux côté serveur)
+
 
 def _pillow_compat() -> None:
     """moviepy 1.x référence encore `Image.ANTIALIAS`, retiré dans Pillow 10 :
@@ -60,6 +62,11 @@ class EditVideoSkill(Skill):
         return f"montage de {n} clip(s) → {step.get('output', '?')}"
 
     def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        clips = step.get("clips")
+        if not isinstance(clips, list) or not clips or not all(isinstance(c, str) and c for c in clips):
+            return "champ 'clips' (liste de chemins) requis"
+        if len(clips) > _MAX_CLIPS:
+            return f"trop de clips (max {_MAX_CLIPS})"
         output = step.get("output")
         if not isinstance(output, str) or not output.lower().endswith(".mp4"):
             return "champ 'output' invalide (fichier .mp4 attendu)"
