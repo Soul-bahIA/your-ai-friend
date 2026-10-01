@@ -10,7 +10,10 @@ import { isMessageType, postMessage } from "../bus/messages.js";
 import { keepalive, lease } from "../scheduler/scheduler.js";
 import { effectiveMaxParallel } from "../scheduler/parallelism.js";
 import { getTask } from "../tasks/repo.js";
-import { LEASED_STATUSES } from "../tasks/stateMachine.js";
+import { isTerminal, LEASED_STATUSES } from "../tasks/stateMachine.js";
+import { RUNTIME_PROTOCOL, checkRuntimeCompatibility } from "../runtime/version.js";
+import { isActionStatus, listActions, upsertAction } from "../runtime/actions.js";
+import { audit } from "../audit.js";
 
 function bad(reply: FastifyReply, error: string) {
   return reply.status(400).send({ error });
@@ -44,8 +47,14 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/v2/runtime/register", agentOpts, async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     if (!isPlainObject(body)) return bad(reply, "corps JSON objet attendu");
-    const extra = unknownKeys(body, ["hostname", "version", "max_slots", "capabilities"]);
+    const extra = unknownKeys(body, ["hostname", "version", "protocol", "max_slots", "capabilities"]);
     if (extra.length) return bad(reply, `champ(s) inconnu(s) : ${extra.join(", ")}`);
+    // Poignée de main (LOT 8) : protocole et version minimale, AVANT toute écriture.
+    const compat = checkRuntimeCompatibility({ version: body.version, protocol: body.protocol, minVersion: config.runtimeMinVersion });
+    if (!compat.ok) {
+      await audit({ userId: request.agentUserId, actor: `agent:${request.agentKeyId}`, action: "runtime.refused", entity: "runtime", data: { reason: compat.reason, version: typeof body.version === "string" ? body.version.slice(0, 50) : null } }).catch(() => {});
+      return reply.status(426).send({ error: `runtime refusé : ${compat.reason}`, min_version: config.runtimeMinVersion, protocol: RUNTIME_PROTOCOL });
+    }
     let maxSlots = 6;
     if (body.max_slots !== undefined) {
       if (typeof body.max_slots !== "number" || !Number.isInteger(body.max_slots) || body.max_slots < 1 || body.max_slots > 32) return bad(reply, "max_slots : entier 1–32 attendu");
@@ -69,6 +78,7 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
     return {
       runtime_id: rows[0].id,
       max_slots: rows[0].max_slots,
+      protocol: RUNTIME_PROTOCOL,
       lease_seconds: config.v2LeaseSeconds,
       max_parallel: effectiveMaxParallel({ global: config.maxParallelAgents, user: us.rows[0]?.max_parallel_agents ?? null, runtime: rows[0].max_slots as number }),
     };
@@ -179,6 +189,81 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
     const expires = new Date(Date.now() + config.v2LeaseSeconds * 1000);
     await pool.query("UPDATE soulbah.tasks SET lease_expires_at = $2, updated_at = now() WHERE id = $1 AND lease_owner = $3 AND attempt = $4", [id, expires, held.owner, held.attempt]);
     return { task_id: id, checkpoint_id: rows[0]?.id ?? null, duplicate: rows.length === 0, lease_expires_at: expires };
+  });
+
+  // --- Journal des actions (LOT 8) : états monotones, clé (task, attempt, step) -------------
+  app.post("/api/v2/runtime/tasks/:id/actions", { ...agentOpts, bodyLimit: 512 * 1024 }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const held = await heldTask(request, reply, id, body);
+    if (!held) return;
+    const stepIndex = parseAttempt(body.step_index);
+    if (stepIndex === null) return bad(reply, "step_index : entier ≥ 0 requis");
+    if (typeof body.tool !== "string" || !/^[a-z][a-z0-9_]{0,39}$/.test(body.tool)) return bad(reply, "tool : type d'étape attendu");
+    if (!isActionStatus(body.status)) return bad(reply, "status : planned | attempted | executed | verified | failed | skipped | simulated");
+    if (body.params !== undefined && !isPlainObject(body.params)) return bad(reply, "params : objet attendu");
+    if (body.evidence !== undefined && !Array.isArray(body.evidence)) return bad(reply, "evidence : liste attendue");
+    const out = await withTransaction((client) =>
+      upsertAction(client, {
+        taskId: id,
+        userId: request.agentUserId!,
+        attempt: held.attempt,
+        stepIndex,
+        tool: body.tool as string,
+        params: body.params as Record<string, unknown> | undefined,
+        status: body.status as never,
+        evidence: body.evidence as unknown[] | undefined,
+        error: typeof body.error === "string" ? body.error.slice(0, 2000) : null,
+        simulated: body.simulated === true || held.task.simulated,
+      }),
+    );
+    if (!out.ok) return reply.status(out.status).send({ error: out.error });
+    return { action_id: out.id, status: out.status, previous: out.previous };
+  });
+
+  app.get("/api/v2/runtime/tasks/:id/actions", agentOpts, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return bad(reply, "id invalide");
+    const q = request.query as { runtime_id?: string; attempt?: string };
+    const rt = await ownedRuntime(request, q.runtime_id);
+    if (!rt) return reply.status(404).send({ error: "runtime inconnu" });
+    const task = await getTask(pool, id, request.agentUserId);
+    if (!task) return reply.status(410).send({ error: "gone" });
+    const attempt = q.attempt === undefined ? undefined : Number(q.attempt);
+    if (attempt !== undefined && !(Number.isInteger(attempt) && attempt >= 0)) return bad(reply, "attempt : entier ≥ 0");
+    return { task_id: id, attempt: task.attempt, status: task.status, actions: await listActions(pool, id, attempt) };
+  });
+
+  // --- Réconciliation au redémarrage du superviseur (LOT 8, §9.9) ----------------------------
+  app.post("/api/v2/runtime/reconcile", agentOpts, async (request, reply) => {
+    const body = (request.body ?? {}) as { runtime_id?: unknown; tasks?: unknown };
+    const rt = await ownedRuntime(request, body.runtime_id);
+    if (!rt) return reply.status(404).send({ error: "runtime inconnu" });
+    if (!Array.isArray(body.tasks) || body.tasks.length > 128) return bad(reply, "tasks : liste (≤ 128) de { task_id, attempt } attendue");
+    const owner = `runtime:${rt.id}`;
+    const decisions: unknown[] = [];
+    for (const t of body.tasks) {
+      if (!isPlainObject(t) || !isUuid(t.task_id) || parseAttempt(t.attempt) === null) return bad(reply, "tasks[] : { task_id (uuid), attempt (entier) } attendu");
+      const task = await getTask(pool, t.task_id, request.agentUserId);
+      let decision: "resume" | "abandon" | "cancel";
+      if (!task || task.status === "CANCELLED") decision = "cancel";
+      else if (isTerminal(task.status) || task.attempt !== t.attempt || task.lease_owner !== owner || !LEASED_STATUSES.includes(task.status)) decision = "abandon";
+      else decision = "resume";
+      if (decision === "resume") {
+        await pool.query("UPDATE soulbah.tasks SET lease_expires_at = now() + make_interval(secs => $2), updated_at = now() WHERE id = $1", [t.task_id, config.v2LeaseSeconds]);
+      }
+      decisions.push({
+        task_id: t.task_id,
+        attempt: t.attempt,
+        decision,
+        status: task?.status ?? "gone",
+        current_attempt: task?.attempt ?? null,
+        actions: decision === "resume" ? await listActions(pool, t.task_id, t.attempt as number) : [],
+      });
+    }
+    await pool.query("UPDATE soulbah.runtimes SET last_seen_at = now(), status = 'online', updated_at = now() WHERE id = $1", [rt.id]);
+    await audit({ userId: request.agentUserId, actor: owner, action: "runtime.reconciled", entity: "runtime", entityId: rt.id, data: { tasks: decisions.length } }).catch(() => {});
+    return { decisions, lease_seconds: config.v2LeaseSeconds };
   });
 
   app.get("/api/v2/runtime/tasks/:id", agentOpts, async (request, reply) => {

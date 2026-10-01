@@ -92,6 +92,8 @@ export const config = {
   v2LeaseSeconds: Math.max(10, Math.min(3600, num(process.env.SOULBAH_LEASE_SECONDS, 90))),
   schedulerIntervalSeconds: Math.max(1, num(process.env.SOULBAH_SCHEDULER_INTERVAL_SECONDS, 5)),
   streamIntervalMs: Math.max(250, num(process.env.SOULBAH_STREAM_INTERVAL_MS, 2000)),
+  // LOT 8 : version minimale (semver) acceptée d'un runtime à l'enregistrement ; vide = toutes.
+  runtimeMinVersion: (process.env.SOULBAH_RUNTIME_MIN_VERSION ?? "").trim() || "0.0.0",
 
   // Générations (formations/applications) bloquées au-delà de ce délai → 'Erreur'.
   staleGenerationMinutes: num(process.env.STALE_GENERATION_MINUTES, 30),

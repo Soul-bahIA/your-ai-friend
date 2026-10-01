@@ -48,7 +48,7 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
     const k = await pool.query("INSERT INTO agent_keys (user_id, key_hash, label, allowed_dirs) VALUES ($1, $2, 'PC v2', '[]'::jsonb) RETURNING id", [U, hashKey(rawKey)]);
     // 6 runtimes factices (6 workers) : un seul est lié à la clé (register), les autres sont créés en base
     // avec des clés dédiées pour simuler plusieurs PC du même utilisateur.
-    const reg = await app.inject({ method: "POST", url: "/api/v2/runtime/register", headers: agent, payload: { hostname: "pc-1", version: "test", max_slots: 6 } });
+    const reg = await app.inject({ method: "POST", url: "/api/v2/runtime/register", headers: agent, payload: { hostname: "pc-1", version: "2.0.0", protocol: 1, max_slots: 6 } });
     expect(reg.statusCode).toBe(200);
     runtimeIds.push(reg.json().runtime_id);
     for (let i = 2; i <= 6; i++) {
