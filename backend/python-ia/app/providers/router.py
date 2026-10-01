@@ -240,6 +240,26 @@ class Orchestrator:
         return _env_float("LLM_BUDGET_S", 110.0)
 
     # ---------------------------------------------------------------- routing
+    @staticmethod
+    def local_role_for(task: str) -> str | None:
+        """Rôle local d'une tâche : profil (planner, evaluator, vision, cheap) ou code."""
+        if task in TASK_PROFILES:
+            return TASK_PROFILES[task]
+        return "code" if task == "code" else None
+
+    def local_chain(self, task: str) -> list[str]:
+        """Serveurs locaux pour une tâche, du plus adapté au plus petit (repli Grand → Petit) :
+        spécialisé du rôle, général (LOCAL_LLM_URL), petit modèle (LOCAL_LLM_URL_SMALL)."""
+        provs = self._providers_map()
+        role = self.local_role_for(task)
+        chain = [f"local_{role}"] if role else []
+        chain += ["local", "local_small"]
+        out: list[str] = []
+        for pid in chain:
+            if pid in provs and pid not in out:
+                out.append(pid)
+        return out
+
     def plan_hops(self, task: str, override: str | None, needs_vision: bool) -> list[Hop]:
         provs = self._providers_map()
         if not provs and BLOCKED_BY_MODE:
@@ -268,16 +288,35 @@ class Orchestrator:
             primary = self._routing.get(task)
             if not primary or primary not in provs:
                 primary = self._default_provider_id()
-            order = [primary] + [p for p in self._fallback_order() if p in provs and p != primary]
+            cloud_order = [p for p in [primary] + self._fallback_order()
+                           if p in provs and not p.startswith("local")]
+            cloud_order = list(dict.fromkeys(cloud_order))
+            local = self.local_chain(task)
+            policy = str(soulbah_settings_now().get("model_policy") or "auto").strip()
+            if policy == "cloud-first":
+                order = cloud_order + local  # comportement V2 : cloud d'abord, local en repli
+            elif policy == "local-only":
+                order = local  # jamais de cloud, même en HYBRID
+            elif policy != "auto" and policy.split(":", 1)[0] in provs:
+                pinned = policy.split(":", 1)[0]  # « fournisseur » ou « fournisseur:modèle »
+                order = [pinned] + [p for p in local + cloud_order if p != pinned]
+            else:
+                order = local + cloud_order  # V3 : local prioritaire (mission §8, mode HYBRID)
+            if not order:
+                order = [p for p in [primary] if p]
 
         profile = self.profile_for(task)
         default_effort = (os.getenv("LLM_EFFORT_DEFAULT", "") or "").strip().lower() or None
         hops: list[Hop] = []
+        policy_now = str(soulbah_settings_now().get("model_policy") or "auto").strip()
+        pinned_pid, _, pinned_model = policy_now.partition(":")
         for pid in order:
             prov = provs[pid]
             model, effort = prov.model, default_effort
             if profile and profile[0] == pid:
                 model, effort = profile[1], profile[2]
+            if not override and pid == pinned_pid and pinned_model:
+                model = pinned_model  # model_policy « fournisseur:modèle »
             if needs_vision and not prov.capabilities(model).vision:
                 if override:
                     raise LLMError(400, "Le fournisseur imposé ne prend pas en charge les images.", kind="no_vision")
@@ -459,7 +498,9 @@ class Orchestrator:
             "blocked_by_mode": dict(BLOCKED_BY_MODE),
             "reasoning_available": bool(provs),
             "vision_available": vision,
-            "local_configured": "local" in provs,
+            "local_configured": any(p.startswith("local") for p in provs),
+            "model_policy": settings.get("model_policy"),
+            "local_chains": {t: self.local_chain(t) for t in ("automation", "evaluation", "vision", "routing", "code", "general")},
             "network_guard": {k: v for k, v in network_guard.status().items() if k != "recent"},
             "providers": [p.describe() for p in provs.values()],
             "configured": list(provs.keys()),

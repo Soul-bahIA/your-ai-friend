@@ -76,6 +76,9 @@ SPECS: dict[str, dict[str, str]] = {
 LOCAL_URL_ENV = "LOCAL_LLM_URL"
 LOCAL_MODEL_ENV = "LOCAL_LLM_MODEL"
 LOCAL_KEY_ENV = "LOCAL_LLM_KEY"
+# V3 LOT 3 : serveurs locaux spécialisés par rôle (facultatifs) et repli vers un modèle plus
+# petit. Chacun : LOCAL_LLM_URL_<RÔLE> (+ LOCAL_LLM_MODEL_<RÔLE>) → fournisseur « local_<rôle> ».
+LOCAL_ROLES = ("planner", "evaluator", "vision", "cheap", "code", "small")
 
 
 # V3 LOT 1 : fournisseurs écartés par le mode (id → raison), renseigné par build_providers().
@@ -121,6 +124,19 @@ def build_providers() -> dict[str, LLMProvider]:
         # LOCAL_LLM_URL vers un hôte d'Internet : ce n'est pas un modèle local (refusé hors HYBRID).
         BLOCKED_BY_MODE["local"] = f"LOCAL_LLM_URL vers un hôte externe ({host}) refusé en mode {settings['mode']}"
         local_url = ""
+    for role in LOCAL_ROLES:
+        url = os.getenv(f"{LOCAL_URL_ENV}_{role.upper()}", "")
+        if not url:
+            continue
+        rhost = urlsplit(url).hostname or ""
+        if not cloud_ok and not soulbah_settings.is_local_endpoint(settings, rhost):
+            BLOCKED_BY_MODE[f"local_{role}"] = f"{LOCAL_URL_ENV}_{role.upper()} vers un hôte externe ({rhost}) refusé en mode {settings['mode']}"
+            continue
+        providers[f"local_{role}"] = OpenAICompatProvider(
+            f"local_{role}", url, os.getenv(LOCAL_KEY_ENV, ""),
+            os.getenv(f"{LOCAL_MODEL_ENV}_{role.upper()}", "") or os.getenv(LOCAL_MODEL_ENV, "local"),
+            family="local",
+        )
     if local_url:
         providers["local"] = OpenAICompatProvider(
             "local",

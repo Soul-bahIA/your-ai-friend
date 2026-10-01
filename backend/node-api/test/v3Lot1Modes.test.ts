@@ -106,10 +106,16 @@ describe("fournisseurs soumis au mode", () => {
   const keys = { OPENAI_API_KEY: "sk-test", LOCAL_LLM_URL: "http://127.0.0.1:8080/v1" } as NodeJS.ProcessEnv;
 
   it("chat : cloud seulement en HYBRID ; modèle local seulement sur une machine locale", () => {
-    expect(resolveChatProvider(keys, settings({}))?.provider).toBe("openai");
+    expect(resolveChatProvider(keys, settings({ SOULBAH_MODEL_POLICY: "cloud-first" }))?.provider).toBe("openai");
     expect(resolveChatProvider(keys, settings({ SOULBAH_MODE: "OFFLINE" }))?.provider).toBe("local");
     expect(resolveChatProvider({ OPENAI_API_KEY: "sk-test" } as NodeJS.ProcessEnv, settings({ SOULBAH_MODE: "LOCAL_INTERNET" }))).toBeNull();
     expect(resolveChatProvider({ LOCAL_LLM_URL: "https://modeles.exemple.com/v1" } as NodeJS.ProcessEnv, settings({ SOULBAH_MODE: "OFFLINE" }))).toBeNull();
+  });
+
+  it("chat (LOT 3) : local d'abord en « auto », ordre V2 en « cloud-first », local seul en « local-only »", () => {
+    expect(resolveChatProvider(keys, settings({}))?.provider).toBe("local");
+    expect(resolveChatProvider(keys, settings({ SOULBAH_MODEL_POLICY: "cloud-first" }))?.provider).toBe("openai");
+    expect(resolveChatProvider({ OPENAI_API_KEY: "sk-test" } as NodeJS.ProcessEnv, settings({ SOULBAH_MODEL_POLICY: "local-only" }))).toBeNull();
   });
 
   it("embeddings : aucun appel réseau hors HYBRID", async () => {

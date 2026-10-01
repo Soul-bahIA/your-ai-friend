@@ -42,3 +42,36 @@ def test_offline_blocks_provider_hosts_before_dns():
         assert network_guard.status()["blocked"] >= 3
     finally:
         network_guard.install(HYBRID)
+
+
+def test_local_provider_sends_schema_for_constrained_json(monkeypatch):
+    """V3 LOT 2 : vers llama-server (famille local), le schéma part dans response_format (grammaire) ;
+    vers un fournisseur cloud compatible OpenAI, seul json_object est envoyé."""
+    import asyncio
+
+    import httpx
+
+    from app.providers import openai_compat
+    from app.providers.openai_compat import OpenAICompatProvider
+
+    seen: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{\"ok\": true}"}}],
+                                         "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+
+    real = httpx.AsyncClient
+
+    def factory(*a, **k):
+        k["transport"] = httpx.MockTransport(handler)
+        return real(*a, **k)
+
+    monkeypatch.setattr(openai_compat.httpx, "AsyncClient", factory)
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+    msgs = [{"role": "user", "content": "x"}]
+    asyncio.run(OpenAICompatProvider("local", "http://127.0.0.1:8091/v1", "", "m", family="local")
+                .generate("s", msgs, 50, json_schema=schema))
+    asyncio.run(OpenAICompatProvider("openai", "http://127.0.0.1:9/v1", "k", "gpt-4o").generate("s", msgs, 50, json_schema=schema))
+    assert seen[0]["response_format"] == {"type": "json_object", "schema": schema}
+    assert seen[1]["response_format"] == {"type": "json_object"}

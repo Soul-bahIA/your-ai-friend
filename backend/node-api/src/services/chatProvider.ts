@@ -67,7 +67,7 @@ const ORDER = ["openai", "gemini", "mistral", "deepseek", "xai", "qwen"];
  * CHAT_MODEL ne s'applique qu'au fournisseur explicitement choisi (CHAT_PROVIDER) :
  * en repli sur un autre fournisseur, on n'envoie jamais le modèle d'un autre éditeur.
  */
-export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env, settings: Pick<SoulbahSettings, "mode" | "network"> = currentSettings()): ChatProvider | null {
+export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env, settings: Pick<SoulbahSettings, "mode" | "network"> & Partial<Pick<SoulbahSettings, "model_policy">> = currentSettings()): ChatProvider | null {
   // V3 LOT 1 : hors HYBRID, seul le modèle local (LOCAL_LLM_URL) est autorisé.
   const cloud = cloudModelsAllowed(settings);
   const wanted = (env.CHAT_PROVIDER ?? "").toLowerCase();
@@ -105,8 +105,11 @@ export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env, settin
     const chosen = build(wanted, true);
     if (chosen) return chosen;
   }
-  // 2. Sinon, 1er fournisseur disponible (OpenAI prioritaire), puis le modèle local.
-  for (const id of [...ORDER, "local"]) {
+  // 2. Sinon, 1er fournisseur disponible. V3 LOT 3 : le modèle local passe d'abord (model_policy
+  //    « auto »), seul (« local-only »), ou en dernier comme en V2 (« cloud-first »).
+  const policy = (settings.model_policy ?? "auto").trim();
+  const order = policy === "cloud-first" ? [...ORDER, "local"] : policy === "local-only" ? ["local"] : ["local", ...ORDER];
+  for (const id of order) {
     const p = build(id, false);
     if (p) return p;
   }

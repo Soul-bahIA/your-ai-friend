@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+import dataclasses
 from typing import Any
 
 import httpx
@@ -42,7 +43,14 @@ class OpenAICompatProvider(LLMProvider):
         self._api_key = api_key
 
     def capabilities(self, model: str | None = None) -> ModelCapabilities:
-        return capabilities_for(self.id, self.family, model or self.model)
+        caps = capabilities_for(self.id, self.family, model or self.model)
+        if self.id == "local_vision" and not caps.vision:
+            # V3 LOT 3 : serveur local déclaré pour le rôle vision (LOCAL_LLM_URL_VISION).
+            caps = dataclasses.replace(caps, vision=True)
+        if self.family == "local" and not caps.json_schema:
+            # llama-server contraint la sortie par grammaire (response_format.schema).
+            caps = dataclasses.replace(caps, json_schema=True)
+        return caps
 
     async def generate(
         self,
@@ -87,6 +95,10 @@ class OpenAICompatProvider(LLMProvider):
         }
         if json_schema is not None:
             payload["response_format"] = {"type": "json_object"}
+            if self.family == "local":
+                # V3 LOT 2 : llama-server contraint la génération par grammaire à partir du schéma
+                # (sortie JSON valide garantie) — décisif pour la fiabilité des petits modèles locaux.
+                payload["response_format"]["schema"] = json_schema
 
         headers = {"Content-Type": "application/json"}
         if self._api_key:
