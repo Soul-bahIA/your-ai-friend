@@ -32,6 +32,7 @@ from executor import Executor
 from pending import PendingUpdates
 from permissions import PermissionGate, workspace_errors
 from redaction import RedactingFormatter
+from runtime.instance_lock import KIND_AGENT_V1, InstanceLock, describe as describe_holder
 import skills
 from skills.base import CancelToken
 
@@ -376,6 +377,40 @@ def _manage_key(store: bool) -> int:
     return 0
 
 
+# --- Préparation commune agent V1 / runtime V2 (LOT 8) -----------------------------
+def build_executor(cfg: Config) -> tuple[Executor | None, int]:
+    """Contrôles de démarrage puis construction du gate et de l'executor.
+
+    Retourne (executor, 0) ou (None, 2) si le démarrage est refusé : catalogue d'outils
+    incohérent (LOT 2) ou workspace dans le dépôt (S1 / contrat §14). Partagé avec
+    `runtime.supervisor` et `runtime.worker` pour ne pas dupliquer ces règles."""
+    problems = skills.manifest_errors()
+    if problems:
+        for problem in problems:
+            log.error("✖ Catalogue d'outils : %s", problem)
+        log.error("Démarrage refusé : le registre des skills et agent/skills/manifests.py divergent "
+                  "(voir docs/CATALOGUE_OUTILS.md).")
+        return None, 2
+    errors = workspace_errors(cfg.allowed_dirs)
+    if errors:
+        for err in errors:
+            log.error("✖ %s", err)
+        log.error("Démarrage refusé : utilisez un workspace dédié hors du dépôt SoulBah, par exemple %s "
+                  "(laissez SOULBAH_ALLOWED_DIRS vide pour l'utiliser).", default_workspace())
+        return None, 2
+    if cfg.default_workspace:
+        try:
+            os.makedirs(cfg.allowed_dirs[0], exist_ok=True)
+        except OSError as e:
+            log.error("Impossible de créer le workspace %s : %s", cfg.allowed_dirs[0], e)
+            return None, 2
+    gate = PermissionGate(
+        cfg.permission_mode, cfg.allowed_dirs, cfg.dry_run, cfg.allow_input_control,
+        confirm_timeout=cfg.confirm_timeout, approval_mode=cfg.approval_mode,
+    )
+    return Executor(gate, step_timeout=cfg.step_timeout), 0
+
+
 # --- Boucle principale ---------------------------------------------------------
 @dataclass
 class LoopState:
@@ -448,6 +483,21 @@ def _interruptible_sleep(delay: float) -> None:
 
 
 def _serve(cfg: Config, executor: Executor, once: bool) -> int:
+    # LOT 8 (audit §14) : garde d'instance mutuelle avec le runtime V2 — l'agent V1 et
+    # `runtime.supervisor` ne tournent jamais en même temps (mêmes tâches, même bureau).
+    lock = InstanceLock(KIND_AGENT_V1)
+    acquired, holder = lock.acquire()
+    if not acquired:
+        log.error("✖ Un autre exécutant local tourne déjà : %s (verrou %s). Arrêtez-le d'abord — "
+                  "ou supprimez le verrou s'il est périmé.", describe_holder(holder), lock.path)
+        return 5
+    try:
+        return _serve_locked(cfg, executor, once)
+    finally:
+        lock.release()
+
+
+def _serve_locked(cfg: Config, executor: Executor, once: bool) -> int:
     client = TaskClient(cfg)
     pending = PendingUpdates()
     state = LoopState()
@@ -513,14 +563,6 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     if args.store_key or args.forget_key:
         return _manage_key(store=args.store_key)
-    # LOT 2 : contrat d'outils unique — registre des skills et manifestes cohérents.
-    problems = skills.manifest_errors()
-    if problems:
-        for problem in problems:
-            log.error("✖ Catalogue d'outils : %s", problem)
-        log.error("Démarrage refusé : le registre des skills et agent/skills/manifests.py divergent "
-                  "(voir docs/CATALOGUE_OUTILS.md).")
-        return 2
     env_dry = os.environ.get("SOULBAH_DRY_RUN", "").strip().lower() in _TRUE
     dry = bool(args.dry_run or args.plan or env_dry)
     cfg = load_config(require_key=not dry)
@@ -533,26 +575,10 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("⚠ La clé agent vient encore de l'environnement / agent/.env alors qu'une copie chiffrée "
                     "(DPAPI) existe : retirez SOULBAH_AGENT_KEY de agent/.env (%s)", agent_secrets.key_file())
 
-    # S1 / contrat §14 : workspace hors du dépôt, jamais le dossier de l'agent.
-    errors = workspace_errors(cfg.allowed_dirs)
-    if errors:
-        for err in errors:
-            log.error("✖ %s", err)
-        log.error("Démarrage refusé : utilisez un workspace dédié hors du dépôt SoulBah, par exemple %s "
-                  "(laissez SOULBAH_ALLOWED_DIRS vide pour l'utiliser).", default_workspace())
-        return 2
-    if cfg.default_workspace:
-        try:
-            os.makedirs(cfg.allowed_dirs[0], exist_ok=True)
-        except OSError as e:
-            log.error("Impossible de créer le workspace %s : %s", cfg.allowed_dirs[0], e)
-            return 2
-
-    gate = PermissionGate(
-        cfg.permission_mode, cfg.allowed_dirs, cfg.dry_run, cfg.allow_input_control,
-        confirm_timeout=cfg.confirm_timeout, approval_mode=cfg.approval_mode,
-    )
-    executor = Executor(gate, step_timeout=cfg.step_timeout)
+    # LOT 2 (catalogue cohérent) + S1 / contrat §14 (workspace hors du dépôt) : build_executor.
+    executor, code = build_executor(cfg)
+    if executor is None:
+        return code
 
     _running = True
     _interrupts = 0

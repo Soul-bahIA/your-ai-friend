@@ -233,6 +233,39 @@ boucle Observer prévue. En mode `auto`, elles ne sont pas confirmées.
   serveur délivre un jeton HMAC lié à l'empreinte du contenu, vérifié juste avant l'exécution. Sans réponse,
   en cas d'erreur réseau ou de contenu différent : refus. Détails : `docs/LOT6_AGENT_NOTES.md`.
 
+## Runtime V2 (LOT 8)
+
+Le **runtime V2** remplace la boucle unique de l'agent quand le serveur expose l'API V2
+(`/api/v2/runtime/*`, sessions et missions multi-agents). Détails : `docs/LOT8_RUNTIME_NOTES.md`.
+
+```bat
+Lancer_Runtime.bat                       :: ou : .venv\Scripts\python -m runtime.supervisor
+powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1          :: démarrage à l'ouverture de session
+powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1 -Uninstall
+```
+
+- **Un processus par tâche** (`runtime.worker`), chacun dans son **Job Object** : un arbre bloqué ou annulé est
+  tué en moins de 10 s ; si le superviseur meurt, ses workers meurent avec lui. `open_app` lance les
+  applications HORS du job (elles survivent à la tâche).
+- **Journal local** SQLite (WAL) `%LOCALAPPDATA%\Soulbahuntime\journal.db` : baux détenus, état de chaque étape
+  (planned → attempted → executed → verified), checkpoints, outbox des écritures non acceptées.
+- **Reprise** : un worker mort est relancé (même tentative) depuis le journal ; au redémarrage du superviseur, les
+  tâches détenues sont **réconciliées** avec le serveur. Une étape `verified` est sautée, `executed` est actée sans
+  ré-exécution, `attempted` n'est rejouée que si l'outil est idempotent — sinon une **question** est posée dans
+  l'app et rien n'est rejoué sans réponse.
+- **Une seule instance** : le runtime et `soulbah_agent.py` refusent de tourner en même temps.
+- **Poignée de main** : un runtime trop ancien est refusé par le serveur (426, sortie 4) ; un serveur sans V2 (404)
+  ou `SOULBAH_RUNTIME_LEGACY=1` fait tourner la boucle V1 dans le superviseur.
+- **Preuves** (LOT 9) : chaque étape exécutée envoie des preuves typées (code de sortie, chemin + sha256, empreinte
+  du contenu lu, statistiques vidéo…) ; les captures d'écran sont téléversées comme **artefacts** sha256, jamais en
+  base64.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SOULBAH_MAX_SLOTS` | `6` | tâches simultanées sur ce PC (1–32) ; le serveur applique aussi son plafond |
+| `SOULBAH_RUNTIME_DIR` | `%LOCALAPPDATA%\Soulbahuntime` | journal, verrou d'instance, fichiers de tâches, logs |
+| `SOULBAH_RUNTIME_LEGACY` | (vide) | `1` = boucle de l'agent V1 dans le superviseur |
+
 ## Installation
 
 ```bash
@@ -336,5 +369,8 @@ agent/
 ├── executor.py          # étapes avec délai, jetons d'annulation, pause/stop, plan vide, simulation
 ├── skills/              # 17 skills + base.py (contrat, CancelToken, masquage), safety.py (deny-list),
 │                        # proctree.py (arbre de processus), recording.py, media_probe.py, desktop.py
+├── runtime/             # runtime V2 (LOT 8) : supervisor, worker, journal (SQLite WAL + outbox),
+│                        # rtclient, evidence (preuves typées, artefacts), instance_lock, legacy_adapter
+├── Lancer_Runtime.bat   # lanceur du runtime V2 ; scripts/install_autostart.ps1 (ouverture de session)
 └── tests/               # suite pytest
 ```

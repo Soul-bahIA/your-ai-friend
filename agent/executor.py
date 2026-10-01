@@ -17,6 +17,10 @@ log = logging.getLogger("soulbah.executor")
 EventFn = Callable[[str, str, dict], None]  # (type, message, data)
 # -> "none" | "pause" | "stop" | "gone" (410 : tâche supprimée) | "error" (lecture impossible)
 ControlFn = Callable[[], str]
+# LOT 8 : observateur du cycle d'une étape pour le journal d'actions du runtime.
+# (phase, index, step, result) avec phase ∈ {"planned", "attempted", "done"} ;
+# `result` n'est fourni (SkillResult) que pour "done".
+StepFn = Callable[[str, int, dict, "SkillResult | None"], None]
 
 DEFAULT_STEP_TIMEOUT = 900.0
 _CONTROL_POLL_SECONDS = 3.0  # lecture de l'ordre stop pendant une étape longue
@@ -178,6 +182,7 @@ class Executor:
         cancel: CancelToken | None = None,
         task_id: str | None = None,
         attempt: int = 0,
+        on_step: StepFn | None = None,
     ) -> dict[str, Any]:
         """Exécute chaque étape et retourne un rapport structuré.
 
@@ -198,9 +203,22 @@ class Executor:
           n'est plus la nôtre — on s'arrête sans rien émettre ;
         - `cancel` : jeton de la tâche (Ctrl+C) — arrêt rapide, statut `cancelled` ;
         - `task_id` / `attempt` : identité de la tâche V1, transmise au gate pour les
-          approbations distantes (LOT 6) — None / 0 pour un plan local.
+          approbations distantes (LOT 6) — None / 0 pour un plan local ;
+        - `on_step` (LOT 8) : observateur `(phase, index, step, result)` appelé AVANT
+          l'autorisation ("planned"), juste avant l'exécution ("attempted") et après
+          ("done", avec le SkillResult) — le worker du runtime en tire l'état des
+          actions (planned → attempted → executed/verified/failed). Une exception de
+          l'observateur est journalisée et ignorée.
         """
         user_emit = on_event or (lambda *_a, **_k: None)
+
+        def observe(phase: str, index: int, step: dict, result: SkillResult | None = None) -> None:
+            if on_step is None:
+                return
+            try:
+                on_step(phase, index, step, result)
+            except Exception:  # noqa: BLE001 - l'observateur ne doit pas tuer la tâche
+                log.exception("Observateur d'étape en erreur (%s, étape %d)", phase, index)
 
         def emit(etype: str, message: str, data: dict) -> None:
             try:
@@ -309,10 +327,12 @@ class Executor:
                     break
 
                 step_type = str(step.get("type", "")).strip()
+                observe("planned", i, step)
                 skill = get_skill(step_type)
                 if skill is None:
                     report.append({"index": i, "type": step_type, "ok": False, "detail": "skill inconnu"})
                     emit("step_failed", "skill inconnu", {"index": i, "step_type": step_type})
+                    observe("done", i, step, SkillResult(ok=False, detail="skill inconnu"))
                     all_ok = False
                     log.warning("Étape %d : type inconnu '%s'", i, step_type)
                     break
@@ -363,6 +383,7 @@ class Executor:
                 if not allowed:
                     report.append({"index": i, "type": step_type, "ok": False, "detail": f"non autorisé ({reason})"})
                     emit("step_failed", f"non autorisé ({reason})", {"index": i, "step_type": step_type})
+                    observe("done", i, step, SkillResult(ok=False, detail=f"non autorisé ({reason})"))
                     all_ok = False
                     log.info("Étape %d refusée : %s", i, reason)
                     break
@@ -373,6 +394,7 @@ class Executor:
                     # LOT 6 : référence de l'approbation distante — jamais le jeton lui-même.
                     started["approval_id"] = ctx["approval_id"]
                 emit("step_started", description, started)
+                observe("attempted", i, step)
 
                 t0 = time.monotonic()
                 interrupt = None
@@ -384,6 +406,8 @@ class Executor:
                         skill, step, self.timeout_for(skill), control, abort, token
                     )
                 duration_s = round(time.monotonic() - t0, 3)
+                if interrupt != _ABORT:
+                    observe("done", i, step, result)
 
                 entry: dict[str, Any] = {
                     "index": i, "type": step_type, "ok": result.ok,

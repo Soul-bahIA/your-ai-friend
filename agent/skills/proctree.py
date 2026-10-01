@@ -49,6 +49,9 @@ if _IS_WIN:
 
     _JobObjectExtendedLimitInformation = 9
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    # LOT 8 : autorise un enfant à créer des processus HORS du job (open_app : les
+    # applications de l'utilisateur ne doivent pas mourir avec la tâche).
+    _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
     _CREATE_SUSPENDED = 0x00000004
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     _STILL_ACTIVE = 259
@@ -99,21 +102,34 @@ if _IS_WIN:
     _ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 
 
+# Drapeau CreateProcess posé par un processus membre d'un job pour que son enfant n'en
+# fasse PAS partie. Sans effet hors job ; refusé (ERROR_ACCESS_DENIED) si le job n'a pas
+# BREAKAWAY_OK — l'appelant (skills.open_app) retente alors sans le drapeau.
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
 class _Job:
-    """Job Object Windows « tuer à la fermeture » (None ailleurs ou en cas d'échec)."""
+    """Job Object Windows « tuer à la fermeture » (None ailleurs ou en cas d'échec).
+
+    `breakaway_ok=True` (LOT 8 : job d'une tâche du runtime) permet aux membres de
+    lancer des processus hors du job via CREATE_BREAKAWAY_FROM_JOB : utilisé par
+    open_app pour que les applications ouvertes survivent à la fin de la tâche."""
 
     def __init__(self, handle: int):
         self.handle = handle
 
     @classmethod
-    def create(cls) -> "_Job | None":
+    def create(cls, breakaway_ok: bool = False) -> "_Job | None":
         if not _IS_WIN:
             return None
         handle = _k32.CreateJobObjectW(None, None)
         if not handle:
             return None
         info = _EXTENDED_LIMIT()
-        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        flags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if breakaway_ok:
+            flags |= _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        info.BasicLimitInformation.LimitFlags = flags
         if not _k32.SetInformationJobObject(handle, _JobObjectExtendedLimitInformation,
                                             ctypes.byref(info), ctypes.sizeof(info)):
             _k32.CloseHandle(handle)
@@ -187,6 +203,53 @@ def kill_tree(proc: subprocess.Popen, job: _Job | None) -> None:
         pass
 
 
+def popen_in_job(
+    argv: list[str],
+    cwd: str | None,
+    env: dict[str, str] | None = None,
+    use_job: bool = True,
+    breakaway_ok: bool = False,
+    **popen_kwargs,
+) -> tuple[subprocess.Popen, "_Job | None"]:
+    """Lance `argv` (sans shell) dans un Job Object neuf (Windows) ou une nouvelle
+    session (Unix) et retourne (processus, job ou None).
+
+    Sous Windows le processus est créé SUSPENDU, affecté au job puis relancé : tous
+    ses descendants héritent du job. Si le job est indisponible, il est fermé et
+    None est renvoyé (repli `taskkill /T` dans kill_tree). L'appelant doit fermer le
+    job (`job.close()`) quand le processus est terminé — la fermeture tue les
+    survivants (KILL_ON_JOB_CLOSE)."""
+    job = _Job.create(breakaway_ok=breakaway_ok) if use_job else None
+    kwargs: dict = dict(cwd=cwd, env=env, shell=False)
+    kwargs.update(popen_kwargs)
+    if _IS_WIN:
+        if job is not None:
+            kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
+    else:
+        kwargs.setdefault("start_new_session", True)
+
+    try:
+        proc = subprocess.Popen(argv, **kwargs)
+    except Exception:
+        if job is not None:
+            job.close()
+        raise
+
+    if job is not None:
+        used_job = job.assign(proc)
+        if not used_job:
+            log.warning("Job Object indisponible pour PID %d — repli sur taskkill /T", proc.pid)
+        status = _ntdll.NtResumeProcess(int(proc._handle))  # type: ignore[attr-defined]
+        if status != 0:  # NTSTATUS en échec : le processus resterait suspendu
+            kill_tree(proc, job)
+            job.close()
+            raise OSError(f"impossible de relancer le processus suspendu (NTSTATUS {status:#x})")
+        if not used_job:
+            job.close()
+            job = None
+    return proc, job
+
+
 def run_tree(
     argv: list[str],
     cwd: str,
@@ -197,38 +260,12 @@ def run_tree(
 ) -> ProcResult:
     """Lance `argv` (sans shell), attend la fin, le délai ou l'annulation, et
     garantit qu'aucun descendant ne survit à un délai dépassé ou une annulation."""
-    job = _Job.create() if use_job else None
-    kwargs: dict = dict(
-        cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-        text=True, encoding="utf-8", errors="replace", shell=False, env=env,
+    proc, job = popen_in_job(
+        argv, cwd, env=env, use_job=use_job,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+        text=True, encoding="utf-8", errors="replace",
     )
-    if _IS_WIN:
-        if job is not None:
-            kwargs["creationflags"] = _CREATE_SUSPENDED
-    else:
-        kwargs["start_new_session"] = True
-
-    try:
-        proc = subprocess.Popen(argv, **kwargs)
-    except Exception:
-        if job is not None:
-            job.close()
-        raise
-
-    used_job = False
-    if job is not None:
-        used_job = job.assign(proc)
-        if not used_job:
-            log.warning("Job Object indisponible pour PID %d — repli sur taskkill /T", proc.pid)
-        status = _ntdll.NtResumeProcess(int(proc._handle))  # type: ignore[attr-defined]
-        if status != 0:  # NTSTATUS en échec : le processus resterait suspendu
-            kill_tree(proc, job)
-            job.close()
-            proc.communicate()
-            raise OSError(f"impossible de relancer le processus suspendu (NTSTATUS {status:#x})")
-        if not used_job:
-            job.close()
-            job = None
+    used_job = job is not None
 
     deadline = time.monotonic() + max(0.0, timeout)
     timed_out = cancelled = tree_killed = False

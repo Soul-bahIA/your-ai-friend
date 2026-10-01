@@ -11,6 +11,10 @@ Sécurité :
     (nom exact + « .exe », sans le dossier courant) ou le registre « App Paths ».
     Le chemin résolu doit être absolu et finir par .exe (pas de .bat/.cmd).
   - Lancement direct de l'exe en liste d'arguments, shell=False, sans `cmd /c start`.
+  - LOT 8 : sous Windows, l'application est lancée HORS du Job Object de la tâche
+    (CREATE_BREAKAWAY_FROM_JOB) : la fin ou le kill de la tâche ne ferme pas les
+    applications de l'utilisateur. Si le job courant n'autorise pas le breakaway
+    (ou si le drapeau est refusé), on relance sans lui.
 """
 from __future__ import annotations
 
@@ -211,6 +215,20 @@ def resolve_executable(key: str) -> str | None:
     return None
 
 
+def _launch_detached(exe: str) -> None:
+    """Lance l'exe hors du Job Object courant quand c'est possible (voir docstring)."""
+    if sys.platform == "win32":
+        from skills.proctree import CREATE_BREAKAWAY_FROM_JOB
+
+        try:
+            subprocess.Popen([exe], shell=False, close_fds=True, creationflags=CREATE_BREAKAWAY_FROM_JOB)
+            return
+        except OSError:
+            # Job sans BREAKAWAY_OK (ERROR_ACCESS_DENIED) : lancement classique.
+            pass
+    subprocess.Popen([exe], shell=False, close_fds=True)
+
+
 class OpenAppSkill(Skill):
     name = "open_app"
     step_types = ("open_app", "open_software", "launch")
@@ -235,7 +253,7 @@ class OpenAppSkill(Skill):
         exe = resolve_executable(key)
         try:
             if exe:
-                subprocess.Popen([exe], shell=False, close_fds=True)
+                _launch_detached(exe)
             elif sys.platform == "darwin":
                 # Nom validé (aucun métacaractère), argv en liste : pas d'injection.
                 subprocess.Popen(["open", "-a", key], shell=False)
