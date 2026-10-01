@@ -64,7 +64,11 @@ BEGIN
   -- Mémoire, clés, journal, connaissances, base dynamique, générations.
   INSERT INTO agent_memory (user_id, type, goal, content, status)
   VALUES (uid, 'practice', '(général)', 'c', 'proposed');
-  UPDATE agent_memory SET status = 'validated' WHERE user_id = uid;
+  -- PATCH /api/agent-memory/:id (routes/agentMemory.ts) : la validation pose metadata.validated_by
+  -- dans la même instruction (exigé par agent_memory_validated_requires_proof, LOT 4).
+  UPDATE agent_memory SET status = 'validated',
+         metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('validated_by', uid::text, 'validated_at', now())
+   WHERE user_id = uid;
   DELETE FROM agent_memory WHERE user_id = uid;
   INSERT INTO agent_keys (user_id, key_hash, label) VALUES (uid, 'ci-hash', 'pc');
   UPDATE agent_keys SET last_used_at = now() WHERE user_id = uid;
@@ -116,6 +120,29 @@ BEGIN
     RAISE EXCEPTION 'soulbah_api exécute du DDL';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
+
+  -- V2 (LOT 4) : seul écrivain du schéma soulbah ; audit en ajout seul même pour lui.
+  INSERT INTO soulbah.sessions (id, user_id, goal) VALUES ('00000000-0000-4000-8000-00000000a0f1', uid, 'session api');
+  INSERT INTO soulbah.tasks (id, session_id, user_id, title, role)
+    VALUES ('00000000-0000-4000-8000-00000000a0e1', '00000000-0000-4000-8000-00000000a0f1', uid, 'T', 'coder');
+  UPDATE soulbah.tasks SET status = 'READY' WHERE id = '00000000-0000-4000-8000-00000000a0e1';
+  INSERT INTO soulbah.audit_logs (user_id, actor, action, entity, entity_id, data)
+    VALUES (uid, 'system:scheduler', 'task.transition', 'task', '00000000-0000-4000-8000-00000000a0e1', '{"to":"READY"}');
+  IF (SELECT ok FROM soulbah.verify_audit_chain()) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'soulbah_api : chaîne d''audit invalide après insertion';
+  END IF;
+  BEGIN
+    UPDATE soulbah.audit_logs SET data = '{}' WHERE actor = 'system:scheduler';
+    RAISE EXCEPTION 'soulbah_api modifie audit_logs';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    DELETE FROM soulbah.audit_logs WHERE actor = 'system:scheduler';
+    RAISE EXCEPTION 'soulbah_api supprime audit_logs';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM 1 FROM soulbah.memories LIMIT 1;
+  PERFORM 1 FROM soulbah.knowledge_documents LIMIT 1;
 END $$;
 RESET ROLE;
 

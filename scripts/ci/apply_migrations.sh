@@ -27,8 +27,9 @@
 #   REPLAY_FROM  première version rejouée au passage 2 (défaut : 20260703000000)
 #   PG_MIN_MESSAGES  niveau client_min_messages pendant les migrations (défaut : warning)
 #   STUB_VECTOR=1 équivaut à --stub-vector : réécrit à la volée le DDL pgvector
-#                (CREATE EXTENSION vector supprimé, vector(N) → real[], index HNSW
-#                sautés) pour un PG local SANS pgvector (cas de ce PC Windows, PG18).
+#                (CREATE EXTENSION vector supprimé, vector(N) et `vector` sans dimension
+#                → real[], index HNSW sautés) pour un PG local SANS pgvector (cas de ce PC
+#                Windows, PG18).
 #                Valide tout le schéma SAUF la sémantique vectorielle, couverte par le
 #                job CI `db` (image pgvector).
 #
@@ -62,7 +63,8 @@ stub_vector() {
   perl -0pe '
     s/CREATE\s+EXTENSION\s+IF\s+NOT\s+EXISTS\s+vector\s*;/-- [stub-vector] extension pgvector absente : non créée/gi;
     s/\bvector\((\d+)\)/real[] \/* [stub-vector] vector($1) *\//gi;
-    s/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+[\w.]+\s+USING\s+hnsw\s*\([^;]*\)\s*;/-- [stub-vector] index HNSW $1 sauté/gi;
+    s/(\s)vector(\s*,)/$1real[] \/* [stub-vector] vector *\/$2/gi;
+    s/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+[\w.]+\s+USING\s+hnsw\s*\([^;]*;/-- [stub-vector] index HNSW $1 sauté/gi;
   '
 }
 
@@ -80,7 +82,7 @@ apply_file() {
 
 dump_schema() {
   local out="$1"
-  "${PG_DUMP_CMD[@]}" --schema-only --schema=public --schema=auth > "$out.raw"
+  "${PG_DUMP_CMD[@]}" --schema-only --schema=public --schema=auth --schema=soulbah > "$out.raw"
   # \restrict / \unrestrict : jetons aléatoires ajoutés par pg_dump >= 17.6 / 18.0.
   grep -Ev '^\\(un)?restrict ' "$out.raw" > "$out" || true
 }

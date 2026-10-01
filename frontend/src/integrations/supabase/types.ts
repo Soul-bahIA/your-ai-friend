@@ -1,4 +1,6 @@
-// Types du schéma public, alignés sur supabase/migrations (dernière revue : LOT 1).
+// Types du schéma public, alignés sur supabase/migrations (dernière revue : LOT 4 — colonnes V2
+// additives d'agent_keys, agent_memory, agent_tasks.v2_task_id, knowledge_base ; le schéma
+// `soulbah` n'est pas exposé à PostgREST et n'apparaît donc pas ici).
 // agent_tasks.target_agent_key_id / claimed_by_key_id : contrat LOT 1 §7.
 export type Json =
   | string
@@ -48,6 +50,11 @@ export type Database = {
       }
       agent_keys: {
         Row: {
+          capabilities: Json
+          expires_at: string | null
+          kind: string
+          last_seen_at: string | null
+          scopes: Json
           allowed_dirs: Json
           created_at: string
           id: string
@@ -57,6 +64,11 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          capabilities?: Json
+          expires_at?: string | null
+          kind?: string
+          last_seen_at?: string | null
+          scopes?: Json
           allowed_dirs?: Json
           created_at?: string
           id?: string
@@ -66,6 +78,11 @@ export type Database = {
           user_id: string
         }
         Update: {
+          capabilities?: Json
+          expires_at?: string | null
+          kind?: string
+          last_seen_at?: string | null
+          scopes?: Json
           allowed_dirs?: Json
           created_at?: string
           id?: string
@@ -78,6 +95,15 @@ export type Database = {
       }
       agent_memory: {
         Row: {
+          confidence: number
+          evidence_ids: Json
+          expires_at: string | null
+          is_simulation: boolean
+          scope: string
+          session_id: string | null
+          source_task_id: string | null
+          validated_at: string | null
+          validated_by: string | null
           content: string
           created_at: string
           goal: string
@@ -91,6 +117,15 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          confidence?: number
+          evidence_ids?: Json
+          expires_at?: string | null
+          is_simulation?: boolean
+          scope?: string
+          session_id?: string | null
+          source_task_id?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
           content: string
           created_at?: string
           goal: string
@@ -104,6 +139,15 @@ export type Database = {
           user_id: string
         }
         Update: {
+          confidence?: number
+          evidence_ids?: Json
+          expires_at?: string | null
+          is_simulation?: boolean
+          scope?: string
+          session_id?: string | null
+          source_task_id?: string | null
+          validated_at?: string | null
+          validated_by?: string | null
           content?: string
           created_at?: string
           goal?: string
@@ -120,6 +164,7 @@ export type Database = {
       }
       agent_tasks: {
         Row: {
+          v2_task_id: string | null
           claimed_by_key_id: string | null
           completed_at: string | null
           control: string
@@ -138,6 +183,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          v2_task_id?: string | null
           claimed_by_key_id?: string | null
           completed_at?: string | null
           control?: string
@@ -156,6 +202,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          v2_task_id?: string | null
           claimed_by_key_id?: string | null
           completed_at?: string | null
           control?: string
@@ -365,6 +412,12 @@ export type Database = {
       }
       knowledge_base: {
         Row: {
+          doc_status: string | null
+          embedding_model: string | null
+          ingest_status: string | null
+          last_written_at: string | null
+          mime: string | null
+          source_uri: string | null
           category: string
           confidence: number
           content: string
@@ -387,6 +440,12 @@ export type Database = {
           version: number
         }
         Insert: {
+          doc_status?: string | null
+          embedding_model?: string | null
+          ingest_status?: string | null
+          last_written_at?: string | null
+          mime?: string | null
+          source_uri?: string | null
           category?: string
           confidence?: number
           content: string
@@ -409,6 +468,12 @@ export type Database = {
           version?: number
         }
         Update: {
+          doc_status?: string | null
+          embedding_model?: string | null
+          ingest_status?: string | null
+          last_written_at?: string | null
+          mime?: string | null
+          source_uri?: string | null
           category?: string
           confidence?: number
           content?: string

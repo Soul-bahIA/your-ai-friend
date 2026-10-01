@@ -387,5 +387,317 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- =====================================================================================
+-- V2 (LOT 4) : schéma soulbah — accès client refusé, machine à états, anti-cycle, verrous,
+-- audit chaîné et immuable, vues mémoire / documents.
+-- =====================================================================================
+DO $$
+BEGIN
+  IF to_regnamespace('soulbah') IS NULL THEN RAISE EXCEPTION 'LOT 4 : schéma soulbah absent'; END IF;
+  IF (SELECT count(*) FROM pg_tables WHERE schemaname = 'soulbah') < 18 THEN
+    RAISE EXCEPTION 'LOT 4 : tables soulbah manquantes (% trouvées)', (SELECT count(*) FROM pg_tables WHERE schemaname = 'soulbah');
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'soulbah' AND NOT rowsecurity) THEN
+    RAISE EXCEPTION 'LOT 4 : RLS désactivée sur une table soulbah';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'soulbah') THEN
+    RAISE EXCEPTION 'LOT 4 : une policy ouvre le schéma soulbah';
+  END IF;
+  IF has_schema_privilege('authenticated', 'soulbah', 'USAGE') OR has_schema_privilege('anon', 'soulbah', 'USAGE') THEN
+    RAISE EXCEPTION 'LOT 4 : soulbah accessible à anon/authenticated';
+  END IF;
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint
+       WHERE conname = 'agent_tasks_status_check' AND conrelid = 'public.agent_tasks'::regclass)
+     NOT LIKE '%''pending''%''cancelled''%' THEN
+    RAISE EXCEPTION 'Jamais : le CHECK de statut d''agent_tasks a changé';
+  END IF;
+END $$;
+
+-- Client authenticated : aucun accès (même en connaissant les noms).
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claims = '{"sub":"00000000-0000-4000-8000-0000000000a1"}';
+DO $$
+BEGIN
+  BEGIN
+    PERFORM 1 FROM soulbah.tasks LIMIT 1;
+    RAISE EXCEPTION 'LOT 4 : authenticated lit soulbah.tasks';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM 1 FROM soulbah.memories LIMIT 1;
+    RAISE EXCEPTION 'LOT 4 : authenticated lit soulbah.memories';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO soulbah.audit_logs (actor, action) VALUES ('user:x', 'test');
+    RAISE EXCEPTION 'LOT 4 : authenticated écrit soulbah.audit_logs';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM soulbah.verify_audit_chain();
+    RAISE EXCEPTION 'LOT 4 : authenticated exécute soulbah.verify_audit_chain';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+RESET ROLE;
+
+-- Jeu de données V2 (superutilisateur)
+INSERT INTO soulbah.user_settings (user_id) VALUES ('00000000-0000-4000-8000-0000000000a1');
+DO $$
+BEGIN
+  BEGIN
+    UPDATE soulbah.user_settings SET max_parallel_agents = 33 WHERE user_id = '00000000-0000-4000-8000-0000000000a1';
+    RAISE EXCEPTION 'LOT 4 : max_parallel_agents 33 accepté (CHECK 1–32)';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
+INSERT INTO soulbah.sessions (id, user_id, goal) VALUES
+  ('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'session de test');
+INSERT INTO soulbah.sessions (id, user_id, goal) VALUES
+  ('00000000-0000-4000-8000-00000000f002', '00000000-0000-4000-8000-0000000000a2', 'autre session');
+INSERT INTO soulbah.tasks (id, session_id, user_id, title, role) VALUES
+  ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'A', 'coder'),
+  ('00000000-0000-4000-8000-00000000e002', '00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'B', 'coder'),
+  ('00000000-0000-4000-8000-00000000e003', '00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000000a1', 'C', 'qa_reviewer'),
+  ('00000000-0000-4000-8000-00000000e004', '00000000-0000-4000-8000-00000000f002', '00000000-0000-4000-8000-0000000000a2', 'X', 'coder');
+
+-- Anti-cycle : A → B → C puis C → A refusé ; dépendance inter-sessions refusée.
+INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id) VALUES
+  ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-00000000e002'),
+  ('00000000-0000-4000-8000-00000000e002', '00000000-0000-4000-8000-00000000e003');
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id)
+      VALUES ('00000000-0000-4000-8000-00000000e003', '00000000-0000-4000-8000-00000000e001');
+    RAISE EXCEPTION 'LOT 4 : cycle A → B → C → A accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id)
+      VALUES ('00000000-0000-4000-8000-00000000e002', '00000000-0000-4000-8000-00000000e001');
+    RAISE EXCEPTION 'LOT 4 : cycle direct A → B → A accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id)
+      VALUES ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-00000000e004');
+    RAISE EXCEPTION 'LOT 4 : dépendance entre deux sessions acceptée';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id)
+      VALUES ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-00000000e001');
+    RAISE EXCEPTION 'LOT 4 : auto-dépendance acceptée';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
+
+-- Machine à états (§9.4) : chemin nominal accepté, transitions absentes refusées.
+DO $$
+DECLARE t uuid := '00000000-0000-4000-8000-00000000e003';
+BEGIN
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'RUNNING' WHERE id = t;
+    RAISE EXCEPTION 'LOT 4 : PENDING → RUNNING accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE soulbah.tasks SET status = 'READY' WHERE id = t;
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'RUNNING' WHERE id = t;  -- attempt non incrémenté
+    RAISE EXCEPTION 'LOT 4 : READY → RUNNING sans attempt+1 accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE soulbah.tasks SET status = 'RUNNING', attempt = attempt + 1 WHERE id = t;
+  UPDATE soulbah.tasks SET status = 'VALIDATING' WHERE id = t;
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'RUNNING' WHERE id = t;
+    RAISE EXCEPTION 'LOT 4 : VALIDATING → RUNNING accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  UPDATE soulbah.tasks SET status = 'COMPLETED' WHERE id = t;
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'CANCELLED' WHERE id = t;
+    RAISE EXCEPTION 'LOT 4 : COMPLETED → CANCELLED accepté (terminal)';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'READY' WHERE id = t;
+    RAISE EXCEPTION 'LOT 4 : COMPLETED → READY accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  -- Annulation depuis un état actif, échec puis relance manuelle (FAILED → READY)
+  UPDATE soulbah.tasks SET status = 'READY' WHERE id = '00000000-0000-4000-8000-00000000e002';
+  UPDATE soulbah.tasks SET status = 'RUNNING', attempt = 1 WHERE id = '00000000-0000-4000-8000-00000000e002';
+  UPDATE soulbah.tasks SET status = 'FAILED' WHERE id = '00000000-0000-4000-8000-00000000e002';
+  UPDATE soulbah.tasks SET status = 'READY' WHERE id = '00000000-0000-4000-8000-00000000e002';
+  UPDATE soulbah.tasks SET status = 'CANCELLED' WHERE id = '00000000-0000-4000-8000-00000000e002';
+  BEGIN
+    UPDATE soulbah.tasks SET status = 'COMPLETED', simulated = true WHERE id = '00000000-0000-4000-8000-00000000e001';
+    RAISE EXCEPTION 'LOT 4 : tâche simulée COMPLETED acceptée';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
+
+-- Verrous : un seul exclusif par clé, partagés multiples.
+INSERT INTO soulbah.resource_leases (resource_key, holder_task_id, mode, expires_at) VALUES
+  ('desktop.input:rt1', '00000000-0000-4000-8000-00000000e001', 'exclusive', now() + interval '1 min');
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO soulbah.resource_leases (resource_key, holder_task_id, mode, expires_at) VALUES
+      ('desktop.input:rt1', '00000000-0000-4000-8000-00000000e002', 'exclusive', now() + interval '1 min');
+    RAISE EXCEPTION 'LOT 4 : deux verrous exclusifs sur desktop.input:rt1';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  INSERT INTO soulbah.resource_leases (resource_key, holder_task_id, mode, expires_at) VALUES
+    ('cpu.heavy', '00000000-0000-4000-8000-00000000e001', 'shared', now() + interval '1 min'),
+    ('cpu.heavy', '00000000-0000-4000-8000-00000000e002', 'shared', now() + interval '1 min');
+END $$;
+
+-- Actions : idempotence (task, attempt, step) et « simulated jamais verified ».
+INSERT INTO soulbah.actions (task_id, user_id, attempt, step_index, tool) VALUES
+  ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000000a1', 1, 0, 'wait');
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO soulbah.actions (task_id, user_id, attempt, step_index, tool) VALUES
+      ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000000a1', 1, 0, 'wait');
+    RAISE EXCEPTION 'LOT 4 : action dupliquée (task, attempt, step) acceptée';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO soulbah.actions (task_id, user_id, attempt, step_index, tool, simulated, status) VALUES
+      ('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000000a1', 1, 1, 'wait', true, 'verified');
+    RAISE EXCEPTION 'LOT 4 : action simulée « verified » acceptée';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
+
+-- Audit : chaîne valide, UPDATE/DELETE/TRUNCATE refusés, altération détectée par verify_audit_chain.
+INSERT INTO soulbah.audit_logs (user_id, actor, action, entity, data) VALUES
+  ('00000000-0000-4000-8000-0000000000a1', 'system:test', 'task.transition', 'task', '{"from":"PENDING","to":"READY"}'),
+  ('00000000-0000-4000-8000-0000000000a1', 'system:test', 'task.transition', 'task', '{"from":"READY","to":"RUNNING"}'),
+  ('00000000-0000-4000-8000-0000000000a1', 'user:a1',     'permission.approved', 'permission', '{}');
+DO $$
+DECLARE v record; h soulbah.audit_chain_head%ROWTYPE; first_seq bigint;
+BEGIN
+  SELECT * INTO v FROM soulbah.verify_audit_chain();
+  IF NOT v.ok OR v.checked <> 3 THEN RAISE EXCEPTION 'LOT 4 : chaîne d''audit invalide après 3 insertions (ok=%, checked=%)', v.ok, v.checked; END IF;
+  SELECT * INTO h FROM soulbah.audit_chain_head WHERE id = 1;
+  IF h.last_hash <> (SELECT row_hash FROM soulbah.audit_logs ORDER BY seq DESC LIMIT 1) THEN
+    RAISE EXCEPTION 'LOT 4 : tête de chaîne désynchronisée';
+  END IF;
+  IF (SELECT prev_hash FROM soulbah.audit_logs ORDER BY seq LIMIT 1) <> repeat('0', 64) THEN
+    RAISE EXCEPTION 'LOT 4 : la première ligne ne part pas du hash zéro';
+  END IF;
+  IF (SELECT count(DISTINCT row_hash) FROM soulbah.audit_logs) <> 3 THEN RAISE EXCEPTION 'LOT 4 : hashs non distincts'; END IF;
+
+  BEGIN
+    UPDATE soulbah.audit_logs SET data = '{"x":1}' WHERE actor = 'user:a1';
+    RAISE EXCEPTION 'LOT 4 : UPDATE audit_logs accepté';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    DELETE FROM soulbah.audit_logs WHERE actor = 'user:a1';
+    RAISE EXCEPTION 'LOT 4 : DELETE audit_logs accepté';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    TRUNCATE soulbah.audit_logs;
+    RAISE EXCEPTION 'LOT 4 : TRUNCATE audit_logs accepté';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+
+  -- Altération « hors triggers » (superutilisateur, session_replication_role=replica) → détectée.
+  SELECT min(seq) INTO first_seq FROM soulbah.audit_logs;
+  PERFORM set_config('session_replication_role', 'replica', true);
+  UPDATE soulbah.audit_logs SET data = '{"from":"PENDING","to":"COMPLETED"}' WHERE seq = first_seq;
+  PERFORM set_config('session_replication_role', 'origin', true);
+  SELECT * INTO v FROM soulbah.verify_audit_chain();
+  IF v.ok OR v.broken_at <> first_seq THEN
+    RAISE EXCEPTION 'LOT 4 : altération de la ligne % non détectée (ok=%, broken_at=%)', first_seq, v.ok, v.broken_at;
+  END IF;
+END $$;
+
+-- Mémoire : une ligne « validated » sans preuve ni validateur est lue « proposed » ;
+-- une nouvelle écriture « validated » sans preuve est refusée ; la forme V1 (metadata) passe.
+DO $$
+DECLARE st text;
+BEGIN
+  -- Ligne « héritée » : écrite sans la contrainte (retirée puis remise dans cette transaction annulée),
+  -- comme les lignes antérieures à la migration (NOT VALID ne les contrôle pas).
+  ALTER TABLE public.agent_memory DROP CONSTRAINT agent_memory_validated_requires_proof;
+  INSERT INTO public.agent_memory (id, user_id, type, goal, content, status) VALUES
+    ('00000000-0000-4000-8000-00000000d001', '00000000-0000-4000-8000-0000000000a1', 'solution', 'g', 'héritée', 'validated');
+  ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_validated_requires_proof
+    CHECK (status <> 'validated' OR validated_by IS NOT NULL OR (metadata ? 'validated_by')
+           OR (jsonb_typeof(evidence_ids) = 'array' AND jsonb_array_length(evidence_ids) > 0)) NOT VALID;
+  SELECT status INTO st FROM soulbah.memories WHERE id = '00000000-0000-4000-8000-00000000d001';
+  IF st <> 'proposed' THEN RAISE EXCEPTION 'LOT 4 : mémoire héritée « validated » sans preuve lue comme %', st; END IF;
+  BEGIN
+    INSERT INTO public.agent_memory (user_id, type, goal, content, status) VALUES
+      ('00000000-0000-4000-8000-0000000000a1', 'solution', 'g', 'sans preuve', 'validated');
+    RAISE EXCEPTION 'LOT 4 : mémoire validated sans preuve acceptée';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  INSERT INTO public.agent_memory (user_id, type, goal, content, status, metadata) VALUES
+    ('00000000-0000-4000-8000-0000000000a1', 'solution', 'g', 'forme V1', 'validated',
+     '{"validated_by":"00000000-0000-4000-8000-0000000000a1"}');
+  INSERT INTO public.agent_memory (user_id, type, goal, content, status, validated_by) VALUES
+    ('00000000-0000-4000-8000-0000000000a1', 'solution', 'g', 'forme V2', 'validated', '00000000-0000-4000-8000-0000000000a1');
+  BEGIN
+    INSERT INTO public.agent_memory (user_id, type, goal, content, scope) VALUES
+      ('00000000-0000-4000-8000-0000000000a1', 'solution', 'g', 'portée inconnue', 'planet');
+    RAISE EXCEPTION 'LOT 4 : scope inconnu accepté';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END $$;
+
+-- Documents : statut dérivé sans modifier les lignes héritées.
+DO $$
+DECLARE st text; derived boolean;
+BEGIN
+  UPDATE public.knowledge_base SET category = 'recherche' WHERE id = '00000000-0000-4000-8000-0000000000e1';
+  SELECT doc_status, doc_status_derived INTO st, derived FROM soulbah.knowledge_documents WHERE id = '00000000-0000-4000-8000-0000000000e1';
+  IF st <> 'finding' OR NOT derived THEN RAISE EXCEPTION 'LOT 4 : document « recherche » lu comme % (dérivé=%)', st, derived; END IF;
+  SELECT doc_status INTO st FROM soulbah.knowledge_documents WHERE id = '00000000-0000-4000-8000-0000000000e2';
+  IF st <> 'user' THEN RAISE EXCEPTION 'LOT 4 : document hérité lu comme %', st; END IF;
+  IF EXISTS (SELECT 1 FROM public.knowledge_base WHERE doc_status IS NOT NULL) THEN
+    RAISE EXCEPTION 'LOT 4 : la migration a écrit doc_status sur des lignes héritées';
+  END IF;
+  INSERT INTO soulbah.knowledge_chunks (document_id, user_id, chunk_index, content) VALUES
+    ('00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000a1', 0, 'premier morceau de texte');
+  IF (SELECT count(*) FROM soulbah.knowledge_chunks WHERE tsv @@ to_tsquery('simple', 'morceau')) <> 1 THEN
+    RAISE EXCEPTION 'LOT 4 : tsvector généré des chunks inopérant';
+  END IF;
+  BEGIN
+    INSERT INTO soulbah.knowledge_chunks (document_id, user_id, chunk_index, content) VALUES
+      ('00000000-0000-4000-8000-0000000000e1', '00000000-0000-4000-8000-0000000000a1', 0, 'doublon');
+    RAISE EXCEPTION 'LOT 4 : chunk dupliqué accepté';
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    IF to_regclass('soulbah.idx_knowledge_chunks_hnsw_te3s') IS NULL THEN
+      RAISE EXCEPTION 'LOT 4 : index HNSW partiel des chunks absent';
+    END IF;
+    IF format_type((SELECT atttypid FROM pg_attribute WHERE attrelid = 'soulbah.knowledge_chunks'::regclass AND attname = 'embedding'),
+                   (SELECT atttypmod FROM pg_attribute WHERE attrelid = 'soulbah.knowledge_chunks'::regclass AND attname = 'embedding')) <> 'vector' THEN
+      RAISE EXCEPTION 'LOT 4 : knowledge_chunks.embedding doit être vector SANS dimension';
+    END IF;
+  END IF;
+END $$;
+
+-- Pont V1 : agent_tasks.v2_task_id nullable, FK SET NULL.
+DO $$
+BEGIN
+  INSERT INTO public.agent_tasks (id, user_id, task_type, v2_task_id) VALUES
+    ('00000000-0000-4000-8000-00000000c901', '00000000-0000-4000-8000-0000000000a1', 'goal', '00000000-0000-4000-8000-00000000e003');
+  DELETE FROM soulbah.tasks WHERE id = '00000000-0000-4000-8000-00000000e003';
+  IF (SELECT v2_task_id FROM public.agent_tasks WHERE id = '00000000-0000-4000-8000-00000000c901') IS NOT NULL THEN
+    RAISE EXCEPTION 'LOT 4 : v2_task_id non remis à NULL après suppression de la tâche V2';
+  END IF;
+END $$;
+
 \echo 'schema_checks : toutes les assertions sont passées'
 ROLLBACK;

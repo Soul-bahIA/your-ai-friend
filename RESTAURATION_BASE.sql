@@ -1427,4 +1427,1033 @@ BEGIN
 END $$;
 
 
+-- >>>>>>>>>> 20261001120000_v2_schema.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 1/12 : schéma `soulbah` (LOT 4, audit §9, §12).
+-- Migration IDEMPOTENTE et ADDITIVE (rien n'est supprimé ni renommé ; public.* intact).
+--
+-- Le schéma `soulbah` est le plan de contrôle V2 : node-api en est le SEUL écrivain
+-- (connexion privilégiée, rôle soulbah_api). Il n'est jamais exposé à PostgREST ni aux
+-- clients : tout droit est révoqué pour PUBLIC, anon et authenticated, et aucune policy
+-- n'ouvre l'accès (RLS activée sur chaque table, sans policy = refus).
+-- Supabase : NE PAS ajouter `soulbah` aux « Exposed schemas » de l'API.
+-- =============================================================================
+
+CREATE SCHEMA IF NOT EXISTS soulbah;
+COMMENT ON SCHEMA soulbah IS
+  'Soulbah IA V2 — plan de contrôle (sessions, tâches, messages, preuves, audit). Écrit par node-api uniquement ; jamais exposé à PostgREST.';
+
+REVOKE ALL ON SCHEMA soulbah FROM PUBLIC;
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      EXECUTE format('REVOKE ALL ON SCHEMA soulbah FROM %I', r);
+      -- Objets futurs créés par le rôle courant : aucun droit par défaut pour les clients.
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA soulbah REVOKE ALL ON TABLES FROM %I', r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA soulbah REVOKE ALL ON SEQUENCES FROM %I', r);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA soulbah REVOKE ALL ON FUNCTIONS FROM %I', r);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Horodatage de modification (même rôle que public.update_updated_at_column, propre au schéma).
+CREATE OR REPLACE FUNCTION soulbah.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = soulbah, pg_temp
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END $$;
+
+-- Niveaux de sécurité (audit §9.10) et aides de validation réutilisées par les CHECK.
+CREATE OR REPLACE FUNCTION soulbah.is_security_level(p text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT p IN ('L0', 'L1', 'L2', 'L3') $$;
+
+CREATE OR REPLACE FUNCTION soulbah.is_json_array(p jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT p IS NOT NULL AND jsonb_typeof(p) = 'array' $$;
+
+CREATE OR REPLACE FUNCTION soulbah.is_json_object(p jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$ SELECT p IS NOT NULL AND jsonb_typeof(p) = 'object' $$;
+
+
+-- >>>>>>>>>> 20261001120100_v2_users_sessions.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 2/12 : réglages utilisateur et sessions (missions) — audit §9.4, §9.6, §12.
+-- Idempotente, additive.
+-- =============================================================================
+
+-- Réglages par utilisateur (page Paramètres). max_parallel_agents : CHECK 1–32 (§9.6).
+CREATE TABLE IF NOT EXISTS soulbah.user_settings (
+  user_id              uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  max_parallel_agents  integer NOT NULL DEFAULT 6
+                       CONSTRAINT user_settings_max_parallel_range CHECK (max_parallel_agents BETWEEN 1 AND 32),
+  -- Plafond de niveau de sécurité autorisé sans approbation par action (L0–L3).
+  max_security_level   text NOT NULL DEFAULT 'L2'
+                       CONSTRAINT user_settings_level_check CHECK (soulbah.is_security_level(max_security_level)),
+  -- Budget quotidien (USD) des appels de modèles ; NULL = illimité.
+  daily_budget_usd     numeric(12, 4) CONSTRAINT user_settings_budget_positive CHECK (daily_budget_usd IS NULL OR daily_budget_usd >= 0),
+  settings             jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT user_settings_settings_object CHECK (soulbah.is_json_object(settings)),
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.user_settings ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.user_settings;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.user_settings
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+
+-- Sessions : une mission = un objectif, un plan (DAG) versionné, un cycle
+-- DRAFT → PLANNING → AWAITING_APPROVAL → RUNNING/PAUSED → COMPLETED | FAILED | CANCELLED (§9.3).
+CREATE TABLE IF NOT EXISTS soulbah.sessions (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id              uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  goal                 text NOT NULL CONSTRAINT sessions_goal_length CHECK (length(goal) BETWEEN 1 AND 4000),
+  status               text NOT NULL DEFAULT 'DRAFT'
+                       CONSTRAINT sessions_status_check CHECK (status IN
+                         ('DRAFT', 'PLANNING', 'AWAITING_APPROVAL', 'RUNNING', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED')),
+  -- Environnement d'exécution (PC ciblé, workspace, variables non secrètes…).
+  environment          jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT sessions_environment_object CHECK (soulbah.is_json_object(environment)),
+  max_security_level   text NOT NULL DEFAULT 'L2'
+                       CONSTRAINT sessions_level_check CHECK (soulbah.is_security_level(max_security_level)),
+  -- Surcharge par mission du parallélisme (NULL = réglage utilisateur / global).
+  max_parallel_agents  integer CONSTRAINT sessions_max_parallel_range CHECK (max_parallel_agents IS NULL OR max_parallel_agents BETWEEN 1 AND 32),
+  budget_usd           numeric(12, 4) CONSTRAINT sessions_budget_positive CHECK (budget_usd IS NULL OR budget_usd >= 0),
+  spent_usd            numeric(12, 4) NOT NULL DEFAULT 0 CONSTRAINT sessions_spent_positive CHECK (spent_usd >= 0),
+  plan                 jsonb,
+  plan_version         integer NOT NULL DEFAULT 0 CONSTRAINT sessions_plan_version_positive CHECK (plan_version >= 0),
+  -- Session simulée (dry-run) : n'écrit jamais de mémoire, jamais COMPLETED « pour de vrai » (§9.8).
+  simulated            boolean NOT NULL DEFAULT false,
+  error                text,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  started_at           timestamptz,
+  finished_at          timestamptz
+);
+ALTER TABLE soulbah.sessions ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.sessions;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.sessions
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON soulbah.sessions (user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_active ON soulbah.sessions (status)
+  WHERE status IN ('PLANNING', 'AWAITING_APPROVAL', 'RUNNING', 'PAUSED');
+
+
+-- >>>>>>>>>> 20261001120200_v2_agents_runtimes.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 3/12 : agents (rôles instanciés dans une session), runtimes (PC exécutants) et
+-- extension de public.agent_keys — audit §9.2, §9.6, §12.
+-- Idempotente, additive.
+-- =============================================================================
+
+-- agent_keys : une clé = un PC (V1) ou un runtime V2 (kind), avec portées, expiration et
+-- capacités annoncées (slots, écran, téléphone, navigateur…).
+ALTER TABLE public.agent_keys
+  ADD COLUMN IF NOT EXISTS kind          text NOT NULL DEFAULT 'agent',
+  ADD COLUMN IF NOT EXISTS scopes        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS expires_at    timestamptz,
+  ADD COLUMN IF NOT EXISTS capabilities  jsonb NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS last_seen_at  timestamptz;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_keys_kind_check'
+                   AND conrelid = 'public.agent_keys'::regclass) THEN
+    ALTER TABLE public.agent_keys ADD CONSTRAINT agent_keys_kind_check
+      CHECK (kind IN ('agent', 'runtime')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_keys_scopes_array'
+                   AND conrelid = 'public.agent_keys'::regclass) THEN
+    ALTER TABLE public.agent_keys ADD CONSTRAINT agent_keys_scopes_array
+      CHECK (soulbah.is_json_array(scopes)) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_keys_capabilities_object'
+                   AND conrelid = 'public.agent_keys'::regclass) THEN
+    ALTER TABLE public.agent_keys ADD CONSTRAINT agent_keys_capabilities_object
+      CHECK (soulbah.is_json_object(capabilities)) NOT VALID;
+  END IF;
+END $$;
+DO $$
+DECLARE c text;
+BEGIN
+  FOREACH c IN ARRAY ARRAY['agent_keys_kind_check', 'agent_keys_scopes_array', 'agent_keys_capabilities_object'] LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE public.agent_keys VALIDATE CONSTRAINT %I', c);
+    EXCEPTION WHEN check_violation THEN
+      RAISE NOTICE 'Contrainte % non validée : des lignes existantes la violent', c;
+    END;
+  END LOOP;
+END $$;
+
+-- Runtimes : processus superviseur d'un PC (LOT 8), lié à une clé agent.
+CREATE TABLE IF NOT EXISTS soulbah.runtimes (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  agent_key_id   uuid NOT NULL REFERENCES public.agent_keys(id) ON DELETE CASCADE,
+  hostname       text,
+  version        text,
+  -- Capacité du PC (SOULBAH_MAX_SLOTS), bornée comme les autres plafonds (§9.6).
+  max_slots      integer NOT NULL DEFAULT 6 CONSTRAINT runtimes_max_slots_range CHECK (max_slots BETWEEN 1 AND 32),
+  capabilities   jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT runtimes_capabilities_object CHECK (soulbah.is_json_object(capabilities)),
+  status         text NOT NULL DEFAULT 'offline'
+                 CONSTRAINT runtimes_status_check CHECK (status IN ('online', 'draining', 'offline')),
+  lease_owner    text,
+  last_seen_at   timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT runtimes_one_per_key UNIQUE (agent_key_id)
+);
+ALTER TABLE soulbah.runtimes ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.runtimes;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.runtimes
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_runtimes_user ON soulbah.runtimes (user_id, status);
+
+-- Agents : un rôle instancié dans une session (desktop_operator, coder, researcher, qa_reviewer…).
+-- current_task_id est ajouté par 4/12 (la table tasks n'existe pas encore).
+CREATE TABLE IF NOT EXISTS soulbah.agents (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id     uuid NOT NULL REFERENCES soulbah.sessions(id) ON DELETE CASCADE,
+  user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role           text NOT NULL CONSTRAINT agents_role_format CHECK (role ~ '^[a-z][a-z0-9_]{0,63}$'),
+  role_version   text NOT NULL DEFAULT '1.0.0',
+  name           text,
+  status         text NOT NULL DEFAULT 'IDLE'
+                 CONSTRAINT agents_status_check CHECK (status IN ('IDLE', 'BUSY', 'WAITING', 'STOPPED', 'FAILED')),
+  runtime_id     uuid REFERENCES soulbah.runtimes(id) ON DELETE SET NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.agents ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.agents;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.agents
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_agents_session ON soulbah.agents (session_id, status);
+-- Compteur « x/6 » : agents BUSY par utilisateur (§9.6).
+CREATE INDEX IF NOT EXISTS idx_agents_busy ON soulbah.agents (user_id) WHERE status = 'BUSY';
+
+
+-- >>>>>>>>>> 20261001120300_v2_tasks.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 4/12 : tâches (10 états, baux, idempotence, critères) — audit §9.4, §9.8, §12.
+-- Idempotente, additive. public.agent_tasks garde ses 5 statuts (CHECK intact) : seule la
+-- colonne nullable v2_task_id est ajoutée (correspondance avec la tâche V2).
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS soulbah.tasks (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id           uuid NOT NULL REFERENCES soulbah.sessions(id) ON DELETE CASCADE,
+  user_id              uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  parent_task_id       uuid REFERENCES soulbah.tasks(id) ON DELETE SET NULL,
+  -- Identifiant stable dans le plan (nœud du DAG), ex. « observe_1 ».
+  node_key             text CONSTRAINT tasks_node_key_format CHECK (node_key IS NULL OR node_key ~ '^[a-z][a-z0-9_.-]{0,63}$'),
+  title                text NOT NULL CONSTRAINT tasks_title_length CHECK (length(title) BETWEEN 1 AND 500),
+  role                 text NOT NULL CONSTRAINT tasks_role_format CHECK (role ~ '^[a-z][a-z0-9_]{0,63}$'),
+  status               text NOT NULL DEFAULT 'PENDING'
+                       CONSTRAINT tasks_status_check CHECK (status IN
+                         ('PENDING', 'READY', 'RUNNING', 'WAITING', 'BLOCKED', 'VALIDATING',
+                          'RETRYING', 'COMPLETED', 'FAILED', 'CANCELLED')),
+  -- Bail (§9.4) : attempt +1 à chaque READY → RUNNING ; lease_owner = runtime:slot.
+  attempt              integer NOT NULL DEFAULT 0 CONSTRAINT tasks_attempt_positive CHECK (attempt >= 0),
+  retry_count          integer NOT NULL DEFAULT 0 CONSTRAINT tasks_retry_positive CHECK (retry_count >= 0),
+  max_retries          integer NOT NULL DEFAULT 2 CONSTRAINT tasks_max_retries_range CHECK (max_retries BETWEEN 0 AND 10),
+  lease_owner          text,
+  lease_expires_at     timestamptz,
+  -- Clé d'idempotence fournie par le planificateur (unique par session).
+  idempotency_key      text,
+  security_level       text NOT NULL DEFAULT 'L1'
+                       CONSTRAINT tasks_level_check CHECK (soulbah.is_security_level(security_level)),
+  -- Ressources exclusives/partagées déclarées (§9.7) : [{"key":"desktop.input:<runtime>","mode":"exclusive"}].
+  resources            jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT tasks_resources_array CHECK (soulbah.is_json_array(resources)),
+  -- Spécification exécutable (étapes du catalogue d'outils, instructions du rôle…).
+  spec                 jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT tasks_spec_object CHECK (soulbah.is_json_object(spec)),
+  -- DSL de critères d'acceptation (§9.8) : [{"type":"file_exists","path":…,"required":true}].
+  acceptance_criteria  jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT tasks_criteria_array CHECK (soulbah.is_json_array(acceptance_criteria)),
+  result               jsonb,
+  error                text,
+  simulated            boolean NOT NULL DEFAULT false,
+  blocked_reason       text,
+  waiting_reason       text,
+  priority             integer NOT NULL DEFAULT 5 CONSTRAINT tasks_priority_range CHECK (priority BETWEEN 1 AND 10),
+  plan_version         integer NOT NULL DEFAULT 0 CONSTRAINT tasks_plan_version_positive CHECK (plan_version >= 0),
+  -- RETRYING → READY quand next_attempt_at est atteint (backoff 30 s, 2 min, 8 min).
+  next_attempt_at      timestamptz,
+  -- BLOCKED → FAILED à l'échéance d'escalade (24 h par défaut).
+  escalate_at          timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  started_at           timestamptz,
+  finished_at          timestamptz,
+  -- Une tâche simulée ne peut pas être COMPLETED (§9.4 « un run simulated ne passe jamais »).
+  CONSTRAINT tasks_simulated_never_completed CHECK (NOT (simulated AND status = 'COMPLETED'))
+);
+ALTER TABLE soulbah.tasks ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.tasks;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.tasks
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_idempotency ON soulbah.tasks (session_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_node_key ON soulbah.tasks (session_id, plan_version, node_key)
+  WHERE node_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_session_status ON soulbah.tasks (session_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON soulbah.tasks (user_id, status, created_at DESC);
+-- File du scheduler (READY, par priorité puis ancienneté) et backoff des RETRYING.
+CREATE INDEX IF NOT EXISTS idx_tasks_ready ON soulbah.tasks (priority, created_at) WHERE status = 'READY';
+CREATE INDEX IF NOT EXISTS idx_tasks_retrying ON soulbah.tasks (next_attempt_at) WHERE status = 'RETRYING';
+-- Reaper : baux expirés des tâches actives (§9.4 : passage direct en RETRYING).
+CREATE INDEX IF NOT EXISTS idx_tasks_lease ON soulbah.tasks (lease_expires_at)
+  WHERE status IN ('RUNNING', 'WAITING', 'VALIDATING');
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON soulbah.tasks (parent_task_id) WHERE parent_task_id IS NOT NULL;
+
+-- Machine à états (§9.4) : toute transition absente du tableau est refusée en base
+-- (défense en profondeur ; node-api applique la même table). CANCELLED est atteignable
+-- depuis tout état non terminal ; FAILED → READY = relance manuelle auditée.
+CREATE OR REPLACE FUNCTION soulbah.tasks_check_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = soulbah, pg_temp
+AS $$
+BEGIN
+  IF NEW.status = OLD.status THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.status = 'CANCELLED' AND OLD.status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN
+    RETURN NEW;
+  END IF;
+  IF (OLD.status, NEW.status) IN (
+       ('PENDING', 'READY'), ('PENDING', 'BLOCKED'),
+       ('READY', 'RUNNING'),
+       ('RUNNING', 'WAITING'), ('RUNNING', 'BLOCKED'), ('RUNNING', 'VALIDATING'),
+       ('RUNNING', 'RETRYING'), ('RUNNING', 'FAILED'),
+       ('WAITING', 'RUNNING'), ('WAITING', 'BLOCKED'), ('WAITING', 'RETRYING'), ('WAITING', 'FAILED'),
+       ('BLOCKED', 'READY'), ('BLOCKED', 'PENDING'), ('BLOCKED', 'FAILED'),
+       ('VALIDATING', 'COMPLETED'), ('VALIDATING', 'RETRYING'), ('VALIDATING', 'FAILED'),
+       ('RETRYING', 'READY'),
+       ('FAILED', 'READY')) THEN
+    IF OLD.status = 'READY' AND NEW.status = 'RUNNING' AND NEW.attempt <> OLD.attempt + 1 THEN
+      RAISE EXCEPTION 'soulbah.tasks % : READY → RUNNING exige attempt = % (reçu %)', OLD.id, OLD.attempt + 1, NEW.attempt
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'soulbah.tasks % : transition % → % interdite (audit §9.4)', OLD.id, OLD.status, NEW.status
+    USING ERRCODE = 'check_violation';
+END $$;
+DROP TRIGGER IF EXISTS check_transition ON soulbah.tasks;
+CREATE TRIGGER check_transition BEFORE UPDATE OF status ON soulbah.tasks
+  FOR EACH ROW EXECUTE FUNCTION soulbah.tasks_check_transition();
+
+-- agents.current_task_id (3/12 ne pouvait pas encore référencer tasks).
+ALTER TABLE soulbah.agents ADD COLUMN IF NOT EXISTS current_task_id uuid;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agents_current_task_fk') THEN
+    ALTER TABLE soulbah.agents ADD CONSTRAINT agents_current_task_fk
+      FOREIGN KEY (current_task_id) REFERENCES soulbah.tasks(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Pont V1 : la tâche agent_tasks créée pour exécuter une tâche V2 (legacy_adapter, LOT 8).
+ALTER TABLE public.agent_tasks ADD COLUMN IF NOT EXISTS v2_task_id uuid;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_tasks_v2_task_fk') THEN
+    ALTER TABLE public.agent_tasks ADD CONSTRAINT agent_tasks_v2_task_fk
+      FOREIGN KEY (v2_task_id) REFERENCES soulbah.tasks(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_v2_task ON public.agent_tasks (v2_task_id) WHERE v2_task_id IS NOT NULL;
+
+
+-- >>>>>>>>>> 20261001120400_v2_task_dependencies.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 5/12 : dépendances entre tâches (arêtes du DAG) + trigger anti-cycle — audit §9.4, §12.
+-- Idempotente, additive.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS soulbah.task_dependencies (
+  task_id             uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  depends_on_task_id  uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  -- hard : bloque READY tant que la dépendance n'est pas COMPLETED (FAILED/CANCELLED → BLOCKED) ;
+  -- soft : ordre préféré, jamais bloquant.
+  kind                text NOT NULL DEFAULT 'hard' CONSTRAINT task_dependencies_kind_check CHECK (kind IN ('hard', 'soft')),
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (task_id, depends_on_task_id),
+  CONSTRAINT task_dependencies_no_self CHECK (task_id <> depends_on_task_id)
+);
+ALTER TABLE soulbah.task_dependencies ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_reverse ON soulbah.task_dependencies (depends_on_task_id);
+
+-- Anti-cycle : A → B → A est refusé (critère de sortie LOT 4). Les deux tâches doivent
+-- appartenir à la même session ; la session est verrouillée (FOR UPDATE) pour sérialiser
+-- les insertions concurrentes d'un même DAG.
+CREATE OR REPLACE FUNCTION soulbah.task_dependencies_check_cycle()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = soulbah, pg_temp
+AS $$
+DECLARE
+  s_task  uuid;
+  s_dep   uuid;
+  cyc     boolean;
+BEGIN
+  SELECT session_id INTO s_task FROM soulbah.tasks WHERE id = NEW.task_id;
+  SELECT session_id INTO s_dep  FROM soulbah.tasks WHERE id = NEW.depends_on_task_id;
+  IF s_task IS NULL OR s_dep IS NULL OR s_task <> s_dep THEN
+    RAISE EXCEPTION 'soulbah.task_dependencies : % et % ne sont pas dans la même session', NEW.task_id, NEW.depends_on_task_id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM 1 FROM soulbah.sessions WHERE id = s_task FOR UPDATE;
+
+  -- Cycle si, en remontant les dépendances existantes depuis depends_on_task_id, on
+  -- retrouve task_id (profondeur bornée : un DAG légitime fait au plus quelques dizaines de nœuds).
+  WITH RECURSIVE up(id, depth) AS (
+    SELECT NEW.depends_on_task_id, 1
+    UNION ALL
+    SELECT d.depends_on_task_id, up.depth + 1
+      FROM soulbah.task_dependencies d
+      JOIN up ON d.task_id = up.id
+     WHERE up.depth < 1000
+  )
+  SELECT EXISTS (SELECT 1 FROM up WHERE up.id = NEW.task_id) INTO cyc;
+  IF cyc THEN
+    RAISE EXCEPTION 'soulbah.task_dependencies : cycle de dépendances refusé (% dépendrait de % qui en dépend déjà)',
+      NEW.task_id, NEW.depends_on_task_id USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS check_cycle ON soulbah.task_dependencies;
+CREATE TRIGGER check_cycle BEFORE INSERT OR UPDATE ON soulbah.task_dependencies
+  FOR EACH ROW EXECUTE FUNCTION soulbah.task_dependencies_check_cycle();
+
+
+-- >>>>>>>>>> 20261001120500_v2_messages.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 6/12 : messages structurés entre agents et plan de contrôle — audit §9.5, §12.
+-- Idempotente, additive. public.chat_messages (chat utilisateur) est intacte.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS soulbah.messages (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id      uuid NOT NULL REFERENCES soulbah.sessions(id) ON DELETE CASCADE,
+  task_id         uuid REFERENCES soulbah.tasks(id) ON DELETE SET NULL,
+  from_agent_id   uuid REFERENCES soulbah.agents(id) ON DELETE SET NULL,
+  to_agent_id     uuid REFERENCES soulbah.agents(id) ON DELETE SET NULL,
+  -- Destinataire par rôle (quand aucun agent précis) : planner, qa_reviewer, user, control_plane…
+  to_role         text CONSTRAINT messages_to_role_format CHECK (to_role IS NULL OR to_role ~ '^[a-z][a-z0-9_]{0,63}$'),
+  type            text NOT NULL CONSTRAINT messages_type_check CHECK (type IN
+                    ('TASK_REQUEST', 'TASK_RESULT', 'QUESTION', 'BLOCKER', 'EVIDENCE',
+                     'REVIEW_REQUEST', 'REVIEW_RESULT', 'ERROR', 'KNOWLEDGE_FOUND')),
+  correlation_id  uuid,
+  reply_to        uuid REFERENCES soulbah.messages(id) ON DELETE SET NULL,
+  -- Charge utile (schéma JSON par type, validé par node-api) ; ≤ 64 Ko (§9.5).
+  payload         jsonb NOT NULL DEFAULT '{}'::jsonb
+                  CONSTRAINT messages_payload_object CHECK (soulbah.is_json_object(payload))
+                  CONSTRAINT messages_payload_size CHECK (pg_column_size(payload) <= 65536),
+  requires_ack    boolean NOT NULL DEFAULT false,
+  acked_at        timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.messages ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_messages_session ON soulbah.messages (session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_task ON soulbah.messages (task_id, created_at) WHERE task_id IS NOT NULL;
+-- Livraison aux workers (keepalive) : messages non acquittés par destinataire.
+CREATE INDEX IF NOT EXISTS idx_messages_pending_ack ON soulbah.messages (to_agent_id, created_at)
+  WHERE requires_ack AND acked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_correlation ON soulbah.messages (correlation_id) WHERE correlation_id IS NOT NULL;
+
+
+-- >>>>>>>>>> 20261001120600_v2_actions_tool_calls.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 7/12 : actions (états planned → verified, idempotence) et appels d'outils / de
+-- modèles (métrage) — audit §9.4, §9.8, §12. public.agent_events reste la télémétrie V1.
+-- Idempotente, additive.
+-- =============================================================================
+
+-- Une action = une étape d'une tentative. Clé d'idempotence task_id:attempt:step_index (§9.8).
+CREATE TABLE IF NOT EXISTS soulbah.actions (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id              uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  user_id              uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  attempt              integer NOT NULL CONSTRAINT actions_attempt_positive CHECK (attempt >= 0),
+  step_index           integer NOT NULL CONSTRAINT actions_step_positive CHECK (step_index >= 0),
+  -- Outil du catalogue (shared/tools/catalog.json) et paramètres (secrets déjà masqués).
+  tool                 text NOT NULL CONSTRAINT actions_tool_format CHECK (tool ~ '^[a-z][a-z0-9_]{0,39}$'),
+  params               jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT actions_params_object CHECK (soulbah.is_json_object(params)),
+  security_level       text NOT NULL DEFAULT 'L1' CONSTRAINT actions_level_check CHECK (soulbah.is_security_level(security_level)),
+  status               text NOT NULL DEFAULT 'planned'
+                       CONSTRAINT actions_status_check CHECK (status IN
+                         ('planned', 'attempted', 'executed', 'verified', 'failed', 'skipped', 'simulated')),
+  -- Preuves typées (§9.8) : [{"kind":"exit_code","confidence":"high","value":0,"artifact_id":…}].
+  evidence             jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT actions_evidence_array CHECK (soulbah.is_json_array(evidence)),
+  evidence_confidence  text CONSTRAINT actions_confidence_check CHECK (evidence_confidence IS NULL OR evidence_confidence IN ('high', 'medium', 'low', 'none')),
+  simulated            boolean NOT NULL DEFAULT false,
+  error                text,
+  started_at           timestamptz,
+  finished_at          timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT actions_idempotency UNIQUE (task_id, attempt, step_index),
+  -- Un dry-run ne devient jamais « vérifié » (§9.4 états d'une action).
+  CONSTRAINT actions_simulated_never_verified CHECK (NOT (simulated AND status = 'verified')),
+  CONSTRAINT actions_simulated_status CHECK (status <> 'simulated' OR simulated)
+);
+ALTER TABLE soulbah.actions ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.actions;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.actions
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_actions_task ON soulbah.actions (task_id, attempt, step_index);
+
+-- Métrage de chaque appel d'outil (exit_code) ou de modèle (jetons, coût, fournisseur) :
+-- alimenté par node-api à partir de l'en-tête x-llm-usage de python-ia (LOT 5) et des
+-- rapports d'actions du runtime (LOT 9).
+CREATE TABLE IF NOT EXISTS soulbah.tool_calls (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  session_id      uuid REFERENCES soulbah.sessions(id) ON DELETE SET NULL,
+  task_id         uuid REFERENCES soulbah.tasks(id) ON DELETE SET NULL,
+  action_id       uuid REFERENCES soulbah.actions(id) ON DELETE SET NULL,
+  kind            text NOT NULL CONSTRAINT tool_calls_kind_check CHECK (kind IN ('tool', 'model')),
+  -- Outil (nom du catalogue) ou rôle/tâche du modèle (planner, evaluator, vision, chat…).
+  name            text NOT NULL CONSTRAINT tool_calls_name_length CHECK (length(name) BETWEEN 1 AND 120),
+  provider        text,
+  model           text,
+  status          text NOT NULL DEFAULT 'ok' CONSTRAINT tool_calls_status_check CHECK (status IN ('ok', 'error', 'timeout', 'refused')),
+  exit_code       integer,
+  http_status     integer CONSTRAINT tool_calls_http_status_range CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599),
+  input_tokens    integer CONSTRAINT tool_calls_in_positive CHECK (input_tokens IS NULL OR input_tokens >= 0),
+  output_tokens   integer CONSTRAINT tool_calls_out_positive CHECK (output_tokens IS NULL OR output_tokens >= 0),
+  cost_usd        numeric(12, 6) CONSTRAINT tool_calls_cost_positive CHECK (cost_usd IS NULL OR cost_usd >= 0),
+  latency_ms      integer CONSTRAINT tool_calls_latency_positive CHECK (latency_ms IS NULL OR latency_ms >= 0),
+  error           text,
+  metadata        jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT tool_calls_metadata_object CHECK (soulbah.is_json_object(metadata)),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.tool_calls ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON soulbah.tool_calls (session_id, created_at) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tool_calls_task ON soulbah.tool_calls (task_id, created_at) WHERE task_id IS NOT NULL;
+-- Budgets : coût par utilisateur et par jour (LOT 5 / LOT 6).
+CREATE INDEX IF NOT EXISTS idx_tool_calls_user_day ON soulbah.tool_calls (user_id, created_at) WHERE kind = 'model';
+
+
+-- >>>>>>>>>> 20261001120700_v2_knowledge.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 8/12 : connaissances — extension de public.knowledge_base (documents), vue
+-- soulbah.knowledge_documents, table soulbah.knowledge_chunks (RAG hybride) — audit §12, T14, T38.
+-- Idempotente, additive. La dimension de knowledge_base.embedding (vector(1536)) n'est
+-- JAMAIS changée en place (« Jamais », §12) : les chunks portent un `embedding vector`
+-- sans dimension fixe et un embedding_model par ligne.
+-- =============================================================================
+
+-- knowledge_base = knowledge_documents : source, statut d'ingestion et statut documentaire.
+-- doc_status est NULLABLE SANS défaut : les lignes héritées ne sont pas modifiées, la vue
+-- dérive leur statut (category = 'recherche' → finding, non validé ; sinon user).
+ALTER TABLE public.knowledge_base
+  ADD COLUMN IF NOT EXISTS source_uri       text,
+  ADD COLUMN IF NOT EXISTS mime             text,
+  ADD COLUMN IF NOT EXISTS ingest_status    text,
+  ADD COLUMN IF NOT EXISTS embedding_model  text,
+  ADD COLUMN IF NOT EXISTS last_written_at  timestamptz,
+  ADD COLUMN IF NOT EXISTS doc_status       text;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_base_doc_status_check'
+                   AND conrelid = 'public.knowledge_base'::regclass) THEN
+    ALTER TABLE public.knowledge_base ADD CONSTRAINT knowledge_base_doc_status_check
+      CHECK (doc_status IS NULL OR doc_status IN ('finding', 'user', 'validated', 'rejected', 'deprecated')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_base_ingest_status_check'
+                   AND conrelid = 'public.knowledge_base'::regclass) THEN
+    ALTER TABLE public.knowledge_base ADD CONSTRAINT knowledge_base_ingest_status_check
+      CHECK (ingest_status IS NULL OR ingest_status IN ('pending', 'chunked', 'embedded', 'failed')) NOT VALID;
+  END IF;
+END $$;
+DO $$
+DECLARE c text;
+BEGIN
+  FOREACH c IN ARRAY ARRAY['knowledge_base_doc_status_check', 'knowledge_base_ingest_status_check'] LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE public.knowledge_base VALIDATE CONSTRAINT %I', c);
+    EXCEPTION WHEN check_violation THEN
+      RAISE NOTICE 'Contrainte % non validée : des lignes existantes la violent', c;
+    END;
+  END LOOP;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_doc_status ON public.knowledge_base (user_id, doc_status);
+
+-- Vue : statut effectif des documents. Le RAG « connaissance validée » exclut les findings.
+CREATE OR REPLACE VIEW soulbah.knowledge_documents AS
+SELECT kb.id,
+       kb.user_id,
+       kb.title,
+       kb.category,
+       kb.domain,
+       kb.source,
+       kb.source_uri,
+       kb.mime,
+       kb.ingest_status,
+       kb.embedding_model,
+       kb.content_hash,
+       kb.version,
+       kb.confidence,
+       COALESCE(kb.doc_status, CASE WHEN kb.category = 'recherche' THEN 'finding' ELSE 'user' END) AS doc_status,
+       (kb.doc_status IS NULL) AS doc_status_derived,
+       kb.last_verified_at,
+       kb.last_written_at,
+       kb.created_at,
+       kb.updated_at
+  FROM public.knowledge_base kb;
+
+-- Chunks : unité de récupération (FTS + vecteur, fusion RRF au LOT 13).
+CREATE TABLE IF NOT EXISTS soulbah.knowledge_chunks (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id      uuid NOT NULL REFERENCES public.knowledge_base(id) ON DELETE CASCADE,
+  user_id          uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  chunk_index      integer NOT NULL CONSTRAINT knowledge_chunks_index_positive CHECK (chunk_index >= 0),
+  content          text NOT NULL CONSTRAINT knowledge_chunks_content_length CHECK (length(content) BETWEEN 1 AND 20000),
+  token_count      integer CONSTRAINT knowledge_chunks_tokens_positive CHECK (token_count IS NULL OR token_count >= 0),
+  -- tsvector généré (FTS) ; configuration « simple » : multilingue, sans racinisation.
+  tsv              tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
+  -- Vecteur SANS dimension fixe (T38) : le modèle est porté par la ligne.
+  embedding        vector,
+  embedding_model  text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT knowledge_chunks_unique UNIQUE (document_id, chunk_index),
+  CONSTRAINT knowledge_chunks_model_with_embedding CHECK (embedding IS NULL OR embedding_model IS NOT NULL)
+);
+ALTER TABLE soulbah.knowledge_chunks ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document ON soulbah.knowledge_chunks (document_id, chunk_index);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_user ON soulbah.knowledge_chunks (user_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_tsv ON soulbah.knowledge_chunks USING gin (tsv);
+-- Index HNSW PARTIEL par modèle (une dimension fixée par le cast) — un index par modèle d'embedding.
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_hnsw_te3s ON soulbah.knowledge_chunks
+  USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
+  WHERE embedding_model = 'text-embedding-3-small';
+
+
+-- >>>>>>>>>> 20261001120800_v2_memory.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 9/12 : mémoire — extension de public.agent_memory et vue soulbah.memories
+-- (audit §12, T11, contrat LOT 1 §9). Idempotente, additive, aucune ligne modifiée.
+-- =============================================================================
+
+ALTER TABLE public.agent_memory
+  ADD COLUMN IF NOT EXISTS session_id      uuid,
+  ADD COLUMN IF NOT EXISTS scope           text NOT NULL DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS source_task_id  uuid,
+  ADD COLUMN IF NOT EXISTS evidence_ids    jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS confidence      real NOT NULL DEFAULT 0.5,
+  ADD COLUMN IF NOT EXISTS validated_by    uuid,
+  ADD COLUMN IF NOT EXISTS validated_at    timestamptz,
+  ADD COLUMN IF NOT EXISTS expires_at      timestamptz,
+  ADD COLUMN IF NOT EXISTS is_simulation   boolean NOT NULL DEFAULT false;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_session_fk') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_session_fk
+      FOREIGN KEY (session_id) REFERENCES soulbah.sessions(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_source_task_fk') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_source_task_fk
+      FOREIGN KEY (source_task_id) REFERENCES soulbah.tasks(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_scope_check') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_scope_check
+      CHECK (scope IN ('session', 'project', 'user', 'global')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_confidence_range') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_confidence_range
+      CHECK (confidence >= 0 AND confidence <= 1) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_evidence_array') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_evidence_array
+      CHECK (soulbah.is_json_array(evidence_ids)) NOT VALID;
+  END IF;
+  -- Contrat §9 / audit §12 : « validated » exige une preuve ou un validateur. La forme V1
+  -- (metadata.validated_by, routes/agentMemory.ts) reste acceptée jusqu'au LOT 8.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_memory_validated_requires_proof') THEN
+    ALTER TABLE public.agent_memory ADD CONSTRAINT agent_memory_validated_requires_proof
+      CHECK (status <> 'validated'
+             OR validated_by IS NOT NULL
+             OR (metadata ? 'validated_by')
+             OR (jsonb_typeof(evidence_ids) = 'array' AND jsonb_array_length(evidence_ids) > 0)) NOT VALID;
+  END IF;
+END $$;
+DO $$
+DECLARE c text;
+BEGIN
+  FOREACH c IN ARRAY ARRAY['agent_memory_scope_check', 'agent_memory_confidence_range',
+                           'agent_memory_evidence_array', 'agent_memory_validated_requires_proof'] LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE public.agent_memory VALIDATE CONSTRAINT %I', c);
+    EXCEPTION WHEN check_violation THEN
+      RAISE NOTICE 'Contrainte % non validée : des lignes existantes la violent (lues comme « proposed » par soulbah.memories)', c;
+    END;
+  END LOOP;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_agent_memory_scope ON public.agent_memory (user_id, scope, status);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_session ON public.agent_memory (session_id) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_memory_expires ON public.agent_memory (expires_at) WHERE expires_at IS NOT NULL;
+
+-- Vue : statut EFFECTIF. Une ligne « validated » sans validateur ni preuve (écrite par
+-- l'ancien évaluateur) est lue comme « proposed », sans modification de données.
+CREATE OR REPLACE VIEW soulbah.memories AS
+SELECT m.id,
+       m.user_id,
+       m.session_id,
+       m.scope,
+       m.type,
+       m.level,
+       m.goal,
+       m.content,
+       m.metadata,
+       m.project_id,
+       m.source_task_id,
+       m.evidence_ids,
+       m.confidence,
+       CASE
+         WHEN m.status = 'validated'
+              AND m.validated_by IS NULL
+              AND NOT (m.metadata ? 'validated_by')
+              AND (jsonb_typeof(m.evidence_ids) <> 'array' OR jsonb_array_length(m.evidence_ids) = 0)
+           THEN 'proposed'
+         ELSE m.status
+       END AS status,
+       m.status AS stored_status,
+       COALESCE(m.validated_by, NULLIF(m.metadata ->> 'validated_by', '')::uuid) AS validated_by,
+       COALESCE(m.validated_at, NULLIF(m.metadata ->> 'validated_at', '')::timestamptz) AS validated_at,
+       m.expires_at,
+       m.is_simulation,
+       m.created_at,
+       m.updated_at
+  FROM public.agent_memory m
+ WHERE m.expires_at IS NULL OR m.expires_at > now();
+
+
+-- >>>>>>>>>> 20261001120900_v2_skills_evaluations_checkpoints.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 10/12 : skills versionnées, évaluations, checkpoints — audit §9.8, §9.9, §12.
+-- Idempotente, additive.
+-- =============================================================================
+
+-- Skills : alimentée par le catalogue (shared/tools/catalog.json, LOT 2) et par les
+-- procédures apprises (LOT 10). UNIQUE(name, version).
+CREATE TABLE IF NOT EXISTS soulbah.skills (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name            text NOT NULL CONSTRAINT skills_name_format CHECK (name ~ '^[a-z][a-z0-9_]{0,39}$'),
+  version         text NOT NULL CONSTRAINT skills_version_semver CHECK (version ~ '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'),
+  -- catalog : outil du catalogue ; learned : procédure proposée (LOT 10/12, jamais promue sans approbation L3).
+  source          text NOT NULL DEFAULT 'catalog' CONSTRAINT skills_source_check CHECK (source IN ('catalog', 'learned')),
+  status          text NOT NULL DEFAULT 'active' CONSTRAINT skills_status_check CHECK (status IN ('proposed', 'active', 'deprecated', 'rejected')),
+  security_level  text NOT NULL DEFAULT 'L1' CONSTRAINT skills_level_check CHECK (soulbah.is_security_level(security_level)),
+  schema          jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT skills_schema_object CHECK (soulbah.is_json_object(schema)),
+  procedure       jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT skills_procedure_object CHECK (soulbah.is_json_object(procedure)),
+  permissions     jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT skills_permissions_object CHECK (soulbah.is_json_object(permissions)),
+  examples        jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT skills_examples_array CHECK (soulbah.is_json_array(examples)),
+  known_errors    jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT skills_known_errors_array CHECK (soulbah.is_json_array(known_errors)),
+  tests           jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT skills_tests_array CHECK (soulbah.is_json_array(tests)),
+  created_by      uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT skills_name_version UNIQUE (name, version)
+);
+ALTER TABLE soulbah.skills ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.skills;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.skills
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_skills_status ON soulbah.skills (status, name);
+
+-- Évaluations : résultat de la phase VALIDATING d'une tentative (critères DSL, preuves, verdict).
+CREATE TABLE IF NOT EXISTS soulbah.evaluations (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id         uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  attempt         integer NOT NULL CONSTRAINT evaluations_attempt_positive CHECK (attempt >= 0),
+  criteria        jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT evaluations_criteria_array CHECK (soulbah.is_json_array(criteria)),
+  results         jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT evaluations_results_array CHECK (soulbah.is_json_array(results)),
+  verdict         text NOT NULL CONSTRAINT evaluations_verdict_check CHECK (verdict IN ('success', 'partial', 'failure', 'abort', 'not_evaluable')),
+  confidence      text NOT NULL DEFAULT 'none' CONSTRAINT evaluations_confidence_check CHECK (confidence IN ('high', 'medium', 'low', 'none')),
+  evidence_ids    jsonb NOT NULL DEFAULT '[]'::jsonb CONSTRAINT evaluations_evidence_array CHECK (soulbah.is_json_array(evidence_ids)),
+  -- Ce que le plan de contrôle a fait du verdict (contrat LOT 1 : action_taken).
+  action_taken    text,
+  evaluator       text NOT NULL DEFAULT 'rules' CONSTRAINT evaluations_evaluator_check CHECK (evaluator IN ('rules', 'llm', 'qa_reviewer', 'user')),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  -- Une seule évaluation par tentative (VALIDATING durable, LOT 10).
+  CONSTRAINT evaluations_once_per_attempt UNIQUE (task_id, attempt)
+);
+ALTER TABLE soulbah.evaluations ENABLE ROW LEVEL SECURITY;
+
+-- Checkpoints : reprise depuis la dernière étape (§9.9) — curseur et variables d'une tentative.
+CREATE TABLE IF NOT EXISTS soulbah.checkpoints (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id         uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  attempt         integer NOT NULL CONSTRAINT checkpoints_attempt_positive CHECK (attempt >= 0),
+  seq             integer NOT NULL CONSTRAINT checkpoints_seq_positive CHECK (seq >= 0),
+  step_cursor     integer NOT NULL DEFAULT 0 CONSTRAINT checkpoints_cursor_positive CHECK (step_cursor >= 0),
+  variables       jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT checkpoints_variables_object CHECK (soulbah.is_json_object(variables)),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT checkpoints_unique UNIQUE (task_id, attempt, seq)
+);
+ALTER TABLE soulbah.checkpoints ENABLE ROW LEVEL SECURITY;
+
+
+-- >>>>>>>>>> 20261001121000_v2_artifacts_recordings_permissions_leases.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 11/12 : artefacts (sha256), enregistrements vidéo, permissions (grants et demandes
+-- d'approbation), verrous de ressources — audit §9.7, §9.8, §9.10, §12.
+-- Idempotente, additive.
+-- =============================================================================
+
+-- Artefacts : adressés par sha256, un fichier par (utilisateur, hash). Plus aucun base64 en base.
+CREATE TABLE IF NOT EXISTS soulbah.artifacts (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  session_id       uuid REFERENCES soulbah.sessions(id) ON DELETE SET NULL,
+  task_id          uuid REFERENCES soulbah.tasks(id) ON DELETE SET NULL,
+  sha256           text NOT NULL CONSTRAINT artifacts_sha256_format CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+  mime             text NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes       bigint NOT NULL CONSTRAINT artifacts_size_positive CHECK (size_bytes >= 0),
+  -- Emplacement de stockage (chemin du volume média, URI…) : jamais le contenu.
+  uri              text NOT NULL,
+  kind             text NOT NULL DEFAULT 'file' CONSTRAINT artifacts_kind_check CHECK (kind IN ('file', 'screenshot', 'video', 'log', 'report', 'diff')),
+  retention_class  text NOT NULL DEFAULT 'task' CONSTRAINT artifacts_retention_check CHECK (retention_class IN ('ephemeral', 'task', 'session', 'permanent')),
+  metadata         jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT artifacts_metadata_object CHECK (soulbah.is_json_object(metadata)),
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT artifacts_unique_per_user UNIQUE (user_id, sha256)
+);
+ALTER TABLE soulbah.artifacts ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON soulbah.artifacts (task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_artifacts_retention ON soulbah.artifacts (retention_class, created_at);
+
+-- Enregistrements d'écran : durée, fps effectif, probe (h264/aac) — LOT 14.
+CREATE TABLE IF NOT EXISTS soulbah.recordings (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  task_id          uuid REFERENCES soulbah.tasks(id) ON DELETE SET NULL,
+  artifact_id      uuid REFERENCES soulbah.artifacts(id) ON DELETE SET NULL,
+  path             text NOT NULL,
+  status           text NOT NULL DEFAULT 'recording' CONSTRAINT recordings_status_check CHECK (status IN ('recording', 'stopped', 'failed')),
+  duration_s       real CONSTRAINT recordings_duration_positive CHECK (duration_s IS NULL OR duration_s >= 0),
+  fps_requested    real CONSTRAINT recordings_fps_req_positive CHECK (fps_requested IS NULL OR fps_requested > 0),
+  fps_effective    real CONSTRAINT recordings_fps_eff_positive CHECK (fps_effective IS NULL OR fps_effective >= 0),
+  probe            jsonb CONSTRAINT recordings_probe_object CHECK (probe IS NULL OR soulbah.is_json_object(probe)),
+  started_at       timestamptz NOT NULL DEFAULT now(),
+  stopped_at       timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.recordings ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_recordings_task ON soulbah.recordings (task_id) WHERE task_id IS NOT NULL;
+
+-- Permissions : grants de session (L1/L2) et demandes d'approbation par action (L2/L3),
+-- liées au payload présenté (payload_sha256) ; le jeton HMAC (LOT 6) n'est stocké que haché.
+CREATE TABLE IF NOT EXISTS soulbah.permissions (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  session_id         uuid REFERENCES soulbah.sessions(id) ON DELETE CASCADE,
+  task_id            uuid REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  action_id          uuid REFERENCES soulbah.actions(id) ON DELETE SET NULL,
+  kind               text NOT NULL CONSTRAINT permissions_kind_check CHECK (kind IN ('grant', 'request')),
+  security_level     text NOT NULL CONSTRAINT permissions_level_check CHECK (soulbah.is_security_level(security_level)),
+  -- Portée du grant : {"tools":["type_text"],"resources":["desktop.input:*"]}.
+  scope              jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT permissions_scope_object CHECK (soulbah.is_json_object(scope)),
+  payload_sha256     text CONSTRAINT permissions_payload_hash_format CHECK (payload_sha256 IS NULL OR payload_sha256 ~ '^[0-9a-f]{64}$'),
+  payload_presented  jsonb CONSTRAINT permissions_payload_object CHECK (payload_presented IS NULL OR soulbah.is_json_object(payload_presented)),
+  status             text NOT NULL DEFAULT 'pending' CONSTRAINT permissions_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'revoked')),
+  decided_by         uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  decided_at         timestamptz,
+  expires_at         timestamptz,
+  token_hash         text CONSTRAINT permissions_token_hash_format CHECK (token_hash IS NULL OR token_hash ~ '^[0-9a-f]{64}$'),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  -- Une demande L3 porte toujours le payload complet (§9.10 : jamais en lot).
+  CONSTRAINT permissions_l3_requires_payload CHECK (kind <> 'request' OR security_level <> 'L3' OR payload_sha256 IS NOT NULL),
+  CONSTRAINT permissions_decision_consistent CHECK ((status IN ('approved', 'denied')) = (decided_at IS NOT NULL))
+);
+ALTER TABLE soulbah.permissions ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS set_updated_at ON soulbah.permissions;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON soulbah.permissions
+  FOR EACH ROW EXECUTE FUNCTION soulbah.set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_permissions_pending ON soulbah.permissions (user_id, created_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_permissions_session ON soulbah.permissions (session_id, status) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_permissions_task ON soulbah.permissions (task_id) WHERE task_id IS NOT NULL;
+
+-- Verrous de ressources (§9.7) : exclusivité garantie par un index unique partiel.
+CREATE TABLE IF NOT EXISTS soulbah.resource_leases (
+  resource_key     text NOT NULL CONSTRAINT resource_leases_key_format CHECK (resource_key ~ '^[a-z][a-z0-9_.-]*(:[^\s]+)*$'),
+  holder_task_id   uuid NOT NULL REFERENCES soulbah.tasks(id) ON DELETE CASCADE,
+  mode             text NOT NULL DEFAULT 'exclusive' CONSTRAINT resource_leases_mode_check CHECK (mode IN ('exclusive', 'shared')),
+  expires_at       timestamptz NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (resource_key, holder_task_id)
+);
+ALTER TABLE soulbah.resource_leases ENABLE ROW LEVEL SECURITY;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_leases_exclusive ON soulbah.resource_leases (resource_key) WHERE mode = 'exclusive';
+CREATE INDEX IF NOT EXISTS idx_resource_leases_expires ON soulbah.resource_leases (expires_at);
+CREATE INDEX IF NOT EXISTS idx_resource_leases_holder ON soulbah.resource_leases (holder_task_id);
+
+
+-- >>>>>>>>>> 20261001121100_v2_audit.sql <<<<<<<<<<
+
+-- =============================================================================
+-- V2 — 12/12 : journal d'audit en AJOUT SEUL et CHAÎNÉ (prev_hash / row_hash) — audit §9.3, §12.
+-- Idempotente, additive.
+--
+--  * Chaque ligne porte le hash de la précédente (tête de chaîne soulbah.audit_chain_head,
+--    verrouillée FOR UPDATE : la chaîne est linéaire même sous concurrence) et son propre
+--    hash SHA-256 (fonction native sha256(), aucune extension requise).
+--  * UPDATE, DELETE et TRUNCATE sont refusés par trigger ; aucune purge.
+--  * soulbah.verify_audit_chain() recalcule toute la chaîne : (ok, checked, broken_at).
+--
+-- Les autres points prévus par l'audit pour ce dernier fichier étaient déjà livrés au LOT 1 :
+-- trigger agent_tasks_set_updated_at insensible à `control` (20261001090000 §2, 20261001100000 §1),
+-- is_admin() sans argument et REVOKE has_role FROM anon (20261001090000 §3), policies
+-- agent_keys / agent_memory en SELECT (+DELETE) côté client (20261001100000 §2, §5).
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS soulbah.audit_logs (
+  seq          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id           uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+  user_id      uuid,
+  session_id   uuid,
+  task_id      uuid,
+  -- Qui : user:<uuid>, system:scheduler, runtime:<id>, agent:<role>…
+  actor        text NOT NULL CONSTRAINT audit_logs_actor_length CHECK (length(actor) BETWEEN 1 AND 200),
+  -- Quoi : task.transition, permission.approved, memory.validated, skill.promoted…
+  action       text NOT NULL CONSTRAINT audit_logs_action_format CHECK (action ~ '^[a-z][a-z0-9_.]{0,99}$'),
+  entity       text,
+  entity_id    uuid,
+  data         jsonb NOT NULL DEFAULT '{}'::jsonb CONSTRAINT audit_logs_data_object CHECK (soulbah.is_json_object(data)),
+  prev_hash    text NOT NULL CONSTRAINT audit_logs_prev_hash_format CHECK (prev_hash ~ '^[0-9a-f]{64}$'),
+  row_hash     text NOT NULL CONSTRAINT audit_logs_row_hash_format CHECK (row_hash ~ '^[0-9a-f]{64}$'),
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_audit_logs_session ON soulbah.audit_logs (session_id, seq) WHERE session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_logs_task ON soulbah.audit_logs (task_id, seq) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON soulbah.audit_logs (user_id, seq) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON soulbah.audit_logs (action, seq);
+
+CREATE TABLE IF NOT EXISTS soulbah.audit_chain_head (
+  id          smallint PRIMARY KEY CONSTRAINT audit_chain_head_single CHECK (id = 1),
+  last_seq    bigint NOT NULL DEFAULT 0,
+  last_hash   text NOT NULL DEFAULT repeat('0', 64),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE soulbah.audit_chain_head ENABLE ROW LEVEL SECURITY;
+INSERT INTO soulbah.audit_chain_head (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Hash d'une ligne : prev_hash + champs canoniques (jsonb::text est canonique : clés triées).
+CREATE OR REPLACE FUNCTION soulbah.audit_row_hash(
+  p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text,
+  p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamptz)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT encode(sha256(convert_to(
+    p_prev || '|' || p_id::text || '|' || coalesce(p_user::text, '') || '|' || coalesce(p_session::text, '')
+    || '|' || coalesce(p_task::text, '') || '|' || p_actor || '|' || p_action || '|' || coalesce(p_entity, '')
+    || '|' || coalesce(p_entity_id::text, '') || '|' || p_data::text
+    || '|' || to_char(p_created AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'UTF8')), 'hex')
+$$;
+
+CREATE OR REPLACE FUNCTION soulbah.audit_logs_before_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = soulbah, pg_temp
+AS $$
+DECLARE
+  head soulbah.audit_chain_head%ROWTYPE;
+BEGIN
+  SELECT * INTO head FROM soulbah.audit_chain_head WHERE id = 1 FOR UPDATE;
+  IF NOT FOUND THEN
+    INSERT INTO soulbah.audit_chain_head (id) VALUES (1) RETURNING * INTO head;
+  END IF;
+  NEW.created_at := coalesce(NEW.created_at, now());
+  NEW.prev_hash  := head.last_hash;
+  NEW.row_hash   := soulbah.audit_row_hash(NEW.prev_hash, NEW.id, NEW.user_id, NEW.session_id, NEW.task_id,
+                                           NEW.actor, NEW.action, NEW.entity, NEW.entity_id, NEW.data, NEW.created_at);
+  -- La tête avance ICI (trigger BEFORE, ligne par ligne) : un trigger AFTER ne s'exécute qu'en
+  -- fin d'instruction et laisserait toutes les lignes d'un INSERT multi-lignes sur le même prev_hash.
+  UPDATE soulbah.audit_chain_head
+     SET last_seq = NEW.seq, last_hash = NEW.row_hash, updated_at = now()
+   WHERE id = 1;
+  RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION soulbah.audit_logs_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'soulbah.audit_logs est en ajout seul : % refusé', TG_OP
+    USING ERRCODE = 'insufficient_privilege';
+END $$;
+
+DROP TRIGGER IF EXISTS chain_before_insert ON soulbah.audit_logs;
+CREATE TRIGGER chain_before_insert BEFORE INSERT ON soulbah.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION soulbah.audit_logs_before_insert();
+DROP TRIGGER IF EXISTS immutable_rows ON soulbah.audit_logs;
+CREATE TRIGGER immutable_rows BEFORE UPDATE OR DELETE ON soulbah.audit_logs
+  FOR EACH ROW EXECUTE FUNCTION soulbah.audit_logs_immutable();
+DROP TRIGGER IF EXISTS immutable_table ON soulbah.audit_logs;
+CREATE TRIGGER immutable_table BEFORE TRUNCATE ON soulbah.audit_logs
+  FOR EACH STATEMENT EXECUTE FUNCTION soulbah.audit_logs_immutable();
+
+-- Vérification intégrale : première ligne dont prev_hash ou row_hash ne correspond pas.
+CREATE OR REPLACE FUNCTION soulbah.verify_audit_chain(OUT ok boolean, OUT checked bigint, OUT broken_at bigint)
+LANGUAGE plpgsql
+STABLE
+SET search_path = soulbah, pg_temp
+AS $$
+DECLARE
+  r     record;
+  prev  text := repeat('0', 64);
+  n     bigint := 0;
+  head  soulbah.audit_chain_head%ROWTYPE;
+BEGIN
+  FOR r IN SELECT * FROM soulbah.audit_logs ORDER BY seq LOOP
+    IF r.prev_hash <> prev
+       OR r.row_hash <> soulbah.audit_row_hash(r.prev_hash, r.id, r.user_id, r.session_id, r.task_id,
+                                               r.actor, r.action, r.entity, r.entity_id, r.data, r.created_at) THEN
+      ok := false; checked := n; broken_at := r.seq;
+      RETURN;
+    END IF;
+    prev := r.row_hash;
+    n := n + 1;
+  END LOOP;
+  SELECT * INTO head FROM soulbah.audit_chain_head WHERE id = 1;
+  IF FOUND AND head.last_hash <> prev THEN
+    ok := false; checked := n; broken_at := head.last_seq;
+    RETURN;
+  END IF;
+  ok := true; checked := n; broken_at := NULL;
+END $$;
+
+
 COMMIT;
