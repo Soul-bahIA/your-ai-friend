@@ -27,8 +27,15 @@ min(délai de la tâche + marge SDK, temps restant avant l'échéance x-deadline
 proprement avant la coupure. Sans en-tête, un budget implicite par tâche (aligné sur
 les délais de node) borne l'ensemble des sauts.
 
-Chaque appel est journalisé avec son usage (jetons entrée/sortie, raison d'arrêt) ;
-une réponse tronquée (max_tokens) devient une erreur 502 « réponse tronquée ».
+Chaque appel est journalisé avec son usage (jetons entrée/sortie, raison d'arrêt,
+coût estimé) ; une réponse tronquée (max_tokens) devient une erreur 502 « réponse
+tronquée ».
+
+Coûts et budgets (LOT 5, usage.py) : le coût de chaque appel est estimé d'après
+shared/models/pricing.json (`cost_usd`, None si tarif inconnu) et cumulé en mémoire par
+fournisseur et par rôle (`status()["usage"]`). LLM_MAX_OUTPUT_TOKENS_<RÔLE> plafonne
+max_tokens des tâches à profil ; LLM_DAILY_BUDGET_USD (coût cumulé par jour UTC) refuse
+tout nouvel appel par 402 kind="budget" une fois atteint, sans repli.
 """
 from __future__ import annotations
 
@@ -36,14 +43,15 @@ import asyncio
 import json
 import logging
 import os
-import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .. import request_context
 from .base import CompletionResult, LLMError, LLMProvider
+from .circuit import CircuitBreaker  # noqa: F401 — réexporté (compatibilité LOT 1)
 from .registry import build_providers
+from .usage import UsageMeter, estimate_cost, price_for
 
 logger = logging.getLogger("python-ia.llm")
 
@@ -108,94 +116,13 @@ MIN_HOP_S = 1.0             # en dessous, on ne lance pas de nouvel appel
 DEADLINE_MARGIN_S = 0.5     # temps laissé pour répondre à l'appelant (jamais consommé par un saut)
 SDK_TIMEOUT_GRACE_S = 0.25  # le délai du SDK expire un peu AVANT la coupure wait_for
 
-# Jeton renvoyé par acquire() quand le disjoncteur est fermé (appel normal, pas une sonde).
-_NOT_A_PROBE = object()
-
-
-class CircuitBreaker:
-    """Disjoncteur simple par fournisseur : fermé → ouvert après `threshold` échecs
-    consécutifs → semi-ouvert après `cooldown_s` → fermé au premier succès.
-
-    Semi-ouvert : UN SEUL appel d'essai (sonde) passe ; les autres appelants traitent
-    le fournisseur comme ouvert tant que la sonde n'a pas abouti (succès → fermé,
-    échec → rouvert). Une sonde terminée sans verdict (erreur non imputable au
-    fournisseur, requête annulée) est rendue par release() ; par sûreté, une sonde qui
-    n'aboutit jamais expire après `cooldown_s` (au plus une sonde par période)."""
-
-    def __init__(self, threshold: int = 3, cooldown_s: float = 30.0,
-                 clock: Callable[[], float] = time.monotonic):
-        self.threshold = max(1, threshold)
-        self.cooldown_s = cooldown_s
-        self._clock = clock
-        self._failures: dict[str, int] = {}
-        self._opened_at: dict[str, float] = {}
-        self._probes: dict[str, tuple[object, float]] = {}  # pid -> (jeton, début)
-        self._lock = threading.Lock()  # l'orchestrateur est partagé (threads compris)
-
-    def _state(self, pid: str) -> str:
-        opened = self._opened_at.get(pid)
-        if opened is None:
-            return "closed"
-        return "half_open" if self._clock() - opened >= self.cooldown_s else "open"
-
-    def state(self, pid: str) -> str:
-        with self._lock:
-            return self._state(pid)
-
-    def acquire(self, pid: str) -> object | None:
-        """Autorise un appel : None si refusé (ouvert, ou sonde déjà en cours), sinon un
-        jeton à rendre via release() si l'appel se termine sans verdict."""
-        with self._lock:
-            state = self._state(pid)
-            if state == "closed":
-                return _NOT_A_PROBE
-            if state == "open":
-                return None
-            probe = self._probes.get(pid)
-            if probe is not None and self._clock() - probe[1] < self.cooldown_s:
-                return None
-            token = object()
-            self._probes[pid] = (token, self._clock())
-            return token
-
-    def allow(self, pid: str) -> bool:
-        """Compatibilité : acquire() sans conserver le jeton (la sonde éventuelle est
-        close par success()/failure())."""
-        return self.acquire(pid) is not None
-
-    def release(self, pid: str, token: object) -> None:
-        """Rend la sonde détenue par `token` sans verdict : le prochain appelant sondera."""
-        with self._lock:
-            probe = self._probes.get(pid)
-            if probe is not None and probe[0] is token:
-                del self._probes[pid]
-
-    def success(self, pid: str) -> None:
-        with self._lock:
-            self._failures.pop(pid, None)
-            self._opened_at.pop(pid, None)
-            self._probes.pop(pid, None)
-
-    def failure(self, pid: str) -> None:
-        with self._lock:
-            self._probes.pop(pid, None)
-            n = self._failures.get(pid, 0) + 1
-            self._failures[pid] = n
-            if n >= self.threshold:
-                if pid not in self._opened_at or self._state(pid) == "half_open":
-                    logger.warning("Disjoncteur OUVERT pour le fournisseur %s (%d échecs)", pid, n)
-                self._opened_at[pid] = self._clock()
-
-    def reset(self) -> None:
-        with self._lock:
-            self._failures.clear()
-            self._opened_at.clear()
-            self._probes.clear()
-
-    def snapshot(self) -> dict[str, dict[str, Any]]:
-        with self._lock:
-            pids = set(self._failures) | set(self._opened_at)
-            return {p: {"state": self._state(p), "failures": self._failures.get(p, 0)} for p in sorted(pids)}
+# Plafond de max_tokens par profil (LOT 5) : vide = valeur demandée par l'appelant.
+OUTPUT_TOKEN_CAPS: dict[str, str] = {
+    "planner": "LLM_MAX_OUTPUT_TOKENS_PLANNER",
+    "evaluator": "LLM_MAX_OUTPUT_TOKENS_EVALUATOR",
+    "vision": "LLM_MAX_OUTPUT_TOKENS_VISION",
+    "cheap": "LLM_MAX_OUTPUT_TOKENS_CHEAP",
+}
 
 
 @dataclass
@@ -219,6 +146,8 @@ class Orchestrator:
             threshold=_env_int("LLM_CB_THRESHOLD", 3),
             cooldown_s=_env_float("LLM_CB_COOLDOWN_S", 30.0),
         )
+        # Consommation (jetons, coût) cumulée par processus ; survit à set_providers().
+        self.meter = UsageMeter()
 
     # ------------------------------------------------------------------ config
     def set_providers(self, providers: dict[str, LLMProvider] | None) -> None:
@@ -262,6 +191,37 @@ class Orchestrator:
         pid, model = raw.split(":", 1) if ":" in raw else ("anthropic", raw)
         effort = (os.getenv(effort_env, "") or effort_default).strip().lower() or None
         return pid.strip(), model.strip(), effort
+
+    @staticmethod
+    def role_for(task: str) -> str:
+        """Rôle sous lequel la consommation est comptée : nom du profil (planner,
+        evaluator, vision, cheap) si la tâche en a un, sinon la tâche elle-même."""
+        return TASK_PROFILES.get(task, task)
+
+    @staticmethod
+    def output_token_cap(role: str) -> int | None:
+        """Plafond LLM_MAX_OUTPUT_TOKENS_<RÔLE> (entier > 0), None = aucun."""
+        env = OUTPUT_TOKEN_CAPS.get(role)
+        if not env:
+            return None
+        raw = (os.getenv(env, "") or "").strip()
+        if not raw:
+            return None
+        try:
+            cap = int(raw)
+        except ValueError:
+            logger.warning("%s=%r invalide (entier > 0 attendu) : ignoré", env, raw[:20])
+            return None
+        return cap if cap > 0 else None
+
+    @classmethod
+    def cap_output_tokens(cls, task: str, max_tokens: int) -> int:
+        """max_tokens effectif : min(demandé, plafond du profil de la tâche)."""
+        cap = cls.output_token_cap(cls.role_for(task))
+        if cap is not None and max_tokens > cap:
+            logger.info("max_tokens %d plafonné à %d (profil %s)", max_tokens, cap, cls.role_for(task))
+            return cap
+        return max_tokens
 
     @staticmethod
     def _task_timeout_s(task: str) -> float:
@@ -339,8 +299,15 @@ class Orchestrator:
         json_schema: dict | None = None,
         images: list[str] | None = None,
         provider: str | None = None,
+        effort: str | None = None,
     ) -> CompletionResult:
+        """`effort` (LOT 5, relais /v2/models/complete) : impose le niveau d'effort à
+        tous les sauts ; None = effort du profil / LLM_EFFORT_DEFAULT."""
         hops = self.plan_hops(task, provider, bool(images))
+        # Budget quotidien : refus AVANT tout appel, sans repli (402 kind="budget").
+        self.meter.check_budget()
+        max_tokens = self.cap_output_tokens(task, max_tokens)
+        effort = (effort or "").strip().lower() or None
         started = time.monotonic()
         local_deadline = started + self._task_budget_s(task)
         task_timeout = self._task_timeout_s(task)
@@ -372,7 +339,7 @@ class Orchestrator:
                 result = await asyncio.wait_for(
                     hop.provider.generate(
                         system, messages, max_tokens, json_schema, images,
-                        model=hop.model, timeout_s=sdk_timeout, effort=hop.effort,
+                        model=hop.model, timeout_s=sdk_timeout, effort=effort or hop.effort,
                     ),
                     timeout=hard_timeout,
                 )
@@ -400,6 +367,11 @@ class Orchestrator:
                     result.model = hop.model
                 if not result.latency_ms:
                     result.latency_ms = int((time.monotonic() - t0) * 1000)
+                if result.cost_usd is None:
+                    result.cost_usd = estimate_cost(result.provider, result.model,
+                                                    result.input_tokens, result.output_tokens)
+                self.meter.record(result.provider, result.model, self.role_for(task),
+                                  result.input_tokens, result.output_tokens, result.cost_usd)
                 self._log_success(task, result)
                 if result.truncated:
                     raise LLMError(
@@ -456,7 +428,18 @@ class Orchestrator:
         for task, name in TASK_PROFILES.items():
             prof = self.profile_for(task)
             if prof:
-                profiles[name] = {"provider": prof[0], "model": prof[1], "effort": prof[2], "task": task}
+                profiles[name] = {
+                    "provider": prof[0], "model": prof[1], "effort": prof[2], "task": task,
+                    "max_output_tokens_cap": self.output_token_cap(name),
+                    "pricing_usd_per_mtok": price_for(prof[0], prof[1]),
+                }
+        # Tarifs connus (USD / 1M jetons) des modèles effectivement en jeu : modèle par
+        # défaut de chaque fournisseur configuré + modèles des profils. None = inconnu.
+        pricing: dict[str, dict[str, float] | None] = {}
+        for pid, prov in provs.items():
+            pricing[f"{pid}:{prov.model}"] = price_for(pid, prov.model)
+        for prof in profiles.values():
+            pricing.setdefault(f"{prof['provider']}:{prof['model']}", prof["pricing_usd_per_mtok"])
         return {
             "providers": [p.describe() for p in provs.values()],
             "configured": list(provs.keys()),
@@ -465,6 +448,8 @@ class Orchestrator:
             "profiles": profiles,
             "allowed_overrides": self.allowed_overrides(),
             "circuit_breakers": self.breaker.snapshot(),
+            "pricing": pricing,
+            "usage": self.meter.snapshot(),
         }
 
 

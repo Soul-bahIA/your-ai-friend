@@ -27,6 +27,7 @@ from .providers import orchestrator
 from .reasoning import analyze_performance, evaluate_execution, plan_goal
 from .research import synthesize
 from .rust_client import ComputeUnavailable, heavy_compute
+from .v2 import router as v2_router
 from .video import VideoCancelled, build_formation_video
 
 logger = logging.getLogger("python-ia")
@@ -159,6 +160,10 @@ class ServiceGuardMiddleware:
 
 
 app.add_middleware(ServiceGuardMiddleware)
+
+# API V2 (LOT 5 : /v2/models) — mêmes garde-fous que les routes historiques (le
+# middleware ASGI ci-dessus enveloppe toute l'application).
+app.include_router(v2_router)
 
 
 # ---------------------------------------------------------------------------

@@ -105,6 +105,8 @@ class CompletionResult:
     latency_ms: int = 0
     # Fournisseurs essayés AVANT celui qui a répondu (repli), dans l'ordre.
     fallback_from: list[str] = field(default_factory=list)
+    # Coût estimé (USD, shared/models/pricing.json) posé par le routeur ; None = tarif inconnu.
+    cost_usd: float | None = None
 
     def usage(self) -> dict[str, Any]:
         return {
@@ -112,6 +114,7 @@ class CompletionResult:
             "model": self.model,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cost_usd": self.cost_usd,
             "stop_reason": self.stop_reason,
             "truncated": self.truncated,
             "latency_ms": self.latency_ms,

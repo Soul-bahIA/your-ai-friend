@@ -74,9 +74,12 @@ def usage_summary() -> dict[str, Any] | None:
     usage = _usage.get()
     if not usage:
         return None
+    # cost_usd : somme des coûts connus (LOT 5) ; None si aucun appel n'a de tarif connu.
+    costs = [float(u["cost_usd"]) for u in usage if u.get("cost_usd") is not None]
     return {
         "calls": len(usage),
         "input_tokens": sum(int(u.get("input_tokens") or 0) for u in usage),
         "output_tokens": sum(int(u.get("output_tokens") or 0) for u in usage),
+        "cost_usd": round(sum(costs), 8) if costs else None,
         "models": sorted({f"{u.get('provider')}:{u.get('model')}" for u in usage}),
     }

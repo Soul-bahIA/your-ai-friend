@@ -58,8 +58,10 @@ async function postIa<T>(path: string, body: unknown, opts: { long?: boolean } =
     logger.warn({ path, err: err.message }, "python-ia injoignable");
     throw new ServiceError(502, "Service IA injoignable");
   }
+  // Métrage (LOT 5) : agrégé, journalisé et écrit dans soulbah.tool_calls pour l'utilisateur de
+  // la requête courante ; jamais attendu (la réponse ne dépend pas de la base).
   const usage = parseLlmUsage(res.headers.get("x-llm-usage"));
-  if (usage) recordLlmUsage(path, usage);
+  if (usage) void recordLlmUsage(path, usage);
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { detail?: unknown; error?: unknown };
     const detail = typeof data.detail === "string" ? data.detail : typeof data.error === "string" ? data.error : "";

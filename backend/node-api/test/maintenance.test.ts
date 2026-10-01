@@ -135,6 +135,7 @@ describe("intégration python-ia", () => {
       calls: 2,
       input_tokens: 10,
       output_tokens: 5,
+      cost_usd: null,
       models: ["m"],
     });
     expect(parseLlmUsage("pas du json")).toBeNull();

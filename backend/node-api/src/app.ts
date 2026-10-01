@@ -13,6 +13,7 @@ import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import { config } from "./config.js";
 import { bearerToken, cachedAgentForKey, cachedUserForToken } from "./auth.js";
+import { requestStore } from "./lib/requestStore.js";
 import { isOriginAllowed } from "./lib/cors.js";
 import { resolveMediaDir } from "./lib/mediaDir.js";
 import { healthRoutes } from "./routes/health.js";
@@ -85,6 +86,12 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
 
   app.setErrorHandler(errorHandler);
+
+  // Contexte de requête (AsyncLocalStorage) : les services profonds (client python-ia,
+  // métrage dans soulbah.tool_calls) retrouvent l'utilisateur authentifié sans paramètre.
+  app.addHook("onRequest", (request, _reply, done) => {
+    requestStore.run(request, done);
+  });
 
   // --- CORS : liste blanche (CORS_ORIGINS) ---
   await app.register(cors, {

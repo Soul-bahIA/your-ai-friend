@@ -1,6 +1,8 @@
 """Orchestration multi-fournisseurs d'IA de SoulBah AI."""
 from .base import CompletionResult, LLMError, LLMProvider, ModelCapabilities
-from .router import CircuitBreaker, Orchestrator, orchestrator
+from .circuit import CircuitBreaker
+from .router import Orchestrator, orchestrator
+from .usage import UsageMeter, estimate_cost
 
 __all__ = [
     "CircuitBreaker",
@@ -9,5 +11,7 @@ __all__ = [
     "LLMProvider",
     "ModelCapabilities",
     "Orchestrator",
+    "UsageMeter",
+    "estimate_cost",
     "orchestrator",
 ]
