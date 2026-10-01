@@ -1,5 +1,6 @@
 // Garde-fous de démarrage selon SOULBAH_ENV (contrat LOT 1 §1). Fonction pure : testable.
 import fs from "node:fs";
+import { cloudModelsAllowed, hostAllowed, isLocalEndpoint, loadSettings, repoRoot } from "./soulbahSettings.js";
 
 export const SOULBAH_ENVS = ["dev", "test", "staging", "production"] as const;
 export type SoulbahEnv = (typeof SOULBAH_ENVS)[number];
@@ -98,6 +99,31 @@ export function checkStartupEnv(
       errors.push("DEV_LOCAL_USER_ID doit être l'uuid de l'utilisateur de dev (créé par scripts/dev_db/dev_db.sh seed)");
     }
     warnings.push("AUTH_MODE=dev-local : vérification Supabase des JWT DÉSACTIVÉE — un seul utilisateur de dev, boucle locale uniquement");
+  }
+
+  // V3 LOT 1 : configuration centrale (mode OFFLINE / LOCAL_INTERNET / HYBRID…). Une valeur
+  // invalide bloque le démarrage ; en OFFLINE, les services dont dépend node-api doivent être
+  // joignables sans Internet (bouclage, nom local sans point, ou hôte déclaré).
+  const central = loadSettings(env, env === process.env ? repoRoot() : null);
+  for (const e of central.errors) errors.push(`configuration Soulbah : ${e}`);
+  if (central.errors.length === 0 && central.settings.mode === "OFFLINE") {
+    const endpoints: [string, string | undefined][] = [
+      ["DATABASE_URL", (env.DATABASE_URL ?? "").trim() || undefined],
+      ["IA_SERVICE_URL", (env.IA_SERVICE_URL ?? "").trim() || undefined],
+      ["SUPABASE_URL (AUTH_MODE=supabase)", authMode === "supabase" ? (env.SUPABASE_URL ?? "").trim() || undefined : undefined],
+    ];
+    for (const [name, url] of endpoints) {
+      const host = urlHost(url);
+      if (host && !hostAllowed(central.settings, host)) {
+        errors.push(`mode OFFLINE : ${name} pointe vers un hôte externe (${host}) — utilisez un service local ou déclarez l'hôte dans network.allow_hosts`);
+      }
+    }
+  }
+
+  // Hors HYBRID, LOCAL_LLM_URL doit viser une machine de l'utilisateur (sinon : modèle distant).
+  const localLlmHost = urlHost((env.LOCAL_LLM_URL ?? "").trim() || undefined);
+  if (central.errors.length === 0 && localLlmHost && !cloudModelsAllowed(central.settings) && !isLocalEndpoint(central.settings, localLlmHost)) {
+    errors.push(`mode ${central.settings.mode} : LOCAL_LLM_URL vise un hôte externe (${localLlmHost}) — un modèle local doit tourner sur une machine de l'utilisateur (déclarez-la dans network.allow_hosts)`);
   }
 
   // TLS Postgres (S13) — jamais de DATABASE_URL dans les messages (mot de passe).
@@ -236,5 +262,15 @@ function defaultFileReadable(p: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Hôte d'une URL (sans identifiants ni port), ou null si absente ou illisible. */
+function urlHost(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase() || null;
+  } catch {
+    return null;
   }
 }

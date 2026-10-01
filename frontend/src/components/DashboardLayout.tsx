@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import Sidebar from "./Sidebar";
 import CommandBar from "./CommandBar";
+import ModeBadge from "./ModeBadge";
 
 const DashboardLayout = ({ children }: { children: ReactNode }) => {
   const isMobile = useIsMobile();
@@ -24,6 +25,9 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
               <Menu className="h-5 w-5" />
             </button>
             <span className="text-sm font-bold tracking-tight">SOULBAH IA</span>
+            <span className="ml-auto">
+              <ModeBadge compact />
+            </span>
           </header>
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetContent side="left" className="w-64 p-0">

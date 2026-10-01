@@ -3,6 +3,7 @@
 // et le moteur de recherche se rabat sur la KB + la synthèse du modèle.
 
 import { logger } from "../../lib/logger.js";
+import { currentSettings, internetAllowed } from "../../lib/soulbahSettings.js";
 
 const WEB_SEARCH_TIMEOUT_MS = 15_000;
 
@@ -34,6 +35,8 @@ export interface WebSearchProvider {
 class NullProvider implements WebSearchProvider {
   id = "none";
   available = false;
+  /** Raison de l'indisponibilité (V3 LOT 1 : mode OFFLINE). */
+  reason = "aucune clé de recherche web configurée";
   async search(): Promise<WebResult[]> {
     return [];
   }
@@ -127,6 +130,12 @@ let _provider: WebSearchProvider | null = null;
 
 /** Fournisseur de recherche web configuré (ou NullProvider si aucune clé). */
 export function getWebSearchProvider(): WebSearchProvider {
+  // V3 LOT 1 : en OFFLINE, aucune recherche web, même avec une clé (vérifié à chaque appel).
+  if (!internetAllowed(currentSettings())) {
+    const off = new NullProvider();
+    off.reason = "recherche web désactivée en mode OFFLINE";
+    return off;
+  }
   if (_provider) return _provider;
   const wanted = (process.env.WEB_SEARCH_PROVIDER ?? "").toLowerCase();
   const tavily = process.env.TAVILY_API_KEY;

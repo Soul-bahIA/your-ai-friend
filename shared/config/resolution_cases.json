@@ -1,0 +1,195 @@
+{
+  "description": "Cas de résolution de la configuration centrale (V3 LOT 1), exécutés à l'identique par l'agent, python-ia (soulbah_settings.py) et node-api (soulbahSettings.ts). `expect` : valeurs résolues attendues (sous-ensemble) ; `errors` : fragments qui DOIVENT figurer dans les erreurs ; `derived` : politique dérivée.",
+  "cases": [
+    {
+      "name": "défauts : HYBRID, comportement V2 inchangé",
+      "env": {},
+      "file": null,
+      "expect": {
+        "mode": "HYBRID",
+        "max_agents": 6,
+        "resource_profile": "BALANCED",
+        "model_policy": "auto",
+        "network": {
+          "allow_hosts": []
+        },
+        "computer_control": true,
+        "recording": true,
+        "self_improvement": false
+      },
+      "derived": {
+        "label": "HYBRID",
+        "cloud_models_allowed": true,
+        "internet_allowed": true,
+        "effective_max_agents": 6
+      }
+    },
+    {
+      "name": "OFFLINE par l'environnement : ni cloud ni Internet",
+      "env": {
+        "SOULBAH_MODE": "offline"
+      },
+      "file": null,
+      "expect": {
+        "mode": "OFFLINE"
+      },
+      "derived": {
+        "label": "OFFLINE — 100% LOCAL",
+        "cloud_models_allowed": false,
+        "internet_allowed": false
+      },
+      "hosts": {
+        "127.0.0.1": true,
+        "localhost": true,
+        "::1": true,
+        "api.anthropic.com": false,
+        "192.168.1.20": false,
+        "python-ia": true,
+        "postgres": true,
+        "aws-0-eu-west-3.pooler.supabase.com": false
+      }
+    },
+    {
+      "name": "LOCAL_INTERNET (variantes d'écriture) : Internet oui, cloud non",
+      "env": {
+        "SOULBAH_MODE": "local+internet"
+      },
+      "file": null,
+      "expect": {
+        "mode": "LOCAL_INTERNET"
+      },
+      "derived": {
+        "label": "LOCAL + INTERNET",
+        "cloud_models_allowed": false,
+        "internet_allowed": true
+      },
+      "hosts": {
+        "api.anthropic.com": true,
+        "github.com": true
+      }
+    },
+    {
+      "name": "fichier puis environnement : l'environnement l'emporte",
+      "env": {
+        "SOULBAH_MODE": "HYBRID",
+        "SOULBAH_MAX_PARALLEL_AGENTS": "4"
+      },
+      "file": {
+        "mode": "OFFLINE",
+        "max_agents": 3,
+        "resource_profile": "eco",
+        "network": {
+          "allow_hosts": [
+            "Serveur-IA.local",
+            "192.168.1.20"
+          ]
+        }
+      },
+      "expect": {
+        "mode": "HYBRID",
+        "max_agents": 4,
+        "resource_profile": "ECO",
+        "network": {
+          "allow_hosts": [
+            "serveur-ia.local",
+            "192.168.1.20"
+          ]
+        }
+      },
+      "derived": {
+        "effective_max_agents": 2
+      }
+    },
+    {
+      "name": "hôte déclaré joignable même en OFFLINE",
+      "env": {
+        "SOULBAH_MODE": "OFFLINE",
+        "SOULBAH_NETWORK_ALLOW_HOSTS": "192.168.1.20, serveur-ia.local"
+      },
+      "file": null,
+      "expect": {
+        "network": {
+          "allow_hosts": [
+            "192.168.1.20",
+            "serveur-ia.local"
+          ]
+        }
+      },
+      "hosts": {
+        "192.168.1.20": true,
+        "serveur-ia.local": true,
+        "192.168.1.21": false
+      }
+    },
+    {
+      "name": "booléens et politique de modèle",
+      "env": {
+        "SOULBAH_COMPUTER_CONTROL": "non",
+        "SOULBAH_RECORDING": "0",
+        "SOULBAH_SELF_IMPROVEMENT": "oui",
+        "SOULBAH_MODEL_POLICY": "local:qwen2.5-3b-instruct"
+      },
+      "file": null,
+      "expect": {
+        "computer_control": false,
+        "recording": false,
+        "self_improvement": true,
+        "model_policy": "local:qwen2.5-3b-instruct"
+      }
+    },
+    {
+      "name": "faute de frappe sur le mode : erreur (jamais d'ouverture silencieuse)",
+      "env": {
+        "SOULBAH_MODE": "OFLINE"
+      },
+      "file": null,
+      "errors": [
+        "SOULBAH_MODE",
+        "mode inconnu"
+      ]
+    },
+    {
+      "name": "valeurs invalides : toutes signalées",
+      "env": {
+        "SOULBAH_MAX_PARALLEL_AGENTS": "99",
+        "SOULBAH_RESOURCE_PROFILE": "TURBO",
+        "SOULBAH_RECORDING": "peut-être"
+      },
+      "file": null,
+      "errors": [
+        "max_agents",
+        "resource_profile inconnu",
+        "recording : booléen"
+      ]
+    },
+    {
+      "name": "fichier : clé inconnue et hôte avec schéma refusés",
+      "env": {},
+      "file": {
+        "mode": "OFFLINE",
+        "internet": true,
+        "network": {
+          "allow_hosts": [
+            "https://exemple.com"
+          ]
+        }
+      },
+      "errors": [
+        "clé inconnue « internet »",
+        "hôte invalide"
+      ]
+    },
+    {
+      "name": "fichier : $schema et description ignorés",
+      "env": {},
+      "file": {
+        "$schema": "./shared/config/soulbah.config.schema.json",
+        "description": "PC portable",
+        "mode": "LOCAL_INTERNET"
+      },
+      "expect": {
+        "mode": "LOCAL_INTERNET"
+      }
+    }
+  ]
+}

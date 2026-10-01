@@ -1,0 +1,12 @@
+{
+  "$schema": "./shared/config/soulbah.config.schema.json",
+  "description": "Copier à la racine du dépôt sous le nom soulbah.config.json (jamais versionné), ou pointer SOULBAH_CONFIG vers ce fichier. Les variables SOULBAH_* l'emportent sur le fichier.",
+  "mode": "HYBRID",
+  "max_agents": 6,
+  "resource_profile": "BALANCED",
+  "model_policy": "auto",
+  "network": { "allow_hosts": [] },
+  "computer_control": true,
+  "recording": true,
+  "self_improvement": false
+}

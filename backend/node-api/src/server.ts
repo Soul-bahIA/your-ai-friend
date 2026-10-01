@@ -14,6 +14,7 @@ import { runReviews } from "./v2/evaluation/reviewer.js";
 import { runContentTasks } from "./v2/planner/contentRunner.js";
 import { defaultRubricJudge } from "./v2/evaluation/judge.js";
 import { drainBackgroundJobs } from "./services/backgroundJobs.js";
+import { currentSettings } from "./lib/soulbahSettings.js";
 
 // Journaux : en-têtes d'authentification rédigés par pino ; objets et messages des services
 // rédigés par redactingLogger (LOT 6 : aucun secret dans les journaux).
@@ -147,7 +148,7 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 try {
   await app.listen({ port: config.port, host: config.host });
   app.log.info(
-    { corsOrigins: config.corsOrigins, env: startupEnv.soulbahEnv, trustProxy: config.trustProxy },
+    { corsOrigins: config.corsOrigins, env: startupEnv.soulbahEnv, trustProxy: config.trustProxy, mode: currentSettings().mode, maxAgents: config.maxParallelAgents },
     `node-api en écoute sur http://${config.host}:${config.port}`,
   );
 } catch (err) {

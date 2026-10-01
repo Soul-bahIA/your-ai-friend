@@ -6,10 +6,12 @@ import os
 import sys
 import time
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from skills.base import Skill
 from skills.manifests import confirm_step_types, get_manifest, path_param_names
 from skills.safety import canonical_path, deny_reason, workspace_errors  # noqa: F401 - réexporté
+import soulbah_settings as S
 
 log = logging.getLogger("soulbah.permissions")
 
@@ -53,6 +55,9 @@ def is_l3(skill: Skill, step: dict) -> bool:
 # Champs de chemin vérifiés (whitelist + deny-list) quelle que soit la catégorie : tous
 # les paramètres `is_path` des manifestes (texte, ou liste de chemins comme `clips`).
 _PATH_KEYS, _PATH_LIST_KEYS = path_param_names()
+
+# V3 LOT 1 : étapes coupées par recording=false.
+RECORDING_STEP_TYPES = frozenset({"record_screen", "start_recording", "start_recording_bg"})
 
 DEFAULT_CONFIRM_TIMEOUT = 120.0
 # Réponse exigée pour une action de niveau L3 (risquée / irréversible).
@@ -161,8 +166,12 @@ class PermissionGate:
         confirm_timeout: float = DEFAULT_CONFIRM_TIMEOUT,
         approval_mode: str = APPROVAL_CONSOLE,
         approver: Any | None = None,
+        settings: dict[str, Any] | None = None,
     ):
         self.mode = mode  # "confirm" | "auto"
+        # V3 LOT 1 : configuration centrale (mode OFFLINE / LOCAL_INTERNET / HYBRID, contrôle de
+        # l'ordinateur, enregistrement). Défaut : HYBRID, comportement V2 inchangé.
+        self.settings = settings if settings is not None else S.resolve({})["settings"]
         # LOT 6 : console | remote | both ; `approver` = approvals.RemoteApprover (posé par
         # l'agent une fois le client HTTP créé ; None = aucune approbation distante possible).
         self.approval_mode = approval_mode if approval_mode in (APPROVAL_CONSOLE, APPROVAL_REMOTE, APPROVAL_BOTH) \
@@ -344,6 +353,30 @@ class PermissionGate:
             return True, "validé par l'utilisateur"
         return False, "refusé par l'utilisateur"
 
+    # --- configuration centrale (V3 LOT 1) ------------------------------------------
+    def settings_refusal(self, skill: Skill, step: dict) -> str | None:
+        """Refus imposé par la configuration centrale, AVANT toute confirmation : ni le mode
+        auto, ni allow_input_control, ni une approbation ne le lèvent."""
+        st = self.settings
+        stype = str(step.get("type", "")).strip()
+        if not st.get("computer_control", True) and skill.category in INPUT_CONTROL_CATEGORIES:
+            return "contrôle de l'ordinateur désactivé par la configuration (computer_control=false)"
+        if not st.get("recording", True) and stype in RECORDING_STEP_TYPES:
+            return "enregistrement de l'écran désactivé par la configuration (recording=false)"
+        if not S.internet_allowed(st):
+            mode = st.get("mode")
+            if skill.name == "browser_get":
+                host = (urlsplit(str(step.get("url") or "")).hostname or "")
+                if not S.is_local_endpoint(st, host):
+                    return f"mode {mode} : lecture web refusée (hôte {host or '?'} hors des machines locales déclarées)"
+            if skill.name == "git_push":
+                return f"mode {mode} : envoi vers un dépôt distant refusé"
+            if skill.name == "run_command" and str(step.get("program") or "").strip() == "npm":
+                args = step.get("args") if isinstance(step.get("args"), list) else []
+                if args and str(args[0]) in ("ci", "install", "i", "add", "update"):
+                    return f"mode {mode} : installation de paquets npm refusée (réseau requis ; cache hors ligne : LOT 10 V3)"
+        return None
+
     # --- décision ------------------------------------------------------------
     def authorize(self, skill: Skill, step: dict, context: dict[str, Any] | None = None) -> tuple[bool, str]:
         """Retourne (autorisé, raison). Applique whitelist + deny-list, validation
@@ -359,6 +392,12 @@ class PermissionGate:
         err = self._validate(skill, step)
         if err:
             return False, err
+
+        # 2 bis. Configuration centrale (V3 LOT 1) : mode et interrupteurs, même en dry-run
+        #        (un plan simulé doit montrer qu'il serait refusé).
+        refusal = self.settings_refusal(skill, step)
+        if refusal:
+            return False, refusal
 
         # 3. En dry-run, on autorise (l'exécuteur simulera sans agir)
         if self.dry_run:

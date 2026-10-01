@@ -50,3 +50,6 @@ __pycache__/
 *.crt
 *.pem
 backup_passphrase*.txt
+
+# V3 LOT 1 : configuration centrale locale (exemple versionné : shared/config/soulbah.config.example.json)
+soulbah.config.json

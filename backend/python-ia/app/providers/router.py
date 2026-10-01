@@ -50,7 +50,9 @@ from typing import Any
 from .. import request_context
 from .base import CompletionResult, LLMError, LLMProvider
 from .circuit import CircuitBreaker  # noqa: F401 — réexporté (compatibilité LOT 1)
-from .registry import build_providers
+from .. import soulbah_settings
+from ..config import soulbah_settings_now
+from .registry import BLOCKED_BY_MODE, build_providers
 from .usage import UsageMeter, estimate_cost, price_for
 
 logger = logging.getLogger("python-ia.llm")
@@ -240,6 +242,14 @@ class Orchestrator:
     # ---------------------------------------------------------------- routing
     def plan_hops(self, task: str, override: str | None, needs_vision: bool) -> list[Hop]:
         provs = self._providers_map()
+        if not provs and BLOCKED_BY_MODE:
+            mode = soulbah_settings_now()["mode"]
+            raise LLMError(
+                503,
+                f"Aucun modèle local disponible en mode {mode} : les fournisseurs cloud sont "
+                "refusés. Configurez un serveur de modèle local (LOCAL_LLM_URL).",
+                kind="no_local_model",
+            )
         if not provs:
             raise LLMError(
                 500,
@@ -440,7 +450,16 @@ class Orchestrator:
             pricing[f"{pid}:{prov.model}"] = price_for(pid, prov.model)
         for prof in profiles.values():
             pricing.setdefault(f"{prof['provider']}:{prof['model']}", prof["pricing_usd_per_mtok"])
+        settings = soulbah_settings_now()
+        vision = any(p.capabilities(p.model).vision for p in provs.values())
         return {
+            "mode": settings["mode"],
+            "mode_label": soulbah_settings.mode_label(settings),
+            "cloud_models_allowed": soulbah_settings.cloud_models_allowed(settings),
+            "blocked_by_mode": dict(BLOCKED_BY_MODE),
+            "reasoning_available": bool(provs),
+            "vision_available": vision,
+            "local_configured": "local" in provs,
             "providers": [p.describe() for p in provs.values()],
             "configured": list(provs.keys()),
             "default": self._default_provider_id(),

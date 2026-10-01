@@ -2,11 +2,15 @@
 // OpenAI text-embedding-3-small (1536 dim). Best-effort : si indisponible, on renvoie
 // null et la recherche retombe sur le plein-texte — la KB reste fonctionnelle.
 
+import { cloudModelsAllowed, currentSettings } from "../../lib/soulbahSettings.js";
+
 const EMBED_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
 const EMBED_URL = process.env.EMBEDDING_URL ?? "https://api.openai.com/v1/embeddings";
 const EMBED_TIMEOUT_MS = 30_000;
 
 export async function embed(text: string): Promise<number[] | null> {
+  // V3 LOT 1 : l'API d'embeddings est un modèle cloud — refusée hors HYBRID (repli plein texte).
+  if (!cloudModelsAllowed(currentSettings())) return null;
   const key = process.env.OPENAI_API_KEY;
   if (!key || !text.trim()) return null;
   try {

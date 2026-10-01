@@ -408,9 +408,25 @@ def build_executor(cfg: Config) -> tuple[Executor | None, int]:
         except OSError as e:
             log.error("Impossible de créer le workspace %s : %s", cfg.allowed_dirs[0], e)
             return None, 2
+    # V3 LOT 1 : configuration centrale (mode, contrôle de l'ordinateur, enregistrement).
+    from config import load_soulbah_settings
+    import soulbah_settings
+
+    central = load_soulbah_settings()
+    if central["errors"]:
+        for err in central["errors"]:
+            log.error("✖ Configuration Soulbah : %s", err)
+        log.error("Démarrage refusé : corrigez soulbah.config.json ou les variables SOULBAH_* "
+                  "(exemple : shared/config/soulbah.config.example.json).")
+        return None, 2
+    log.info("Mode %s · agents %d · contrôle de l'ordinateur %s · enregistrement %s",
+             soulbah_settings.mode_label(central["settings"]), soulbah_settings.effective_max_agents(central["settings"]),
+             "oui" if central["settings"]["computer_control"] else "non",
+             "oui" if central["settings"]["recording"] else "non")
     gate = PermissionGate(
         cfg.permission_mode, cfg.allowed_dirs, cfg.dry_run, cfg.allow_input_control,
         confirm_timeout=cfg.confirm_timeout, approval_mode=cfg.approval_mode,
+        settings=central["settings"],
     )
     return Executor(gate, step_timeout=cfg.step_timeout), 0
 

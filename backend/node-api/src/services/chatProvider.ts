@@ -5,6 +5,7 @@
 // le même /chat/completions avec streaming et outils. On choisit par configuration
 // (CHAT_PROVIDER), avec repli automatique sur le 1er fournisseur dont la clé est présente.
 // Anthropic n'est pas ici (format SSE différent) : il faudrait un adaptateur dédié.
+import { cloudModelsAllowed, currentSettings, isLocalEndpoint, type SoulbahSettings } from "../lib/soulbahSettings.js";
 
 interface ChatProviderSpec {
   url: string; // endpoint /chat/completions complet
@@ -66,7 +67,9 @@ const ORDER = ["openai", "gemini", "mistral", "deepseek", "xai", "qwen"];
  * CHAT_MODEL ne s'applique qu'au fournisseur explicitement choisi (CHAT_PROVIDER) :
  * en repli sur un autre fournisseur, on n'envoie jamais le modèle d'un autre éditeur.
  */
-export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env): ChatProvider | null {
+export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env, settings: Pick<SoulbahSettings, "mode" | "network"> = currentSettings()): ChatProvider | null {
+  // V3 LOT 1 : hors HYBRID, seul le modèle local (LOCAL_LLM_URL) est autorisé.
+  const cloud = cloudModelsAllowed(settings);
   const wanted = (env.CHAT_PROVIDER ?? "").toLowerCase();
   const chatModel = env.CHAT_MODEL || undefined;
 
@@ -76,6 +79,8 @@ export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env): ChatP
       // Modèle local (Ollama/LM Studio) : activé si LOCAL_LLM_URL est défini.
       const localUrl = env.LOCAL_LLM_URL;
       if (!localUrl) return null;
+      // Hors HYBRID, le « modèle local » doit tourner sur une machine de l'utilisateur.
+      if (!cloud && !isLocalEndpoint(settings, hostOf(localUrl))) return null;
       return {
         provider: "local",
         url: `${localUrl.replace(/\/+$/, "")}/chat/completions`,
@@ -84,7 +89,7 @@ export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env): ChatP
       };
     }
     const spec = SPECS[id];
-    if (!spec) return null;
+    if (!spec || !cloud) return null;
     const key = env[spec.keyEnv];
     if (!key) return null;
     return {
@@ -106,4 +111,12 @@ export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env): ChatP
     if (p) return p;
   }
   return null;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }

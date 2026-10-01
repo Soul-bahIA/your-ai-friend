@@ -36,6 +36,8 @@ import httpx
 
 from . import request_context
 from .llm import LLMError
+from . import soulbah_settings
+from .config import soulbah_settings_now
 from .providers.base import upstream_error
 
 logger = logging.getLogger("python-ia")
@@ -106,6 +108,11 @@ def _synthesize(text: str, out_path: str, timeout_s: float | None = None) -> Non
     """Narration -> fichier MP3 via OpenAI TTS (appel bloquant, depuis un thread du pool).
 
     `timeout_s` : délai TOTAL de la requête (défaut et plafond : 120 s)."""
+    settings = soulbah_settings_now()
+    if not soulbah_settings.cloud_models_allowed(settings):
+        # V3 LOT 1 : la synthèse vocale OpenAI est un service cloud (TTS local : LOT 11 V3).
+        raise LLMError(503, f"Narration audio indisponible en mode {settings['mode']} : synthèse vocale cloud refusée "
+                            "(synthèse locale prévue au LOT 11 V3)", kind="disabled_by_mode")
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise LLMError(500, "OPENAI_API_KEY non configurée (narration audio)")

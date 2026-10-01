@@ -140,3 +140,17 @@ def load_config(require_key: bool = True) -> Config:
         approval_mode=_approval_mode(),
         key_source=key_source,
     )
+
+
+# --- V3 LOT 1 : configuration centrale (shared/config/soulbah_settings.py, copiée ici) ------
+AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(AGENT_DIR)
+
+
+def load_soulbah_settings() -> dict:
+    """{"settings", "errors", "source"} : SOULBAH_CONFIG ou <dépôt>/soulbah.config.json, puis
+    variables SOULBAH_*. Des erreurs = l'agent refuse de démarrer (jamais d'ouverture silencieuse)."""
+    import soulbah_settings
+
+    return soulbah_settings.load(REPO_ROOT)
+

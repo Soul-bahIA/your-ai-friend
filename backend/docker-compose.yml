@@ -41,6 +41,17 @@ x-soulbah-env: &soulbah-env
   # Fournisseurs qu'un client peut imposer (champ `provider`), lu par node-api ET python-ia :
   # même valeur des deux côtés. Vide = aucune surcharge (tout `provider` fourni → 400).
   LLM_ALLOWED_OVERRIDES: ${LLM_ALLOWED_OVERRIDES:-}
+  # V3 LOT 1 : configuration centrale, MÊME valeur pour node-api et python-ia (vide = défaut ;
+  # shared/config/soulbah.config.schema.json). OFFLINE refuse les fournisseurs cloud et exige
+  # une base, un python-ia et un modèle joignables sans Internet.
+  SOULBAH_MODE: ${SOULBAH_MODE:-}
+  SOULBAH_MAX_PARALLEL_AGENTS: ${SOULBAH_MAX_PARALLEL_AGENTS:-6}
+  SOULBAH_RESOURCE_PROFILE: ${SOULBAH_RESOURCE_PROFILE:-}
+  SOULBAH_MODEL_POLICY: ${SOULBAH_MODEL_POLICY:-}
+  SOULBAH_NETWORK_ALLOW_HOSTS: ${SOULBAH_NETWORK_ALLOW_HOSTS:-}
+  SOULBAH_COMPUTER_CONTROL: ${SOULBAH_COMPUTER_CONTROL:-}
+  SOULBAH_RECORDING: ${SOULBAH_RECORDING:-}
+  SOULBAH_SELF_IMPROVEMENT: ${SOULBAH_SELF_IMPROVEMENT:-}
 
 # Routeur de modèles de python-ia (LOT 1, cf. .env.example). Vide = défaut du routeur ;
 # les valeurs numériques lues sans repli dans le code reçoivent leur défaut documenté
@@ -176,7 +187,6 @@ services:
       # Agent local / maintenance / limitation de débit
       AGENT_TASK_STALE_SECONDS: ${AGENT_TASK_STALE_SECONDS:-180}
       # V2 (LOT 7) : parallélisme, baux, scheduler, flux SSE
-      SOULBAH_MAX_PARALLEL_AGENTS: ${SOULBAH_MAX_PARALLEL_AGENTS:-6}
       SOULBAH_LEASE_SECONDS: ${SOULBAH_LEASE_SECONDS:-90}
       SOULBAH_SCHEDULER_INTERVAL_SECONDS: ${SOULBAH_SCHEDULER_INTERVAL_SECONDS:-5}
       SOULBAH_STREAM_INTERVAL_MS: ${SOULBAH_STREAM_INTERVAL_MS:-2000}

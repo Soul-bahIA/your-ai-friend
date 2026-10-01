@@ -74,6 +74,10 @@ jobs:
           python-version: "3.11"
       - name: Manifestes → catalogue généré à jour (shared/tools + copies des services)
         run: python scripts/gen_catalog.py --check
+      # V3 LOT 1 : configuration centrale — shared/config/soulbah_settings.py copié à l'identique
+      # dans l'agent et python-ia (python scripts/sync_shared.py pour régénérer).
+      - name: Modules partagés à jour (shared/config → agent, python-ia)
+        run: python scripts/sync_shared.py --check
 
   # --- API Node (Fastify / TypeScript) ---------------------------------------------
   node-api:

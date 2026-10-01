@@ -134,10 +134,26 @@ class Supervisor:
         self._stop.set()
 
     # --- poignée de main ---------------------------------------------------------------------
+    def v3_capabilities(self) -> dict[str, Any]:
+        """V3 LOT 1 : mode, profil matériel résumé et capacités locales (jamais bloquant)."""
+        try:
+            import capabilities
+            import hardware
+            from config import load_soulbah_settings
+
+            central = load_soulbah_settings()
+            if central["errors"]:
+                return {}
+            return capabilities.registration_payload(central["settings"], hardware.profile())
+        except Exception:  # noqa: BLE001 - un profil illisible ne doit pas empêcher l'enregistrement
+            log.warning("Profil matériel indisponible pour l'enregistrement", exc_info=True)
+            return {}
+
     def handshake(self) -> str:
         """"ok" | "legacy" | "upgrade" | "auth" | "retry"."""
         caps = {"platform": sys.platform, "slots": self.max_slots, "runtime_version": RUNTIME_VERSION,
                 "protocol": PROTOCOL, "desktop": sys.platform == "win32"}
+        caps.update(self.v3_capabilities())
         outcome, detail, data, _status = self.client.register(self.max_slots, caps, hostname=socket.gethostname())
         if outcome == OK:
             self.lease_seconds = float((data or {}).get("lease_seconds") or DEFAULT_LEASE_SECONDS)

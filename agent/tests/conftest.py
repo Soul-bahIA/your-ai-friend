@@ -15,6 +15,14 @@ os.environ["SOULBAH_SECRETS_DIR"] = tempfile.mkdtemp(prefix="soulbah-tests-secre
 # l'utilisateur (%LOCALAPPDATA%\Soulbah\runtime) ; les tests qui en ont besoin le surchargent.
 os.environ["SOULBAH_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="soulbah-tests-runtime-")
 
+# V3 LOT 1 : configuration centrale hermétique — ni variable SOULBAH_* de configuration héritée
+# du shell, ni soulbah.config.json local : l'exemple versionné (HYBRID) est imposé.
+for _k in ("SOULBAH_MODE", "SOULBAH_MAX_PARALLEL_AGENTS", "SOULBAH_RESOURCE_PROFILE", "SOULBAH_MODEL_POLICY",
+           "SOULBAH_NETWORK_ALLOW_HOSTS", "SOULBAH_COMPUTER_CONTROL", "SOULBAH_RECORDING", "SOULBAH_SELF_IMPROVEMENT"):
+    os.environ.pop(_k, None)
+os.environ["SOULBAH_CONFIG"] = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                            "shared", "config", "soulbah.config.example.json")
+
 AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)

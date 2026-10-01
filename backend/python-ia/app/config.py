@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
+from typing import Any
+
+from . import soulbah_settings
 
 # URL du service Rust (calculs intensifs), fournie par docker-compose.
 RUST_SERVICE_URL = os.getenv("RUST_SERVICE_URL", "http://rust-compute:8080")
@@ -47,6 +51,9 @@ def check_startup_config() -> list[str]:
     """
     env = soulbah_env()
     warnings: list[str] = []
+    central = settings_resolution()
+    if central["errors"]:
+        raise RuntimeError("Configuration Soulbah invalide : " + " ; ".join(central["errors"]))
     if env not in VALID_ENVS:
         raise RuntimeError(
             f"SOULBAH_ENV invalide « {env[:40]} » (attendu : {' | '.join(VALID_ENVS)})."
@@ -72,3 +79,20 @@ def check_startup_config() -> list[str]:
             "appel réel) — toutes les clés fournisseur sont ignorées."
         )
     return warnings
+
+
+# ---------------------------------------------------------------------------
+# V3 LOT 1 : configuration centrale (shared/config/soulbah_settings.py, copiée ici).
+# Racine du dépôt : app/ → python-ia/ → backend/ → racine (absente en conteneur : env seul).
+# ---------------------------------------------------------------------------
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+@lru_cache(maxsize=1)
+def settings_resolution() -> dict[str, Any]:
+    return soulbah_settings.load(REPO_ROOT)
+
+
+def soulbah_settings_now() -> dict[str, Any]:
+    """Configuration résolue du processus (lue une fois ; settings_resolution.cache_clear())."""
+    return settings_resolution()["settings"]

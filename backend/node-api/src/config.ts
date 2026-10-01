@@ -1,5 +1,6 @@
 // Configuration centralisée, lue depuis l'environnement (fournie par docker-compose / .env).
 import { parseCorsOrigins } from "./lib/cors.js";
+import { currentSettings, effectiveMaxAgents } from "./lib/soulbahSettings.js";
 
 const num = (v: string | undefined, def: number): number => {
   const n = Number(v);
@@ -88,7 +89,11 @@ export const config = {
 
   // V2 (LOT 7) : plafond global de parallélisme (§9.6, min avec utilisateur / mission / runtime),
   // durée d'un bail de tâche (prolongé par keepalive), période du scheduler, période du flux SSE.
-  maxParallelAgents: Math.max(1, Math.min(32, num(process.env.SOULBAH_MAX_PARALLEL_AGENTS, 6))),
+  // V3 LOT 1 : max_agents de la configuration centrale (SOULBAH_MAX_PARALLEL_AGENTS), réduit
+  // à 2 par le profil ECO. Lu à chaque accès (la configuration est mise en cache au premier).
+  get maxParallelAgents(): number {
+    return effectiveMaxAgents(currentSettings());
+  },
   v2LeaseSeconds: Math.max(10, Math.min(3600, num(process.env.SOULBAH_LEASE_SECONDS, 90))),
   schedulerIntervalSeconds: Math.max(1, num(process.env.SOULBAH_SCHEDULER_INTERVAL_SECONDS, 5)),
   streamIntervalMs: Math.max(250, num(process.env.SOULBAH_STREAM_INTERVAL_MS, 2000)),

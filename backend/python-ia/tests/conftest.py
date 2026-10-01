@@ -18,6 +18,12 @@ for _k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "MISTRAL_API
 # Tests hermétiques : aucune configuration de routage/modèles héritée du shell.
 for _k in [k for k in os.environ if k.startswith("LLM_") or k.endswith("_MODEL")]:
     os.environ.pop(_k, None)
+# V3 LOT 1 : configuration centrale hermétique — ni variable SOULBAH_* du shell, ni
+# soulbah.config.json local : l'exemple versionné (HYBRID, valeurs par défaut) est imposé.
+for _k in [k for k in os.environ if k.startswith("SOULBAH_")]:
+    os.environ.pop(_k, None)
+os.environ["SOULBAH_CONFIG"] = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "shared", "config", "soulbah.config.example.json")
 # Environnement de test (contrat LOT 1 §1) : token inter-services optionnel.
 os.environ["SOULBAH_ENV"] = "test"
 # Filet hermétique : une TTS non simulée par un test vise un port local fermé

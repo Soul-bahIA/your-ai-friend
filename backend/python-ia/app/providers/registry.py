@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 
-from ..config import fake_provider_enabled, is_lax_env, soulbah_env
+from urllib.parse import urlsplit
+
+from .. import soulbah_settings
+from ..config import fake_provider_enabled, is_lax_env, soulbah_env, soulbah_settings_now
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider
 from .fake import FakeProvider
@@ -75,8 +78,15 @@ LOCAL_MODEL_ENV = "LOCAL_LLM_MODEL"
 LOCAL_KEY_ENV = "LOCAL_LLM_KEY"
 
 
+# V3 LOT 1 : fournisseurs écartés par le mode (id → raison), renseigné par build_providers().
+BLOCKED_BY_MODE: dict[str, str] = {}
+
+
 def build_providers() -> dict[str, LLMProvider]:
     providers: dict[str, LLMProvider] = {}
+    BLOCKED_BY_MODE.clear()
+    settings = soulbah_settings_now()
+    cloud_ok = soulbah_settings.cloud_models_allowed(settings)
 
     # LOT 3 : pile de dev sans clé → UNIQUEMENT le fournisseur factice (jamais hors dev/test,
     # même garde que config.check_startup_config : défense en profondeur si le registre est
@@ -92,6 +102,10 @@ def build_providers() -> dict[str, LLMProvider]:
         key = os.getenv(spec["key_env"], "")
         if not key:
             continue
+        if not cloud_ok:
+            # Clé présente mais mode OFFLINE / LOCAL_INTERNET : jamais d'appel cloud.
+            BLOCKED_BY_MODE[pid] = f"fournisseur cloud refusé en mode {settings['mode']}"
+            continue
         model = os.getenv(spec["model_env"], spec["default_model"])
         if spec["family"] == "anthropic":
             providers[pid] = AnthropicProvider(pid, model, key)
@@ -102,6 +116,11 @@ def build_providers() -> dict[str, LLMProvider]:
 
     # Modèle local (clé optionnelle)
     local_url = os.getenv(LOCAL_URL_ENV, "")
+    host = (urlsplit(local_url).hostname or "") if local_url else ""
+    if local_url and not cloud_ok and not soulbah_settings.is_local_endpoint(settings, host):
+        # LOCAL_LLM_URL vers un hôte d'Internet : ce n'est pas un modèle local (refusé hors HYBRID).
+        BLOCKED_BY_MODE["local"] = f"LOCAL_LLM_URL vers un hôte externe ({host}) refusé en mode {settings['mode']}"
+        local_url = ""
     if local_url:
         providers["local"] = OpenAICompatProvider(
             "local",

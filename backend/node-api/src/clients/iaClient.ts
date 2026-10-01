@@ -339,3 +339,26 @@ export async function evaluateGoal(
   });
   return data.evaluation;
 }
+
+// --- V3 LOT 1 : état du routeur de modèles (mode, fournisseurs écartés, disponibilité) ---
+export interface ModelsStatus {
+  mode?: string;
+  mode_label?: string;
+  cloud_models_allowed?: boolean;
+  blocked_by_mode?: Record<string, string>;
+  reasoning_available?: boolean;
+  vision_available?: boolean;
+  local_configured?: boolean;
+  configured?: string[];
+}
+
+/** GET /v2/models (délai court) ; null si python-ia est injoignable ou en erreur. */
+export async function modelsStatus(timeoutMs = 5_000): Promise<ModelsStatus | null> {
+  try {
+    const res = await undiciFetch(`${config.iaServiceUrl}/v2/models`, { headers: iaHeaders(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    return (await res.json()) as ModelsStatus;
+  } catch {
+    return null;
+  }
+}

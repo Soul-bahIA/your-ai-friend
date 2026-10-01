@@ -18,6 +18,7 @@ import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { SERVICE_STATE_LABELS, statusView, type ServiceState } from "@/lib/systemStatus";
 import { useApprovals } from "@/hooks/useApprovals";
 import { pendingActionable } from "@/lib/approvals";
+import ModeBadge from "./ModeBadge";
 
 /** Intervalle du compteur d'approbations en attente dans la barre latérale (ms). */
 const APPROVALS_BADGE_POLL_MS = 15000;
@@ -61,6 +62,9 @@ const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
         <div>
           <h1 className="text-sm font-bold text-foreground tracking-tight">SOULBAH IA</h1>
           <p className="text-[10px] text-muted-foreground font-mono">v1.0.0 — Autonome</p>
+          <div className="mt-1">
+            <ModeBadge />
+          </div>
         </div>
       </div>
 
