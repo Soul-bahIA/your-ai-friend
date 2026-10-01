@@ -15,6 +15,7 @@ import type { Queryable } from "../../db.js";
 import { isPlainObject } from "../../lib/sanitize.js";
 import { audit } from "../audit.js";
 import { redactSecrets } from "../security/redactSecrets.js";
+import { evaluateAndApply } from "../evaluation/engine.js";
 import { getTask, transitionTask, type TaskRow } from "../tasks/repo.js";
 import { afterFailure, DEFAULT_ESCALATION_MS, retryBackoffMs, type FailureReason } from "../tasks/stateMachine.js";
 
@@ -66,7 +67,10 @@ export async function postMessage(q: Queryable, input: PostMessageInput): Promis
   switch (input.type) {
     case "TASK_RESULT": {
       if (task.status !== "RUNNING" && task.status !== "WAITING") return { ok: false, status: 409, error: `résultat refusé : tâche ${task.status}` };
-      const simulated = task.simulated || payload.simulated === true;
+      // Simulé si la tâche, le message OU le résultat lui-même le déclare (un dry-run ne peut
+      // jamais être « blanchi » en COMPLETED par un drapeau de message à false — LOT 10).
+      const simulated =
+        task.simulated || payload.simulated === true || (isPlainObject(payload.result) && payload.result.simulated === true);
       const result = { ...(isPlainObject(payload.result) ? payload.result : { value: payload.result ?? null }), simulated, attempt: task.attempt, message_id: messageId };
       const validating = await transitionTask(q, { task, to: "VALIDATING", set: { result, simulated }, actor: input.actor, data: { message_id: messageId } });
       if (!validating) return { ok: false, status: 409, error: "tâche modifiée concurremment" };
@@ -142,27 +146,14 @@ export async function postMessage(q: Queryable, input: PostMessageInput): Promis
 }
 
 /**
- * Validation (LOT 7 : règles de base ; DSL complète au LOT 10). Un run simulé ne passe JAMAIS
- * (§9.8) ; sans critère d'acceptation → COMPLETED ; avec critères → reste VALIDATING, à
- * l'évaluateur (LOT 10) de conclure.
+ * Validation (LOT 10) : le moteur d'évaluation conclut immédiatement quand il n'a besoin que de
+ * règles (critères DSL sur les preuves) ; avec un critère llm_rubric, la tâche reste en
+ * VALIDATING et `runEvaluations` (boucle du scheduler) la reprendra — VALIDATING est durable.
+ * Un run simulé n'est JAMAIS COMPLETED ; un plan non joué non plus (§9.8).
  */
 export async function validate(q: Queryable, task: TaskRow, actor: string, now: Date): Promise<TaskRow> {
-  if (task.simulated) {
-    const t = await transitionTask(q, { task, to: "FAILED", set: { error: "run simulé (dry-run) : jamais COMPLETED", lease_owner: null }, actor, data: { reason: "simulated" } });
-    return t ?? task;
-  }
-  const criteria = Array.isArray(task.acceptance_criteria) ? task.acceptance_criteria : [];
-  const required = criteria.filter((c) => !isPlainObject(c) || c.required !== false);
-  if (required.length === 0) {
-    await q.query(
-      `INSERT INTO soulbah.evaluations (task_id, user_id, attempt, criteria, results, verdict, confidence, evaluator, action_taken)
-       VALUES ($1, $2, $3, $4::jsonb, '[]'::jsonb, 'success', 'none', 'rules', 'completed_no_criteria') ON CONFLICT (task_id, attempt) DO NOTHING`,
-      [task.id, task.user_id, task.attempt, JSON.stringify(criteria)],
-    );
-    const t = await transitionTask(q, { task, to: "COMPLETED", set: { lease_owner: null }, actor, data: { reason: "no_required_criteria", at: now.toISOString() } });
-    return t ?? task;
-  }
-  return task;
+  const out = await evaluateAndApply(q, task, actor, undefined, now);
+  return out?.task ?? task;
 }
 
 /** Réponse de l'utilisateur à une QUESTION : WAITING → RUNNING (même bail), réponse livrée au keepalive. */

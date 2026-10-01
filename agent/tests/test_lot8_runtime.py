@@ -84,6 +84,10 @@ def test_journal_wal_actions_checkpoints_outbox(tmp_path):
     next_at = j.outbox_retry(eid, now)
     assert next_at == pytest.approx(now + outbox_delay(1))
     assert outbox_delay(1) < outbox_delay(3) <= 120
+    # Ordre par tâche : une écriture plus récente n'est jamais due avant une plus ancienne qui attend.
+    e2 = j.enqueue("POST", "tasks/t1/result", {"b": 2}, kind="result", task_id="t1", attempt=1)
+    assert j.outbox_claim_due(now) == []  # eid attend son backoff : e2 aussi
+    assert [c["id"] for c in j.outbox_claim_due(next_at + 0.1)] == [eid, e2]
     j.set_state("t1", STATE_FINALIZING)
     assert j.get_held("t1")["state"] == STATE_FINALIZING
     j.purge("t1")

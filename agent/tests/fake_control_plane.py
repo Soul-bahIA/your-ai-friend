@@ -44,6 +44,9 @@ class FakeControlPlane:
         self.reconciles: list[list[dict]] = []
         self.registers = 0
         self.artifacts: dict[str, bytes] = {}
+        # Panne simulée (LOT 10 chaos) : toute route répond 503 ; requêtes refusées comptées.
+        self.down = False
+        self.refused_while_down = 0
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -95,6 +98,9 @@ class FakeControlPlane:
         if not headers.get("x-agent-key"):
             return 401, {"error": "x-agent-key requis"}
         with self.lock:
+            if self.down:
+                self.refused_while_down += 1
+                return 503, {"error": "Service temporairement indisponible"}
             if method == "PUT" and path.startswith("/api/v2/artifacts/"):
                 sha = path.rsplit("/", 1)[1].split("?")[0]
                 self.artifacts[sha] = body

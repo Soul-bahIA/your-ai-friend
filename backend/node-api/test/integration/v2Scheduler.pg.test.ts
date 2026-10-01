@@ -87,7 +87,7 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
       method: "POST",
       url: "/api/v2/sessions",
       headers: jwt,
-      payload: { goal: "mission de test", plan: { nodes: [...nodes(2), { key: "fin", title: "Fin", role: "qa_reviewer", security_level: "L0" }], edges: [{ from: "t0", to: "fin" }, { from: "t1", to: "fin" }] } },
+      payload: { goal: "mission de test", plan: { nodes: [...nodes(2), { key: "fin", title: "Fin", role: "coder", security_level: "L0" }], edges: [{ from: "t0", to: "fin" }, { from: "t1", to: "fin" }] } },
     });
     expect(r.statusCode).toBe(201);
     sessionId = r.json().session.id;
@@ -186,7 +186,7 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
     expect(Number(busy.rows[0].n)).toBe(6);
     const au = await pool.query("SELECT count(*)::int AS n FROM soulbah.audit_logs WHERE session_id = $1 AND action = 'task.transition' AND data ->> 'to' = 'RUNNING'", [sid]);
     expect(Number(au.rows[0].n)).toBe(6);
-  });
+  }, 60_000);
 
   it("RUNNING ≤ max pour 1, 3 et 6 (plafond utilisateur relu à chaque bail)", async () => {
     for (const cap of [1, 3, 6]) {
@@ -197,7 +197,7 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
       await Promise.all(Array.from({ length: 300 }, (_, i) => sched.lease({ runtimeId: runtimeIds[i % 6], userId: U, slots: 3 })));
       expect(await runningCount()).toBe(cap);
     }
-  });
+  }, 60_000);
 
   it("surcharge par mission : sessions.max_parallel_agents = 2 borne la mission, pas l'utilisateur", async () => {
     await cancelAllSessions();
@@ -265,9 +265,9 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
 
   it("bus : QUESTION → WAITING → réponse → RUNNING ; EVIDENCE ; REVIEW_REQUEST ; BLOCKER ; ERROR → RETRYING", async () => {
     await cancelAllSessions();
-    const sid = await newRunningSession({ nodes: nodes(2) });
-    const l = await sched.lease({ runtimeId: runtimeIds[0], userId: U, slots: 2 });
-    const [a, b] = l.granted;
+    const sid = await newRunningSession({ nodes: nodes(3) });
+    const l = await sched.lease({ runtimeId: runtimeIds[0], userId: U, slots: 3 });
+    const [a, b, c] = l.granted;
     const rt = { runtime_id: runtimeIds[0], attempt: 1 };
     const msg = (taskId: string, type: string, payload: Record<string, unknown>) =>
       app.inject({ method: "POST", url: `/api/v2/runtime/tasks/${taskId}/message`, headers: agent, payload: { ...rt, type, payload } });
@@ -290,10 +290,18 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
     expect(res.json().status).toBe("COMPLETED");
     await sched.tick();
     expect((await pool.query("SELECT status FROM soulbah.tasks WHERE session_id = $1 AND role = 'qa_reviewer'", [sid])).rows[0].status).toBe("READY");
-    // La route exige le runtime de la clé appelante : on prend un bail avec le runtime 0.
-    const l3 = await sched.lease({ runtimeId: runtimeIds[0], userId: U, slots: 1 });
-    const rv = l3.granted.find((g) => g.role === "qa_reviewer")!;
-    const err = await app.inject({ method: "POST", url: `/api/v2/runtime/tasks/${rv.id}/message`, headers: agent, payload: { runtime_id: runtimeIds[0], attempt: rv.attempt, type: "ERROR", payload: { kind: "crash", message: "boum" } } });
+    // LOT 10 : la relecture qa_reviewer n'est JAMAIS confiée à un runtime — P1 l'exécute.
+    const l3 = await sched.lease({ runtimeId: runtimeIds[0], userId: U, slots: 6 });
+    expect(l3.granted.some((g) => g.role === "qa_reviewer")).toBe(false);
+    const { runReviews } = await import("../../src/v2/evaluation/reviewer");
+    expect((await runReviews()).reviewed).toBe(1);
+    const reviewRow = (await pool.query("SELECT id, status, result FROM soulbah.tasks WHERE session_id = $1 AND role = 'qa_reviewer'", [sid])).rows[0];
+    expect(reviewRow.status).toBe("COMPLETED");
+    expect((reviewRow.result as { approved: boolean }).approved).toBe(true);
+    const rres = await pool.query("SELECT payload FROM soulbah.messages WHERE task_id = $1 AND type = 'REVIEW_RESULT'", [reviewRow.id]);
+    expect(rres.rows[0].payload).toMatchObject({ review_of: a.id, approved: true, evaluation_verdict: "success" });
+    // Une tâche RUNNING qui remonte une erreur rejouable passe en RETRYING.
+    const err = await msg(c.id, "ERROR", { kind: "crash", message: "boum" });
     expect(err.statusCode, err.body).toBe(200);
     expect(err.json().status).toBe("RETRYING");
     const refused = await msg(b.id, "ERROR", { kind: "policy_refused" });

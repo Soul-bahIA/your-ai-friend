@@ -230,7 +230,11 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const task = await getTask(pool, id, request.user!.id);
     if (!task) return reply.status(404).send({ error: "Tâche introuvable" });
     const { rows } = await pool.query("SELECT id, type, payload, to_role, created_at, acked_at FROM soulbah.messages WHERE task_id = $1 ORDER BY created_at DESC LIMIT 100", [id]);
-    return { task, messages: rows };
+    const evaluations = await pool.query(
+      "SELECT id, attempt, verdict, confidence, criteria, results, action_taken, evaluator, created_at FROM soulbah.evaluations WHERE task_id = $1 ORDER BY attempt DESC",
+      [id],
+    );
+    return { task, messages: rows, evaluations: evaluations.rows };
   });
 
   app.post("/api/v2/tasks/:id/answer", { preHandler: requireUser }, async (request, reply) => {

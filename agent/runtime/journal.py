@@ -333,7 +333,15 @@ class Journal:
         now = time.time() if now is None else now
         claimed: list[dict[str, Any]] = []
         with self._tx() as c:
-            rows = c.execute("SELECT * FROM outbox WHERE next_at <= ? ORDER BY id LIMIT ?", (now, limit)).fetchall()
+            # Ordre strict PAR TÂCHE : une écriture n'est due que si aucune écriture plus ancienne
+            # de la même tâche n'attend encore (backoff plus long, ou réclamée par un autre
+            # processus) — sinon un résultat pourrait partir avant les actions qui le précèdent,
+            # et ces actions seraient ensuite refusées (tâche déjà terminée).
+            rows = c.execute(
+                "SELECT * FROM outbox o WHERE o.next_at <= ? AND NOT EXISTS ("
+                "  SELECT 1 FROM outbox p WHERE p.task_id IS NOT NULL AND p.task_id = o.task_id"
+                "  AND p.id < o.id AND p.next_at > ?) ORDER BY o.id LIMIT ?",
+                (now, now, limit)).fetchall()
             for r in rows:
                 c.execute("UPDATE outbox SET next_at = ? WHERE id = ?", (now + _CLAIM_SECONDS, r["id"]))
                 claimed.append(self._outbox_row(r))

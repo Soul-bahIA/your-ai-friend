@@ -18,6 +18,7 @@ import { closeSessionIfDone, getSession, type SessionRow } from "../sessions/rep
 import { TASK_COLS, transitionTask, type TaskRow } from "../tasks/repo.js";
 import { afterFailure, DEFAULT_ESCALATION_MS, LEASED_STATUSES, retryBackoffMs } from "../tasks/stateMachine.js";
 import { effectiveMaxParallel, grantableSlots } from "./parallelism.js";
+import { P1_ROLES } from "../evaluation/reviewer.js";
 
 export const SCHEDULER_LOCK_KEY = 0x53_42_53_43; // « SBSC »
 export const SYSTEM_SCHEDULER = "system:scheduler";
@@ -40,6 +41,13 @@ export interface TickOptions {
   now?: Date;
   /** true : n'attend pas le verrou (boucle périodique) ; défaut : attend (un tick est court). */
   tryLock?: boolean;
+  /**
+   * LOT 10 (chaos) : aucun bail n'est récupéré par le reaper avant cette date. Après une coupure
+   * de la base (ou un redémarrage de node), les runtimes n'ont pas pu prolonger leurs baux :
+   * on leur laisse une durée de bail complète pour se manifester avant de relancer quoi que ce
+   * soit — sinon une tâche encore en cours serait rejouée par un autre runtime (doublon).
+   */
+  reapNotBefore?: Date | null;
 }
 
 /** Un passage du scheduler (idempotent, une seule instance à la fois : verrou consultatif). */
@@ -62,10 +70,14 @@ export async function tick(opts: TickOptions = {}): Promise<TickReport> {
     report.leasesReleased = released.rowCount ?? 0;
 
     // REAPER : bail expiré → RETRYING directement (jamais via FAILED), ou FAILED si épuisé.
-    const stale = await client.query(
-      `SELECT ${TASK_COLS} FROM soulbah.tasks WHERE status IN (${LEASED_SQL}) AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1 FOR UPDATE SKIP LOCKED`,
-      [now],
-    );
+    // Les tâches exécutées par P1 (qa_reviewer) ont leur propre bail court et sont reprises aussi.
+    const reapAllowed = !opts.reapNotBefore || now.getTime() >= opts.reapNotBefore.getTime();
+    const stale = reapAllowed
+      ? await client.query(
+          `SELECT ${TASK_COLS} FROM soulbah.tasks WHERE status IN (${LEASED_SQL}) AND lease_expires_at IS NOT NULL AND lease_expires_at <= $1 FOR UPDATE SKIP LOCKED`,
+          [now],
+        )
+      : { rows: [] as TaskRow[] };
     for (const t of stale.rows as TaskRow[]) {
       const to = afterFailure(t.retry_count, t.max_retries, "lease_expired");
       const set =
@@ -204,10 +216,10 @@ export async function lease(req: LeaseRequest): Promise<LeaseReport> {
     const candidates = await client.query(
       `SELECT ${TASK_COLS.split(",").map((c) => `t.${c.trim()}`).join(", ")}, s.max_parallel_agents AS session_cap, s.max_security_level
          FROM soulbah.tasks t JOIN soulbah.sessions s ON s.id = t.session_id
-        WHERE t.user_id = $1 AND t.status = 'READY' AND s.status = 'RUNNING'
+        WHERE t.user_id = $1 AND t.status = 'READY' AND s.status = 'RUNNING' AND NOT (t.role = ANY($3::text[]))
         ORDER BY t.priority ASC, t.created_at ASC
         FOR UPDATE OF t SKIP LOCKED LIMIT $2`,
-      [req.userId, Math.max(grantable * 3, 6)],
+      [req.userId, Math.max(grantable * 3, 6), P1_ROLES],
     );
     const owner = `runtime:${req.runtimeId}`;
     const expiresAt = new Date(now.getTime() + leaseMs);

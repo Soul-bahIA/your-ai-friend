@@ -9,6 +9,9 @@ import { buildApp } from "./app.js";
 import { runMaintenance } from "./services/maintenance.js";
 import { reapStaleTasks } from "./services/reaper.js";
 import { auditSchedulerError, tick, tickSummary } from "./v2/scheduler/scheduler.js";
+import { runEvaluations } from "./v2/evaluation/engine.js";
+import { runReviews } from "./v2/evaluation/reviewer.js";
+import { defaultRubricJudge } from "./v2/evaluation/judge.js";
 import { drainBackgroundJobs } from "./services/backgroundJobs.js";
 
 // Journaux : en-têtes d'authentification rédigés par pino ; objets et messages des services
@@ -57,16 +60,32 @@ function runReaper(): void {
 }
 
 // Scheduler V2 (LOT 7) : promotion READY, backoff, escalade, reaper des baux, clôture des sessions.
+// LOT 10 : puis relectures QA exécutées par P1 et évaluations restées en VALIDATING. Après une
+// coupure de la base (tick en échec) ou au démarrage, le reaper attend une durée de bail complète
+// pour laisser les runtimes prolonger leurs baux (0 doublon).
 let schedulerBusy = false;
+let schedulerFailing = false;
+let reapNotBefore: Date | null = null;
 function runScheduler(): void {
   if (schedulerBusy) return;
   schedulerBusy = true;
-  tick({ tryLock: true })
-    .then((r) => {
+  tick({ tryLock: true, reapNotBefore })
+    .then(async (r) => {
+      if (schedulerFailing) {
+        schedulerFailing = false;
+        reapNotBefore = new Date(Date.now() + config.v2LeaseSeconds * 1000);
+        app.log.warn({ reapNotBefore }, "scheduler V2 : base de nouveau joignable — baux non récupérés avant une durée de bail");
+      }
       const summary = tickSummary(r);
       if (summary) app.log.info({ scheduler: r }, `scheduler V2 : ${summary}`);
+      const reviews = await runReviews({ judge: defaultRubricJudge });
+      const evals = await runEvaluations({ judge: defaultRubricJudge });
+      if (reviews.reviewed || evals.evaluated || reviews.errors || evals.errors) app.log.info({ reviews, evals }, "évaluations V2");
     })
-    .catch((e) => void auditSchedulerError(e as Error))
+    .catch((e) => {
+      schedulerFailing = true;
+      void auditSchedulerError(e as Error);
+    })
     .finally(() => {
       schedulerBusy = false;
     });
@@ -83,6 +102,8 @@ async function connectDb(): Promise<void> {
     runReaper();
     reaperTimer = setInterval(runReaper, Math.max(10, config.reaperIntervalSeconds) * 1000);
     reaperTimer.unref();
+    // Au démarrage de node, aucun runtime n'a pu prolonger son bail pendant l'arrêt.
+    reapNotBefore = new Date(Date.now() + config.v2LeaseSeconds * 1000);
     runScheduler();
     schedulerTimer = setInterval(runScheduler, config.schedulerIntervalSeconds * 1000);
     schedulerTimer.unref();
