@@ -1,16 +1,35 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { pool } from "../db";
 import { config } from "../config";
 import { requireUser, requireAgentKey } from "../auth";
 import { maybeEvaluateGoalTask } from "./agentGoal";
 import { setAgentAllowedDirs } from "../services/agentKeys";
+import { validateTaskCreateBody } from "../lib/agentSteps";
+import {
+  buildAgentTaskUpdate,
+  buildTaskTouch,
+  isAgentTaskStatus,
+  parseAttempt,
+} from "../lib/agentTaskSql";
+import { isUuid, stripImageB64, isPlainObject } from "../lib/sanitize";
 
 // Reprise des tâches orphelines : un agent tué en pleine exécution laisse sa
 // tâche en 'in_progress' pour toujours (le poll ne lit que les 'pending').
 // À chaque poll, les tâches sans signe de vie (updated_at périmé — l'agent
 // rafraîchit via heartbeat/évènements) sont remises en file, au plus
 // MAX_REQUEUES fois ; au-delà, elles passent en 'failed' (boucle de crash).
+// Chaque requeue incrémente requeue_count : c'est le numéro de tentative (attempt)
+// que l'agent renvoie ensuite pour prouver qu'il détient toujours la tâche.
 const MAX_REQUEUES = 3;
+
+// Les routes de l'agent reçoivent des captures d'écran base64 : corps plus gros admis.
+const AGENT_BODY_LIMIT = 15 * 1024 * 1024;
+const agentRateLimit = { max: config.rateLimitAgent, timeWindow: "1 minute" };
+
+// Colonnes renvoyées à l'agent / à l'UI (jamais SELECT *).
+const POLL_COLS = `id, user_id, task_type, status, priority, payload, requeue_count, control, created_at, updated_at`;
+const LIST_COLS = `id, task_type, status, priority, payload, result, error_message, requeue_count, control,
+  started_at, completed_at, created_at, updated_at`;
 
 async function requeueStaleTasks(userId: string): Promise<void> {
   const stale = config.agentTaskStaleSeconds;
@@ -51,137 +70,186 @@ async function requeueStaleTasks(userId: string): Promise<void> {
   }
 }
 
+/** Après un UPDATE gardé à 0 ligne : 404 si la tâche n'existe pas pour cet utilisateur, sinon 409. */
+async function guardFailure(reply: FastifyReply, taskId: string, userId: string, attempt?: number) {
+  const { rows } = await pool.query(
+    "SELECT status, requeue_count FROM agent_tasks WHERE id = $1 AND user_id = $2",
+    [taskId, userId],
+  );
+  if (rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+  const { status, requeue_count } = rows[0] as { status: string; requeue_count: number };
+  if (attempt !== undefined && attempt !== requeue_count) {
+    return reply.status(409).send({
+      error: `Tentative périmée (attempt ${attempt}, courante ${requeue_count}) — la tâche a été reprise`,
+      status,
+      requeue_count,
+    });
+  }
+  return reply.status(409).send({ error: `Tâche dans l'état « ${status} » : transition refusée`, status, requeue_count });
+}
+
 // Port de l'edge function `agent-tasks`.
-//  - poll / update : worker local, authentifié par x-agent-key
-//  - create (POST) / list (GET) : app web, authentifiée par JWT
-// On conserve la sémantique d'origine (action en query pour poll/update).
+//  - announce / poll / update / event / control (GET) : worker local, x-agent-key
+//  - create (POST) / list (GET) / control (POST) / events : app web, JWT
 
 export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   // --- Worker local : annonce de sa configuration (au démarrage) ---
-  // L'agent déclare ses dossiers autorisés ; le planificateur les injecte
-  // dans le contexte pour ne générer que des chemins réellement whitelistés.
-  app.post("/api/agent-tasks/announce", { preHandler: requireAgentKey }, async (request, reply) => {
-    const body = (request.body ?? {}) as { allowed_dirs?: unknown };
-    const dirs = Array.isArray(body.allowed_dirs)
-      ? body.allowed_dirs.filter((d): d is string => typeof d === "string" && d.length > 0).slice(0, 50)
-      : null;
-    if (!dirs) return reply.status(400).send({ error: "allowed_dirs (liste) requis" });
-    await setAgentAllowedDirs(request.agentKeyId!, dirs);
-    return { success: true };
-  });
+  app.post(
+    "/api/agent-tasks/announce",
+    { preHandler: requireAgentKey, config: { rateLimit: agentRateLimit } },
+    async (request, reply) => {
+      const body = (request.body ?? {}) as { allowed_dirs?: unknown };
+      const dirs = Array.isArray(body.allowed_dirs)
+        ? body.allowed_dirs
+            .filter((d): d is string => typeof d === "string" && d.length > 0 && d.length <= 1024)
+            .slice(0, 50)
+        : null;
+      if (!dirs) return reply.status(400).send({ error: "allowed_dirs (liste) requis" });
+      await setAgentAllowedDirs(request.agentKeyId!, dirs);
+      return { success: true };
+    },
+  );
 
-  // --- Worker local : poll des tâches en attente ---
-  // Le user_id est déduit de la clé agent (agentUserId), plus passé en clair.
-  app.get("/api/agent-tasks/poll", { preHandler: requireAgentKey }, async (request) => {
-    const userId = request.agentUserId!;
-    await requeueStaleTasks(userId);
-    const { rows } = await pool.query(
-      `SELECT * FROM agent_tasks
-       WHERE user_id = $1 AND status = 'pending'
-       ORDER BY priority ASC, created_at ASC LIMIT 5`,
-      [userId],
-    );
-    return { tasks: rows };
-  });
-
-  // --- Worker local : mise à jour du statut d'une tâche (scopée par user_id) ---
-  app.post("/api/agent-tasks/update", { preHandler: requireAgentKey }, async (request, reply) => {
-    const userId = request.agentUserId!;
-    const body = (request.body ?? {}) as {
-      task_id?: string;
-      status?: string;
-      result?: unknown;
-      error_message?: string;
-    };
-    if (!body.task_id || !body.status) {
-      return reply.status(400).send({ error: "task_id et status requis" });
-    }
-
-    const sets: string[] = ["status = $1", "updated_at = now()"];
-    const values: unknown[] = [body.status];
-    let i = 2;
-    if (body.result !== undefined) { sets.push(`result = $${i++}::jsonb`); values.push(JSON.stringify(body.result)); }
-    if (body.error_message !== undefined) { sets.push(`error_message = $${i++}`); values.push(body.error_message); }
-    if (body.status === "in_progress") sets.push("started_at = now()");
-    if (body.status === "completed" || body.status === "failed") sets.push("completed_at = now()");
-
-    // Filtre par task_id ET user_id : on ne peut modifier que ses propres tâches.
-    // Le passage à in_progress est un CLAIM atomique : il exige status='pending',
-    // donc si deux agents (deux clés du même compte) pollent la même tâche, un
-    // seul obtient rowCount=1 ; l'autre reçoit 409 et passe à la suivante.
-    values.push(body.task_id, userId);
-    const claimGuard = body.status === "in_progress" ? " AND status = 'pending'" : "";
-    const { rowCount } = await pool.query(
-      `UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = $${i++} AND user_id = $${i}${claimGuard}`,
-      values,
-    );
-    if (rowCount === 0) {
-      if (body.status === "in_progress") {
-        return reply.status(409).send({ error: "Tâche déjà prise par un autre agent" });
-      }
-      return reply.status(404).send({ error: "Tâche introuvable" });
-    }
-
-    // Boucle Observer → Corriger : si la tâche vient d'un objectif (moteur de
-    // raisonnement) et se termine, on l'évalue en arrière-plan sans bloquer l'agent.
-    if (body.status === "completed" || body.status === "failed") {
-      maybeEvaluateGoalTask(body.task_id, userId).catch((e) =>
-        request.log.error({ err: e }, "évaluation d'objectif échouée"),
+  // --- Worker local : poll des tâches en attente (inclut requeue_count = attempt) ---
+  app.get(
+    "/api/agent-tasks/poll",
+    { preHandler: requireAgentKey, config: { rateLimit: agentRateLimit } },
+    async (request) => {
+      const userId = request.agentUserId!;
+      await requeueStaleTasks(userId);
+      const { rows } = await pool.query(
+        `SELECT ${POLL_COLS} FROM agent_tasks
+         WHERE user_id = $1 AND status = 'pending'
+         ORDER BY priority ASC, created_at ASC LIMIT 5`,
+        [userId],
       );
-    }
-    return { success: true };
-  });
+      return { tasks: rows };
+    },
+  );
 
-  // --- Worker local : émettre un évènement d'exécution (timeline + captures live) ---
-  app.post("/api/agent-tasks/event", { preHandler: requireAgentKey }, async (request, reply) => {
-    const userId = request.agentUserId!;
-    const body = (request.body ?? {}) as {
-      task_id?: string;
-      type?: string;
-      message?: string;
-      data?: unknown;
-    };
-    if (!body.task_id || !body.type) {
-      return reply.status(400).send({ error: "task_id et type requis" });
-    }
-    await pool.query(
-      `INSERT INTO agent_events (task_id, user_id, type, message, data)
-       VALUES ($1, $2, $3, $4, $5::jsonb)`,
-      [body.task_id, userId, body.type, body.message ?? null, JSON.stringify(body.data ?? {})],
-    );
-    // Signe de vie : tout évènement (heartbeat, étape…) atteste que l'agent
-    // travaille encore — on rafraîchit updated_at pour éviter le requeue.
-    pool
-      .query(
-        "UPDATE agent_tasks SET updated_at = now() WHERE id = $1 AND user_id = $2 AND status = 'in_progress'",
-        [body.task_id, userId],
-      )
-      .catch(() => {});
-    // Rétention : à la fin d'une tâche, purge les évènements de plus de 3 jours
-    // (les captures base64 sont volumineuses — on évite une croissance non bornée).
-    if (body.type === "task_completed" || body.type === "task_failed") {
-      pool
-        .query("DELETE FROM agent_events WHERE user_id = $1 AND created_at < now() - interval '3 days'", [userId])
-        .catch(() => {});
-    }
-    return { success: true };
-  });
+  // --- Worker local : mise à jour du statut d'une tâche (claim / fin) ---
+  app.post(
+    "/api/agent-tasks/update",
+    { preHandler: requireAgentKey, bodyLimit: AGENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
+    async (request, reply) => {
+      const userId = request.agentUserId!;
+      const body = (request.body ?? {}) as {
+        task_id?: unknown;
+        status?: unknown;
+        result?: unknown;
+        error_message?: unknown;
+        attempt?: unknown;
+      };
+      if (!isUuid(body.task_id)) return reply.status(400).send({ error: "task_id (uuid) requis" });
+      if (!isAgentTaskStatus(body.status)) {
+        return reply.status(400).send({ error: "status invalide (pending|in_progress|completed|failed|cancelled)" });
+      }
+      const attempt = parseAttempt(body.attempt);
+      if (attempt === null) return reply.status(400).send({ error: "attempt doit être un entier ≥ 0" });
+      if (body.error_message !== undefined && body.error_message !== null && typeof body.error_message !== "string") {
+        return reply.status(400).send({ error: "error_message doit être un texte" });
+      }
+
+      // Claim (in_progress) : exige status='pending'. Toute autre transition exige
+      // status='in_progress' (+ requeue_count = attempt si fourni). Un agent dont la
+      // tâche a été requeue puis reprise ne peut donc plus l'écraser.
+      const q = buildAgentTaskUpdate({
+        taskId: body.task_id,
+        userId,
+        status: body.status,
+        result: body.result,
+        errorMessage:
+          typeof body.error_message === "string" ? body.error_message.slice(0, 4000) : (body.error_message as null | undefined),
+        attempt,
+      });
+      const { rows, rowCount } = await pool.query(q.sql, q.values);
+      if (rowCount !== 1) {
+        if (q.kind === "claim") {
+          return reply.status(409).send({ error: "Tâche déjà prise par un autre agent (ou plus en attente)" });
+        }
+        return guardFailure(reply, body.task_id, userId, attempt);
+      }
+
+      // Boucle Observer → Corriger : uniquement si CETTE requête a effectivement
+      // terminé la tâche (rowCount=1) — pas de double évaluation.
+      if (body.status === "completed" || body.status === "failed") {
+        const taskId = body.task_id;
+        maybeEvaluateGoalTask(taskId, userId).catch((e) =>
+          request.log.error({ err: e }, "évaluation d'objectif échouée"),
+        );
+      }
+      return { success: true, status: rows[0].status, requeue_count: rows[0].requeue_count };
+    },
+  );
+
+  // --- Worker local : évènement d'exécution (timeline + captures live) / heartbeat ---
+  app.post(
+    "/api/agent-tasks/event",
+    { preHandler: requireAgentKey, bodyLimit: AGENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
+    async (request, reply) => {
+      const userId = request.agentUserId!;
+      const body = (request.body ?? {}) as {
+        task_id?: unknown;
+        type?: unknown;
+        message?: unknown;
+        data?: unknown;
+        attempt?: unknown;
+      };
+      if (!isUuid(body.task_id)) return reply.status(400).send({ error: "task_id (uuid) requis" });
+      if (typeof body.type !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(body.type)) {
+        return reply.status(400).send({ error: "type requis" });
+      }
+      const attempt = parseAttempt(body.attempt);
+      if (attempt === null) return reply.status(400).send({ error: "attempt doit être un entier ≥ 0" });
+      if (body.data !== undefined && body.data !== null && !isPlainObject(body.data)) {
+        return reply.status(400).send({ error: "data doit être un objet" });
+      }
+
+      // La tâche doit appartenir à l'utilisateur de la clé, être en cours et (si
+      // fourni) à la même tentative. Ce même UPDATE sert de signe de vie.
+      const touch = buildTaskTouch(body.task_id, userId, attempt);
+      const { rowCount } = await pool.query(touch.sql, touch.values);
+      if (rowCount !== 1) return guardFailure(reply, body.task_id, userId, attempt);
+
+      // Heartbeat : simple signe de vie, pas de ligne d'évènement (évite de remplir la table).
+      if (body.type === "heartbeat") return { success: true };
+
+      await pool.query(
+        `INSERT INTO agent_events (task_id, user_id, type, message, data)
+         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [
+          body.task_id,
+          userId,
+          body.type,
+          typeof body.message === "string" ? body.message.slice(0, 4000) : null,
+          JSON.stringify(body.data ?? {}),
+        ],
+      );
+      return { success: true };
+    },
+  );
 
   // --- Worker local : lire l'ordre de contrôle courant (none|pause|stop) ---
-  app.get("/api/agent-tasks/:id/control", { preHandler: requireAgentKey }, async (request) => {
-    const userId = request.agentUserId!;
-    const { id } = request.params as { id: string };
-    const { rows } = await pool.query(
-      "SELECT control FROM agent_tasks WHERE id = $1 AND user_id = $2",
-      [id, userId],
-    );
-    return { control: rows[0]?.control ?? "none" };
-  });
+  app.get(
+    "/api/agent-tasks/:id/control",
+    { preHandler: requireAgentKey, config: { rateLimit: agentRateLimit } },
+    async (request, reply) => {
+      const userId = request.agentUserId!;
+      const { id } = request.params as { id: string };
+      if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+      const { rows } = await pool.query(
+        "SELECT control FROM agent_tasks WHERE id = $1 AND user_id = $2",
+        [id, userId],
+      );
+      return { control: rows[0]?.control ?? "none" };
+    },
+  );
 
   // --- App web : piloter l'exécution (pause | resume | stop) ---
   app.post("/api/agent-tasks/:id/control", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { control } = (request.body ?? {}) as { control?: string };
     const value = control === "resume" ? "none" : control;
     if (!value || !["none", "pause", "stop"].includes(value)) {
@@ -196,9 +264,10 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // --- App web : historique d'évènements d'une tâche (chargement initial de la timeline) ---
-  app.get("/api/agent-tasks/:id/events", { preHandler: requireUser }, async (request) => {
+  app.get("/api/agent-tasks/:id/events", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { rows } = await pool.query(
       `SELECT id, type, message, data, created_at FROM agent_events
        WHERE task_id = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 500`,
@@ -207,37 +276,41 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
     return { events: rows };
   });
 
-  // --- App web : créer une tâche (JWT) ---
+  // --- App web : créer une tâche (JWT) — étapes validées strictement côté serveur ---
+  // Seul point de création des tâches (la policy RLS INSERT sur agent_tasks est retirée).
   app.post("/api/agent-tasks", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
-    const body = (request.body ?? {}) as { task_type?: string; payload?: unknown; priority?: number };
-    if (!body.task_type) return reply.status(400).send({ error: "task_type requis" });
+    const parsed = validateTaskCreateBody(request.body);
+    if (!parsed.ok) return reply.status(400).send({ error: parsed.error });
+    const { task_type, payload, priority } = parsed.value;
 
     const { rows } = await pool.query(
       `INSERT INTO agent_tasks (user_id, task_type, payload, priority)
-       VALUES ($1, $2, $3::jsonb, $4) RETURNING *`,
-      [userId, body.task_type, JSON.stringify(body.payload ?? {}), body.priority ?? 5],
+       VALUES ($1, $2, $3::jsonb, $4) RETURNING ${LIST_COLS}`,
+      [userId, task_type, JSON.stringify(payload), priority],
     );
     return { success: true, task: rows[0] };
   });
 
-  // --- App web : lister ses tâches (JWT) ---
-  app.get("/api/agent-tasks", { preHandler: requireUser }, async (request) => {
+  // --- App web : lister ses tâches (JWT) — captures retirées des résultats ---
+  app.get("/api/agent-tasks", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const status = (request.query as { status?: string }).status;
-
-    if (status) {
-      const { rows } = await pool.query(
-        `SELECT * FROM agent_tasks WHERE user_id = $1 AND status = $2
-         ORDER BY created_at DESC LIMIT 50`,
-        [userId, status],
-      );
-      return { tasks: rows };
+    if (status !== undefined && !isAgentTaskStatus(status)) {
+      return reply.status(400).send({ error: "status invalide" });
     }
-    const { rows } = await pool.query(
-      "SELECT * FROM agent_tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50",
-      [userId],
-    );
-    return { tasks: rows };
+
+    const { rows } = status
+      ? await pool.query(
+          `SELECT ${LIST_COLS} FROM agent_tasks WHERE user_id = $1 AND status = $2
+           ORDER BY created_at DESC LIMIT 50`,
+          [userId, status],
+        )
+      : await pool.query(
+          `SELECT ${LIST_COLS} FROM agent_tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+          [userId],
+        );
+    return { tasks: rows.map((r) => ({ ...r, result: stripImageB64(r.result) })) };
   });
 }
+

@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import shutil
 
-from skills.base import Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult
+from skills.filesystem import touches_git_dir
 
 
 class MoveFileSkill(Skill):
@@ -16,11 +17,21 @@ class MoveFileSkill(Skill):
     def describe(self, step: dict) -> str:
         return f"déplacer {step.get('src')} → {step.get('dest')}"
 
+    def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        src, dest = step.get("src"), step.get("dest")
+        if not isinstance(src, str) or not isinstance(dest, str) or not src or not dest:
+            return "champs 'src' et 'dest' requis"
+        if touches_git_dir(src) or touches_git_dir(dest):
+            return "déplacement refusé depuis/vers un dossier .git"
+        return None
+
     def run(self, step: dict) -> SkillResult:
         src = step.get("src")
         dest = step.get("dest")
-        if not src or not dest:
+        if not isinstance(src, str) or not isinstance(dest, str) or not src or not dest:
             return SkillResult(ok=False, detail="champs 'src' et 'dest' requis")
+        if touches_git_dir(src) or touches_git_dir(dest):
+            return SkillResult(ok=False, detail="déplacement refusé depuis/vers un dossier .git")
         if not os.path.exists(src):
             return SkillResult(ok=False, detail=f"source introuvable : {src}")
 

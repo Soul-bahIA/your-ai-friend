@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Activity } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import ErrorState from "@/components/ErrorState";
 
 interface LogItem {
   id: string;
@@ -37,38 +38,47 @@ function timeAgo(dateStr: string) {
 
 const ActivityFeed = () => {
   const { user } = useAuth();
+  const userId = user?.id;
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLogs = useCallback(async () => {
+    setError(null);
+    const { data, error: err } = await supabase
+      .from("system_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (err) {
+      console.error("Error loading system logs:", err);
+      setError(err.message);
+    } else {
+      setLogs(data ?? []);
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    if (!user) return;
-
-    const fetchLogs = async () => {
-      const { data } = await supabase
-        .from("system_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (data) setLogs(data);
-      setLoading(false);
-    };
+    if (!userId) return;
 
     fetchLogs();
 
     // Realtime subscription
     const channel = supabase
-      .channel("system_logs_realtime")
+      .channel(`system_logs_realtime-${userId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "system_logs" },
         (payload) => {
-          setLogs((prev) => [payload.new as LogItem, ...prev].slice(0, 20));
+          const item = payload.new as LogItem;
+          setLogs((prev) => (prev.some((l) => l.id === item.id) ? prev : [item, ...prev].slice(0, 20)));
         }
       )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [userId, fetchLogs]);
 
   if (loading) {
     return (
@@ -88,7 +98,9 @@ const ActivityFeed = () => {
         <Activity className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold text-foreground">Activité Récente</h3>
       </div>
-      {logs.length === 0 ? (
+      {error ? (
+        <ErrorState compact message="Impossible de charger le journal système." detail={error} onRetry={fetchLogs} />
+      ) : logs.length === 0 ? (
         <p className="text-xs text-muted-foreground">Aucune activité pour le moment.</p>
       ) : (
         <div className="space-y-3">

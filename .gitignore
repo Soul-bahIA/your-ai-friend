@@ -26,3 +26,6 @@ dist-ssr
 # Env
 .env
 !.env.example
+
+# Sauvegardes de la base (scripts/backup_db.*) — ne jamais versionner
+backups/

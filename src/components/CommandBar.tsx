@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, Loader2, ArrowRight, X, BrainCircuit } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -52,21 +52,16 @@ const CommandBar = () => {
     setLoading(true);
     setDecision(null);
     try {
-      const resp = await fetch(apiUrl("/api/orchestrator/route"), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ request: input.trim() }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) throw new Error(data.error || "Échec de l'orchestration");
-      setDecision(data.decision as RouteDecision);
+      const data = await apiFetch<{ success?: boolean; error?: string; decision?: RouteDecision }>(
+        "/api/orchestrator/route",
+        { method: "POST", json: { request: input.trim() } },
+      );
+      if (!data?.success || !data.decision) throw new Error(data?.error || "Échec de l'orchestration");
+      setDecision({ ...data.decision, subtasks: data.decision.subtasks ?? [] });
       setPrompt(input.trim());
       setInput("");
-    } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Erreur", description: errorMessage(err), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -93,7 +88,7 @@ const CommandBar = () => {
                 {decision.complexity}
               </span>
             </div>
-            <button onClick={() => setDecision(null)} className="text-muted-foreground hover:text-foreground">
+            <button onClick={() => setDecision(null)} className="text-muted-foreground hover:text-foreground" aria-label="Fermer la proposition">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -132,9 +127,11 @@ const CommandBar = () => {
           placeholder="Demandez n'importe quoi — « Crée une formation marketing », « Ouvre Notepad », « Cherche… »"
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
           disabled={loading}
+          aria-label="Barre de commande universelle"
         />
         <button
           type="submit"
+          aria-label="Envoyer la commande"
           disabled={loading || !input.trim()}
           className="flex-shrink-0 rounded-full bg-primary p-1.5 text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
         >

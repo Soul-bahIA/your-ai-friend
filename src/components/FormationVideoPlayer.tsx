@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -161,7 +161,8 @@ const slideColor = (type: SlideType) => {
 };
 
 const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationVideoPlayerProps) => {
-  const slides = useRef(buildSlides(title, lessons));
+  // Construit une seule fois par couple (titre, leçons) — pas à chaque rendu.
+  const slideList = useMemo(() => buildSlides(title, lessons), [title, lessons]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -172,12 +173,23 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
   const startTimeRef = useRef(Date.now());
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  const totalSlides = slides.current.length;
-  const slide = slides.current[currentSlide];
+  const totalSlides = slideList.length;
+  const slide = slideList[Math.min(currentSlide, totalSlides - 1)];
 
   const stopSpeech = useCallback(() => {
-    window.speechSynthesis.cancel();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     setIsSpeaking(false);
+  }, []);
+
+  // Coupe la narration si le composant est démonté (ex. dialogue fermé par le parent).
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
   }, []);
 
   const speakSlide = useCallback((slide: Slide) => {
@@ -236,14 +248,14 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
   // Speak on slide change
   useEffect(() => {
     if (open && playing) {
-      speakSlide(slides.current[currentSlide]);
+      const current = slideList[currentSlide];
+      if (current) speakSlide(current);
     }
-  }, [currentSlide, open, playing, speakSlide]);
+  }, [currentSlide, open, playing, speakSlide, slideList]);
 
   // Reset on open
   useEffect(() => {
     if (open) {
-      slides.current = buildSlides(title, lessons);
       setCurrentSlide(0);
       setPlaying(true);
       setProgress(0);
@@ -251,7 +263,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
     } else {
       stopSpeech();
     }
-  }, [open, title, lessons, stopSpeech]);
+  }, [open, slideList, stopSpeech]);
 
   const globalProgress = ((currentSlide + progress / 100) / totalSlides) * 100;
 
@@ -268,7 +280,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
             <span className="text-[10px] text-muted-foreground font-mono">
               {currentSlide + 1}/{totalSlides}
             </span>
-            <button onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground p-1">
+            <button onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground p-1" aria-label="Fermer le lecteur">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -386,6 +398,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
               className="h-8 w-8"
               onClick={() => goTo(currentSlide - 1)}
               disabled={currentSlide === 0}
+              aria-label="Diapositive précédente"
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -394,6 +407,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
               size="icon"
               className="h-8 w-8"
               onClick={() => setPlaying(!playing)}
+              aria-label={playing ? "Pause" : "Lecture"}
             >
               {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
@@ -403,6 +417,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
               className="h-8 w-8"
               onClick={() => goTo(currentSlide + 1)}
               disabled={currentSlide >= totalSlides - 1}
+              aria-label="Diapositive suivante"
             >
               <SkipForward className="h-4 w-4" />
             </Button>
@@ -412,6 +427,7 @@ const FormationVideoPlayer = ({ open, onOpenChange, title, lessons }: FormationV
               className="h-8 w-8"
               onClick={() => { setTtsEnabled(!ttsEnabled); if (ttsEnabled) stopSpeech(); }}
               title={ttsEnabled ? "Désactiver la narration" : "Activer la narration"}
+              aria-label={ttsEnabled ? "Désactiver la narration" : "Activer la narration"}
             >
               {ttsEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </Button>

@@ -15,7 +15,7 @@ interface ChatProviderSpec {
 
 const SPECS: Record<string, ChatProviderSpec> = {
   openai: {
-    url: process.env.OPENAI_URL ?? "https://api.openai.com/v1/chat/completions",
+    url: "https://api.openai.com/v1/chat/completions",
     keyEnv: "OPENAI_API_KEY",
     modelEnv: "OPENAI_MODEL",
     defaultModel: "gpt-4o",
@@ -61,46 +61,49 @@ export interface ChatProvider {
 
 const ORDER = ["openai", "gemini", "mistral", "deepseek", "xai", "qwen"];
 
-/** Fournisseur de chat retenu, ou null si aucune clé n'est configurée. */
-export function resolveChatProvider(): ChatProvider | null {
-  const wanted = (process.env.CHAT_PROVIDER ?? "").toLowerCase();
+/**
+ * Fournisseur de chat retenu, ou null si aucune clé n'est configurée.
+ * CHAT_MODEL ne s'applique qu'au fournisseur explicitement choisi (CHAT_PROVIDER) :
+ * en repli sur un autre fournisseur, on n'envoie jamais le modèle d'un autre éditeur.
+ */
+export function resolveChatProvider(env: NodeJS.ProcessEnv = process.env): ChatProvider | null {
+  const wanted = (env.CHAT_PROVIDER ?? "").toLowerCase();
+  const chatModel = env.CHAT_MODEL || undefined;
 
-  // Modèle local (Ollama/LM Studio) : activé si LOCAL_LLM_URL est défini.
-  const localUrl = process.env.LOCAL_LLM_URL;
-  const buildLocal = (): ChatProvider | null =>
-    localUrl
-      ? {
-          provider: "local",
-          url: `${localUrl.replace(/\/+$/, "")}/chat/completions`,
-          apiKey: process.env.LOCAL_LLM_KEY ?? "",
-          model: process.env.CHAT_MODEL ?? process.env.LOCAL_LLM_MODEL ?? "llama3.1",
-        }
-      : null;
-
-  const build = (id: string): ChatProvider | null => {
-    if (id === "local") return buildLocal();
+  const build = (id: string, explicit: boolean): ChatProvider | null => {
+    const override = explicit ? chatModel : undefined;
+    if (id === "local") {
+      // Modèle local (Ollama/LM Studio) : activé si LOCAL_LLM_URL est défini.
+      const localUrl = env.LOCAL_LLM_URL;
+      if (!localUrl) return null;
+      return {
+        provider: "local",
+        url: `${localUrl.replace(/\/+$/, "")}/chat/completions`,
+        apiKey: env.LOCAL_LLM_KEY ?? "",
+        model: override || env.LOCAL_LLM_MODEL || "llama3.1",
+      };
+    }
     const spec = SPECS[id];
     if (!spec) return null;
-    const key = process.env[spec.keyEnv];
+    const key = env[spec.keyEnv];
     if (!key) return null;
     return {
       provider: id,
-      url: spec.url,
+      url: id === "openai" ? env.OPENAI_URL || spec.url : spec.url,
       apiKey: key,
-      // CHAT_MODEL surcharge globale, sinon modèle spécifique, sinon défaut.
-      model: process.env.CHAT_MODEL || process.env[spec.modelEnv] || spec.defaultModel,
+      model: override || env[spec.modelEnv] || spec.defaultModel,
     };
   };
 
   // 1. Choix explicite s'il est configuré.
   if (wanted) {
-    const chosen = build(wanted);
+    const chosen = build(wanted, true);
     if (chosen) return chosen;
   }
-  // 2. Sinon, 1er fournisseur disponible (OpenAI prioritaire).
-  for (const id of ORDER) {
-    const p = build(id);
+  // 2. Sinon, 1er fournisseur disponible (OpenAI prioritaire), puis le modèle local.
+  for (const id of [...ORDER, "local"]) {
+    const p = build(id, false);
     if (p) return p;
   }
-  return buildLocal();
+  return null;
 }

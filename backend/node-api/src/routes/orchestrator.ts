@@ -4,6 +4,7 @@ import { routeRequest, ServiceError } from "../clients/iaClient";
 import { researchService } from "../services/research";
 import { planAndQueueGoal } from "./agentGoal";
 import { logEvent } from "../services/logs";
+import { config } from "../config";
 
 // Cerveau central (Chief Agent) : point d'entrée unique. Comprend la demande, désigne
 // l'agent spécialisé, et — si execute=true — DISPATCHE réellement vers la capacité
@@ -12,10 +13,17 @@ import { logEvent } from "../services/logs";
 // renvoyées avec une instruction de navigation.
 
 export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/api/orchestrator/route", { preHandler: requireUser }, async (request, reply) => {
+  app.post(
+    "/api/orchestrator/route",
+    { preHandler: requireUser, config: { rateLimit: { max: config.rateLimitExpensive, timeWindow: "1 minute" } } },
+    async (request, reply) => {
     const userId = request.user!.id;
     const body = (request.body ?? {}) as { request?: string; provider?: string; execute?: boolean };
-    if (!body.request?.trim()) return reply.status(400).send({ error: "request requis" });
+    if (typeof body.request !== "string" || !body.request.trim()) return reply.status(400).send({ error: "request requis" });
+    if (body.request.length > 2000) return reply.status(400).send({ error: "request trop longue (2000 car. max)" });
+    if (body.provider !== undefined && (typeof body.provider !== "string" || body.provider.length > 40)) {
+      return reply.status(400).send({ error: "provider invalide" });
+    }
     const text = body.request.trim();
 
     try {
@@ -57,8 +65,8 @@ export async function orchestratorRoutes(app: FastifyInstance): Promise<void> {
       return { success: true, decision, executed: null, navigate: decision.capability };
     } catch (e) {
       if (e instanceof ServiceError) return reply.status(e.status).send({ error: e.message });
-      request.log.error(e);
-      return reply.status(500).send({ error: e instanceof Error ? e.message : "Erreur d'orchestration" });
+      throw e; // → gestionnaire d'erreurs global (message générique, détail journalisé)
     }
-  });
+    },
+  );
 }

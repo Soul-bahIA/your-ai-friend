@@ -8,3 +8,9 @@ venv/
 *.png
 *.mp4
 *.avi
+
+# Mises à jour finales en attente (file locale) et journaux de l'agent
+.pending_updates.json
+.pending_*.tmp
+logs/
+.pytest_cache/

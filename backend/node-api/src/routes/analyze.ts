@@ -1,20 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db";
+import { requireUser } from "../auth";
 import { requestInference } from "../clients/iaClient";
+import { isUuid } from "../lib/sanitize";
+
+// Démo Node → Python → Rust. Authentifiée : chaque requête est rattachée à son
+// utilisateur (analysis_requests.user_id) et seule sa propre ligne est relisible.
 
 export async function analyzeRoutes(app: FastifyInstance): Promise<void> {
-  // Flux complet : Node → Postgres → Python IA (→ Rust) → Postgres → client
-  app.post("/api/analyze", async (request, reply) => {
-    const body = request.body as { text?: string } | undefined;
-    const text = body?.text?.trim();
+  app.post("/api/analyze", { preHandler: requireUser }, async (request, reply) => {
+    const userId = request.user!.id;
+    const body = request.body as { text?: unknown } | undefined;
+    const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) {
       return reply.status(400).send({ error: "Champ 'text' requis" });
+    }
+    if (text.length > 10_000) {
+      return reply.status(400).send({ error: "Champ 'text' trop long (10000 car. max)" });
     }
 
     // 1. Persiste la requête entrante
     const insert = await pool.query(
-      "INSERT INTO analysis_requests (input_text, status) VALUES ($1, 'processing') RETURNING id",
-      [text],
+      "INSERT INTO analysis_requests (input_text, status, user_id) VALUES ($1, 'processing', $2) RETURNING id",
+      [text, userId],
     );
     const requestId: string = insert.rows[0].id;
 
@@ -24,29 +32,27 @@ export async function analyzeRoutes(app: FastifyInstance): Promise<void> {
 
       // 3. Stocke le résultat (colonne JSONB → on sérialise)
       await pool.query(
-        "UPDATE analysis_requests SET status = 'done', result = $2 WHERE id = $1",
-        [requestId, JSON.stringify(result)],
+        "UPDATE analysis_requests SET status = 'done', result = $2 WHERE id = $1 AND user_id = $3",
+        [requestId, JSON.stringify(result), userId],
       );
 
       return { requestId, ...result };
     } catch (err) {
-      await pool.query(
-        "UPDATE analysis_requests SET status = 'error' WHERE id = $1",
-        [requestId],
-      );
+      await pool
+        .query("UPDATE analysis_requests SET status = 'error' WHERE id = $1 AND user_id = $2", [requestId, userId])
+        .catch(() => {});
       request.log.error(err);
-      return reply
-        .status(502)
-        .send({ error: "Échec de l'inférence IA", requestId });
+      return reply.status(502).send({ error: "Échec de l'inférence IA", requestId });
     }
   });
 
-  // Relecture d'un résultat par id
-  app.get("/api/analyze/:id", async (request, reply) => {
+  // Relecture d'un résultat par id (uniquement les siens)
+  app.get("/api/analyze/:id", { preHandler: requireUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const r = await pool.query(
-      "SELECT id, input_text, status, result, created_at FROM analysis_requests WHERE id = $1",
-      [id],
+      "SELECT id, input_text, status, result, created_at FROM analysis_requests WHERE id = $1 AND user_id = $2",
+      [id, request.user!.id],
     );
     if (r.rowCount === 0) {
       return reply.status(404).send({ error: "Introuvable" });

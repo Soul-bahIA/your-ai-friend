@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from .base import LLMError, LLMProvider
+from .base import LLMError, LLMProvider, upstream_error
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -89,14 +89,9 @@ class OpenAICompatProvider(LLMProvider):
         except httpx.HTTPError as e:
             raise LLMError(502, f"Service IA ({self.id}) injoignable : {e}")
 
-        if r.status_code == 401:
-            raise LLMError(401, f"Clé API invalide pour {self.id}.")
-        if r.status_code == 429:
-            raise LLMError(429, f"Trop de requêtes ({self.id}). Réessayez.")
-        if r.status_code == 402:
-            raise LLMError(402, f"Crédits épuisés pour {self.id}.")
         if r.status_code >= 400:
-            raise LLMError(502, f"Erreur {self.id} ({r.status_code}) : {r.text[:200]}")
+            # Le corps n'est pas renvoyé pour 401/403 (il peut contenir un extrait de clé).
+            raise upstream_error(self.id, r.status_code, r.text[:200])
 
         try:
             data = r.json()

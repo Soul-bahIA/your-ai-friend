@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import ConfirmAction from "@/components/ConfirmAction";
+import { errorMessage } from "@/lib/api";
 import {
   Database, Plus, Trash2, Edit, Save, ArrowLeft, History, Table2, Rows3, AlertTriangle, Loader2,
 } from "lucide-react";
@@ -31,12 +33,12 @@ const removeColumn = (cols: Column[], setCols: (c: Column[]) => void, idx: numbe
   setCols(cols.filter((_, i) => i !== idx));
 };
 
-const updateColumn = (
+const updateColumn = <K extends keyof Column>(
   cols: Column[],
   setCols: (c: Column[]) => void,
   idx: number,
-  field: keyof Column,
-  value: any,
+  field: K,
+  value: Column[K],
 ) => {
   const next = cols.map((c, i) => (i === idx ? { ...c, [field]: value } : c));
   setCols(next);
@@ -58,7 +60,7 @@ function ColumnEditor({ columns, setColumns }: { columns: Column[]; setColumns: 
           />
           <Select
             value={col.type}
-            onValueChange={(v) => updateColumn(columns, setColumns, i, "type", v)}
+            onValueChange={(v) => updateColumn(columns, setColumns, i, "type", v as Column["type"])}
           >
             <SelectTrigger className="w-28">
               <SelectValue />
@@ -72,9 +74,15 @@ function ColumnEditor({ columns, setColumns }: { columns: Column[]; setColumns: 
           <Checkbox
             checked={col.required}
             onCheckedChange={(v) => updateColumn(columns, setColumns, i, "required", !!v)}
+            aria-label={`Colonne ${col.name || i + 1} requise`}
           />
           <span className="text-xs text-muted-foreground w-12">Requis</span>
-          <Button size="icon" variant="ghost" onClick={() => removeColumn(columns, setColumns, i)}>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => removeColumn(columns, setColumns, i)}
+            aria-label={`Retirer la colonne ${col.name || i + 1}`}
+          >
             <Trash2 className="h-3 w-3 text-destructive" />
           </Button>
         </div>
@@ -86,8 +94,17 @@ function ColumnEditor({ columns, setColumns }: { columns: Column[]; setColumns: 
   );
 }
 
+/** Rendu lisible d'une valeur de cellule (JSON, booléen...). */
+function formatCell(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Oui" : "Non";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export default function DatabaseAdmin() {
   const db = useDatabase();
+  const { loadSchemas, loadData, loadMigrations } = db;
   const { toast } = useToast();
   const [activeSchema, setActiveSchema] = useState<UserSchema | null>(null);
   const [tab, setTab] = useState("tables");
@@ -112,15 +129,18 @@ export default function DatabaseAdmin() {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    db.loadSchemas();
-  }, []);
+    loadSchemas();
+  }, [loadSchemas]);
 
+  const activeSchemaId = activeSchema?.id;
   useEffect(() => {
-    if (activeSchema) {
-      db.loadData(activeSchema.id);
-      db.loadMigrations(activeSchema.id);
-    }
-  }, [activeSchema]);
+    if (!activeSchemaId) return;
+    setSelectedRows(new Set());
+    loadData(activeSchemaId);
+    loadMigrations(activeSchemaId).catch((e) =>
+      toast({ title: "Migrations indisponibles", description: errorMessage(e), variant: "destructive" }),
+    );
+  }, [activeSchemaId, loadData, loadMigrations, toast]);
 
   const handleCreateTable = async () => {
     if (!newTableName.trim()) return;
@@ -130,8 +150,8 @@ export default function DatabaseAdmin() {
       setNewTableName("");
       setNewTableDesc("");
       setNewColumns([{ name: "id", type: "text", required: true }]);
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     }
   };
 
@@ -141,8 +161,8 @@ export default function DatabaseAdmin() {
       const updated = await db.updateSchema(editingSchema.id, { columns: editColumns });
       setEditingSchema(null);
       if (activeSchema?.id === updated.id) setActiveSchema(updated);
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     }
   };
 
@@ -153,17 +173,51 @@ export default function DatabaseAdmin() {
       setShowInsert(false);
       setNewRowData({});
       toast({ title: "Donnée ajoutée" });
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     }
   };
 
   const handleDeleteSelected = async () => {
-    for (const id of selectedRows) {
-      await db.deleteRow(id);
+    const ids = Array.from(selectedRows);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await db.deleteRow(id);
+        deleted++;
+        setSelectedRows((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } catch (e) {
+        toast({ title: "Suppression interrompue", description: errorMessage(e), variant: "destructive" });
+        break;
+      }
     }
-    setSelectedRows(new Set());
-    toast({ title: `${selectedRows.size} ligne(s) supprimée(s)` });
+    if (deleted > 0) toast({ title: `${deleted} ligne(s) supprimée(s)` });
+  };
+
+  const handleDeleteRow = async (id: string) => {
+    try {
+      await db.deleteRow(id);
+      setSelectedRows((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } catch (e) {
+      toast({ title: "Suppression impossible", description: errorMessage(e), variant: "destructive" });
+    }
+  };
+
+  const handleDeleteSchema = async (schema: UserSchema) => {
+    try {
+      await db.deleteSchema(schema.id);
+    } catch (e) {
+      toast({ title: "Suppression impossible", description: errorMessage(e), variant: "destructive" });
+    }
   };
 
   return (
@@ -173,7 +227,7 @@ export default function DatabaseAdmin() {
           <div>
             {activeSchema ? (
               <div className="flex items-center gap-3">
-                <Button size="icon" variant="ghost" onClick={() => { setActiveSchema(null); setTab("tables"); }}>
+                <Button size="icon" variant="ghost" onClick={() => { setActiveSchema(null); setTab("tables"); }} aria-label="Retour à la liste des tables">
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
@@ -257,19 +311,25 @@ export default function DatabaseAdmin() {
                             setEditingSchema(s);
                             setEditColumns([...(s.columns as Column[])]);
                           }}
+                          aria-label={`Modifier le schéma de ${s.table_name}`}
                         >
                           <Edit className="h-3 w-3" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            db.deleteSchema(s.id);
-                          }}
-                        >
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </Button>
+                        <ConfirmAction
+                          title="Supprimer cette table ?"
+                          description={`La table « ${s.table_name} » et toutes ses données seront définitivement supprimées.`}
+                          onConfirm={() => handleDeleteSchema(s)}
+                          trigger={
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Supprimer la table ${s.table_name}`}
+                            >
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          }
+                        />
                       </div>
                     </CardTitle>
                   </CardHeader>
@@ -304,9 +364,16 @@ export default function DatabaseAdmin() {
                 <p className="text-sm text-muted-foreground">{db.totalRows} ligne(s)</p>
                 <div className="flex gap-2">
                   {selectedRows.size > 0 && (
-                    <Button size="sm" variant="destructive" onClick={handleDeleteSelected}>
-                      <Trash2 className="h-3 w-3 mr-1" /> Supprimer ({selectedRows.size})
-                    </Button>
+                    <ConfirmAction
+                      title={`Supprimer ${selectedRows.size} ligne(s) ?`}
+                      description="Les lignes sélectionnées seront définitivement supprimées."
+                      onConfirm={handleDeleteSelected}
+                      trigger={
+                        <Button size="sm" variant="destructive">
+                          <Trash2 className="h-3 w-3 mr-1" /> Supprimer ({selectedRows.size})
+                        </Button>
+                      }
+                    />
                   )}
                   <Dialog open={showInsert} onOpenChange={setShowInsert}>
                     <DialogTrigger asChild>
@@ -347,6 +414,7 @@ export default function DatabaseAdmin() {
                             if (v) setSelectedRows(new Set(db.rows.map((r) => r.id)));
                             else setSelectedRows(new Set());
                           }}
+                          aria-label="Tout sélectionner"
                         />
                       </TableHead>
                       {(activeSchema.columns as Column[]).map((col) => (
@@ -369,19 +437,23 @@ export default function DatabaseAdmin() {
                             <Checkbox
                               checked={selectedRows.has(row.id)}
                               onCheckedChange={(v) => {
-                                const next = new Set(selectedRows);
-                                v ? next.add(row.id) : next.delete(row.id);
-                                setSelectedRows(next);
+                                setSelectedRows((prev) => {
+                                  const next = new Set(prev);
+                                  if (v) next.add(row.id);
+                                  else next.delete(row.id);
+                                  return next;
+                                });
                               }}
+                              aria-label="Sélectionner la ligne"
                             />
                           </TableCell>
                           {(activeSchema.columns as Column[]).map((col) => (
                             <TableCell key={col.name} className="text-sm">
-                              {row.row_data?.[col.name] ?? "—"}
+                              {formatCell(row.row_data?.[col.name])}
                             </TableCell>
                           ))}
                           <TableCell>
-                            <Button size="icon" variant="ghost" onClick={() => db.deleteRow(row.id)}>
+                            <Button size="icon" variant="ghost" onClick={() => handleDeleteRow(row.id)} aria-label="Supprimer la ligne">
                               <Trash2 className="h-3 w-3 text-destructive" />
                             </Button>
                           </TableCell>

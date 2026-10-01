@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Shield, Lock, Eye, KeyRound, Plus, Trash2, Copy, Check, Loader2 } from "lucide-react";
@@ -7,7 +7,9 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiUrl, apiAuthHeaders } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
+import ConfirmAction from "@/components/ConfirmAction";
+import ErrorState from "@/components/ErrorState";
 import { useToast } from "@/hooks/use-toast";
 
 interface AgentKey {
@@ -19,48 +21,46 @@ interface AgentKey {
 
 const Security = () => {
   const { user } = useAuth();
+  const userId = user?.id;
   const { toast } = useToast();
   const [keys, setKeys] = useState<AgentKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [freshKey, setFreshKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const loadKeys = async () => {
+  const loadKeys = useCallback(async () => {
+    setLoadError(null);
     try {
-      const res = await fetch(apiUrl("/api/agent-keys"), { headers: await apiAuthHeaders() });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Erreur");
-      setKeys(data.keys || []);
-    } catch (e: any) {
-      // silencieux si le backend n'est pas démarré
-      console.warn("[Security] chargement des clés:", e.message);
+      const data = await apiFetch<{ keys?: AgentKey[] }>("/api/agent-keys");
+      setKeys(data?.keys ?? []);
+    } catch (e) {
+      console.warn("[Security] chargement des clés:", e);
+      setLoadError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (user) loadKeys();
-  }, [user]);
+    if (userId) loadKeys();
+  }, [userId, loadKeys]);
 
   const createKey = async () => {
     setCreating(true);
     try {
-      const res = await fetch(apiUrl("/api/agent-keys"), {
+      const data = await apiFetch<{ key?: string }>("/api/agent-keys", {
         method: "POST",
-        headers: await apiAuthHeaders(),
-        body: JSON.stringify({ label: newLabel.trim() || null }),
+        json: { label: newLabel.trim() || null },
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Erreur");
-      setFreshKey(data.key);
+      setFreshKey(data?.key ?? null);
       setNewLabel("");
       setCopied(false);
       loadKeys();
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     } finally {
       setCreating(false);
     }
@@ -68,23 +68,23 @@ const Security = () => {
 
   const revokeKey = async (id: string) => {
     try {
-      const res = await fetch(apiUrl(`/api/agent-keys/${id}`), {
-        method: "DELETE",
-        headers: await apiAuthHeaders(),
-      });
-      if (!res.ok) throw new Error("Erreur");
+      await apiFetch(`/api/agent-keys/${id}`, { method: "DELETE" });
       setKeys((prev) => prev.filter((k) => k.id !== id));
       toast({ title: "Clé révoquée" });
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     }
   };
 
   const copyKey = async () => {
     if (!freshKey) return;
-    await navigator.clipboard.writeText(freshKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(freshKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: "Copie impossible", description: "Sélectionnez la clé et copiez-la manuellement.", variant: "destructive" });
+    }
   };
 
   return (
@@ -134,7 +134,7 @@ const Security = () => {
                   <code className="flex-1 text-xs font-mono bg-background rounded px-2 py-1.5 overflow-x-auto whitespace-nowrap">
                     {freshKey}
                   </code>
-                  <Button size="icon" variant="outline" onClick={copyKey}>
+                  <Button size="icon" variant="outline" onClick={copyKey} aria-label="Copier la clé">
                     {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
@@ -163,6 +163,16 @@ const Security = () => {
             {/* Liste des clés */}
             {loading ? (
               <p className="text-xs text-muted-foreground">Chargement...</p>
+            ) : loadError ? (
+              <ErrorState
+                compact
+                message="Impossible de charger les clés de l'agent."
+                detail={loadError}
+                onRetry={() => {
+                  setLoading(true);
+                  loadKeys();
+                }}
+              />
             ) : keys.length === 0 ? (
               <p className="text-xs text-muted-foreground">Aucune clé active.</p>
             ) : (
@@ -178,9 +188,17 @@ const Security = () => {
                           : " · jamais utilisée"}
                       </p>
                     </div>
-                    <Button size="icon" variant="ghost" onClick={() => revokeKey(k.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    <ConfirmAction
+                      title="Révoquer cette clé ?"
+                      description={`L'agent utilisant la clé « ${k.label || "Sans nom"} » ne pourra plus se connecter.`}
+                      confirmLabel="Révoquer"
+                      onConfirm={() => revokeKey(k.id)}
+                      trigger={
+                        <Button size="icon" variant="ghost" aria-label={`Révoquer la clé « ${k.label || "Sans nom"} »`}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      }
+                    />
                   </div>
                 ))}
               </div>

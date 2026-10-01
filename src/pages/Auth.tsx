@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,14 +68,15 @@ const Auth = () => {
           }
         }
       }
-    } catch (error: any) {
-      let message = error.message;
-      if (error.message?.includes("User already registered")) {
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      let message = raw || "Une erreur est survenue.";
+      if (raw.includes("User already registered")) {
         message = "Ce compte existe déjà. Passez à la connexion.";
-      } else if (error.message?.includes("Email not confirmed")) {
+      } else if (raw.includes("Email not confirmed")) {
         message =
           "Email non confirmé. Cliquez sur le lien reçu par email avant de vous connecter.";
-      } else if (error.message?.includes("Invalid login credentials")) {
+      } else if (raw.includes("Invalid login credentials")) {
         message = "Email ou mot de passe incorrect.";
       }
       toast({
@@ -85,6 +88,11 @@ const Auth = () => {
       setLoading(false);
     }
   };
+
+  // Déjà connecté : pas besoin de la page de connexion.
+  if (!authLoading && user) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-background bg-mesh flex items-center justify-center p-4">

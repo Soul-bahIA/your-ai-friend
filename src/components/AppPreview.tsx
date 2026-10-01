@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Eye, Code2, Database, Globe, MousePointer, Send, Loader2, X, Pencil } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch, errorMessage } from "@/lib/api";
+import type { GenerateApplicationResponse, GeneratedApplication } from "@/types/application";
 import type { Json } from "@/integrations/supabase/types";
 
 interface AppArchitecture {
@@ -31,7 +33,7 @@ interface AppPreviewProps {
   architecture: AppArchitecture | null;
   applicationId?: string;
   sourceCode?: Json | null;
-  onAppUpdated?: (result: any) => void;
+  onAppUpdated?: (result: GeneratedApplication) => void;
 }
 
 function buildPreviewHtml(title: string, architecture: AppArchitecture | null, editMode: boolean): string {
@@ -178,7 +180,7 @@ interface SelectedElement {
 }
 
 const AppPreview = ({ open, onOpenChange, title, description, appType, techStack, architecture, applicationId, sourceCode, onAppUpdated }: AppPreviewProps) => {
-  const { session } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [tab, setTab] = useState("preview");
   const [editMode, setEditMode] = useState(false);
@@ -239,43 +241,34 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
   };
 
   const handleSendModification = useCallback(async () => {
-    if (!editInput.trim() || !applicationId || !session || !onAppUpdated || sending) return;
+    if (!editInput.trim() || !applicationId || !user || !onAppUpdated || sending) return;
     setSending(true);
 
     const instruction = buildInstruction(editInput, selectedElement);
 
     try {
-      const response = await fetch(
-        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/application`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            appName: title,
-            applicationId,
-            conversationHistory: [{ role: "user", content: instruction }],
-            existingArchitecture: sourceCode || {},
-          }),
-        }
-      );
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Échec de la modification");
+      const result = await apiFetch<GenerateApplicationResponse>("/api/generate/application", {
+        method: "POST",
+        json: {
+          appName: title,
+          applicationId,
+          conversationHistory: [{ role: "user", content: instruction }],
+          existingArchitecture: sourceCode || {},
+        },
+      });
+      if (!result?.application) throw new Error(result?.error || "Échec de la modification");
 
       onAppUpdated(result.application);
       setSelectedElement(null);
       setEditInput("");
       setPreviewKey((k) => k + 1);
       toast({ title: "✅ Modification appliquée", description: `Votre modification a été appliquée avec succès.` });
-    } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Erreur", description: errorMessage(err), variant: "destructive" });
     }
 
     setSending(false);
-  }, [editInput, applicationId, session, onAppUpdated, sending, selectedElement, sourceCode, title, toast]);
+  }, [editInput, applicationId, user, onAppUpdated, sending, selectedElement, sourceCode, title, toast]);
 
   const canEdit = !!applicationId && !!onAppUpdated;
 
@@ -367,7 +360,7 @@ const AppPreview = ({ open, onOpenChange, title, description, appType, techStack
                       </span>
                       <span className="text-[10px] text-muted-foreground">({selectedElement.type})</span>
                     </div>
-                    <button onClick={() => setSelectedElement(null)} className="text-muted-foreground hover:text-foreground">
+                    <button onClick={() => setSelectedElement(null)} className="text-muted-foreground hover:text-foreground" aria-label="Désélectionner l'élément">
                       <X className="h-4 w-4" />
                     </button>
                   </div>

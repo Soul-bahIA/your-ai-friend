@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { GraduationCap, Sparkles, Clock, BookOpen, Play, Video, Trash2, ChevronDown, ChevronUp, Loader2, FileDown, Monitor, Film } from "lucide-react";
 import FormationVideoPlayer from "@/components/FormationVideoPlayer";
 import AgentTasksPanel from "@/components/AgentTasksPanel";
-import { apiUrl } from "@/lib/api";
+import ConfirmAction from "@/components/ConfirmAction";
+import ErrorState from "@/components/ErrorState";
+import { apiFetch, errorMessage, safeMediaUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -32,14 +35,34 @@ interface Formation {
   video_url?: string | null;
 }
 
+/** Applique un événement temps réel directement à la liste (sans refetch complet). */
+function applyFormationChange(
+  prev: Formation[],
+  payload: RealtimePostgresChangesPayload<Record<string, unknown>>,
+): Formation[] {
+  if (payload.eventType === "DELETE") {
+    const id = (payload.old as { id?: string }).id;
+    return id ? prev.filter((f) => f.id !== id) : prev;
+  }
+  const row = payload.new as unknown as Formation;
+  if (!row?.id) return prev;
+  const idx = prev.findIndex((f) => f.id === row.id);
+  if (idx === -1) return [row, ...prev];
+  const next = prev.slice();
+  next[idx] = { ...prev[idx], ...row };
+  return next;
+}
+
 const Formations = () => {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
+  const userId = user?.id;
   const { toast } = useToast();
   const [topic, setTopic] = useState("");
   const [details, setDetails] = useState("");
   useCommandPrefill(setTopic);
   const [formations, setFormations] = useState<Formation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [videoFormation, setVideoFormation] = useState<Formation | null>(null);
@@ -47,74 +70,80 @@ const Formations = () => {
   const [videoGenId, setVideoGenId] = useState<string | null>(null);
 
   const handleGenerateVideo = async (course: Formation) => {
-    if (!session || videoGenId) return;
+    if (!userId || videoGenId) return;
     setVideoGenId(course.id);
     toast({
       title: "Production de la vidéo lancée",
       description: "Narration + montage MP4 — cela peut prendre plusieurs minutes. Laissez l'onglet ouvert.",
     });
     try {
-      const resp = await fetch(apiUrl(`/api/formations/${course.id}/video`), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) throw new Error(data.error || "Échec de la production vidéo");
+      const data = await apiFetch<{
+        success?: boolean;
+        error?: string;
+        video_url?: string;
+        slides?: number;
+        duration_s?: number;
+      }>(`/api/formations/${course.id}/video`, { method: "POST", json: {} });
+      if (!data?.success) throw new Error(data?.error || "Échec de la production vidéo");
       setFormations((prev) =>
         prev.map((f) => (f.id === course.id ? { ...f, video_url: data.video_url } : f)),
       );
       toast({
         title: "🎬 Vidéo MP4 produite !",
-        description: `${data.slides} diapos · ${Math.round(data.duration_s)}s de narration.`,
+        description: `${data.slides ?? "?"} diapos · ${Math.round(data.duration_s ?? 0)}s de narration.`,
       });
-    } catch (err: any) {
-      toast({ title: "Erreur vidéo", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Erreur vidéo", description: errorMessage(err), variant: "destructive" });
     } finally {
       setVideoGenId(null);
     }
   };
 
+  const fetchFormations = useCallback(async () => {
+    if (!userId) return;
+    setLoadError(null);
+    const { data, error } = await supabase
+      .from("formations")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Error loading formations:", error);
+      setLoadError(error.message);
+    } else {
+      setFormations((data ?? []) as unknown as Formation[]);
+    }
+    setLoading(false);
+  }, [userId]);
+
   useEffect(() => {
-    if (!user) return;
-    const fetchFormations = async () => {
-      const { data } = await supabase
-        .from("formations")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (data) setFormations(data as unknown as Formation[]);
-      setLoading(false);
-    };
+    if (!userId) return;
     fetchFormations();
 
     // Temps réel : la génération asynchrone met à jour la formation en base
-    // (statut, contenu) ; on rafraîchit la liste dès qu'une ligne change.
+    // (statut, contenu) ; on applique directement la ligne reçue à la liste.
     const channel = supabase
-      .channel("formations-realtime")
+      .channel(`formations-realtime-${userId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "formations", filter: `user_id=eq.${user.id}` },
-        () => fetchFormations(),
+        { event: "*", schema: "public", table: "formations", filter: `user_id=eq.${userId}` },
+        (payload) => setFormations((prev) => applyFormationChange(prev, payload)),
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [userId, fetchFormations]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic.trim() || !user || !session) return;
+    if (!topic.trim() || !userId) return;
     setCreating(true);
 
     // Step 1: Create placeholder in DB
     const { data, error } = await supabase
       .from("formations")
       .insert({
-        user_id: user.id,
+        user_id: userId,
         title: topic,
         description: details || "Génération en cours...",
         status: "Génération...",
@@ -128,28 +157,17 @@ const Formations = () => {
       return;
     }
 
-    setFormations((prev) => [data as Formation, ...prev]);
+    setFormations((prev) =>
+      prev.some((f) => f.id === data.id) ? prev : [data as unknown as Formation, ...prev],
+    );
     const formationId = data.id;
 
     // Step 2: Call AI generation edge function
     try {
-      const response = await fetch(
-        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/formation`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ topic, details, formationId }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Échec de la génération");
-      }
+      await apiFetch("/api/generate/formation", {
+        method: "POST",
+        json: { topic, details, formationId },
+      });
 
       // Génération asynchrone : elle continue en arrière-plan (analyse → recherche →
       // programme → modules). La carte se met à jour toute seule via le temps réel.
@@ -160,8 +178,8 @@ const Formations = () => {
         description:
           "La formation se construit en arrière-plan (analyse, recherche, modules). La carte se mettra à jour automatiquement une fois prête.",
       });
-    } catch (err: any) {
-      toast({ title: "Erreur IA", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Erreur IA", description: errorMessage(err), variant: "destructive" });
       // Update status to error
       setFormations((prev) =>
         prev.map((f) => (f.id === formationId ? { ...f, status: "Erreur" } : f))
@@ -174,21 +192,27 @@ const Formations = () => {
 
   const handleDelete = async (id: string, title: string) => {
     const { error } = await supabase.from("formations").delete().eq("id", id);
-    if (!error) {
-      setFormations((prev) => prev.filter((f) => f.id !== id));
-      if (user) {
-        await supabase.from("system_logs").insert({
-          user_id: user.id,
-          module: "Formations",
-          event: `Formation « ${title} » supprimée`,
-          level: "warning",
-        });
-      }
+    if (error) {
+      toast({ title: "Suppression impossible", description: error.message, variant: "destructive" });
+      return;
+    }
+    setFormations((prev) => prev.filter((f) => f.id !== id));
+    if (videoFormation?.id === id) setVideoFormation(null);
+    if (agentFormation?.id === id) setAgentFormation(null);
+    toast({ title: "Formation supprimée", description: `« ${title} » a été supprimée.` });
+    if (userId) {
+      const { error: logError } = await supabase.from("system_logs").insert({
+        user_id: userId,
+        module: "Formations",
+        event: `Formation « ${title} » supprimée`,
+        level: "warning",
+      });
+      if (logError) console.error("Error writing system log:", logError);
     }
   };
 
   const handleExportPdf = (course: Formation) => {
-    const lessons = (course.content as Lesson[]) || [];
+    const lessons = Array.isArray(course.content) ? (course.content as Lesson[]) : [];
     const lines: string[] = [];
     lines.push(course.title);
     lines.push("=".repeat(course.title.length));
@@ -292,18 +316,30 @@ const Formations = () => {
         </h2>
         {loading ? (
           <p className="text-xs text-muted-foreground">Chargement...</p>
+        ) : loadError ? (
+          <ErrorState
+            message="Impossible de charger vos formations."
+            detail={loadError}
+            onRetry={() => {
+              setLoading(true);
+              fetchFormations();
+            }}
+          />
         ) : formations.length === 0 ? (
           <p className="text-xs text-muted-foreground">Aucune formation créée.</p>
         ) : (
           <div className="space-y-3">
-            {formations.map((course, i) => (
+            {formations.map((course, i) => {
+              const lessons = Array.isArray(course.content) ? (course.content as Lesson[]) : [];
+              const videoHref = safeMediaUrl(course.video_url);
+              return (
               <div
                 key={course.id}
                 className="rounded-lg border border-border bg-card opacity-0 animate-fade-in hover:border-primary/30 transition-colors"
                 style={{ animationDelay: `${250 + i * 50}ms` }}
               >
                 <div className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4 flex-1 cursor-pointer" onClick={() => setExpandedId(expandedId === course.id ? null : course.id)}>
+                  <div className="flex items-center gap-4 flex-1 cursor-pointer min-w-0" onClick={() => setExpandedId(expandedId === course.id ? null : course.id)}>
                     <div className="flex h-10 w-10 items-center justify-center rounded-md bg-secondary">
                       <GraduationCap className="h-5 w-5 text-primary" />
                     </div>
@@ -326,15 +362,16 @@ const Formations = () => {
                     <span className={`text-xs font-mono px-2 py-1 rounded ${getStatusColor(course.status)}`}>
                       {course.status}
                     </span>
-                    {course.content && Array.isArray(course.content) && course.content.length > 0 && (
+                    {lessons.length > 0 && (
                       <>
-                        {course.video_url ? (
+                        {videoHref ? (
                           <a
-                            href={apiUrl(course.video_url)}
+                            href={videoHref}
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                             className="text-success hover:text-success/80 transition-colors p-1"
                             title="Voir / télécharger la vidéo MP4"
+                            aria-label="Voir / télécharger la vidéo MP4"
                           >
                             <Film className="h-4 w-4" />
                           </a>
@@ -344,6 +381,7 @@ const Formations = () => {
                             disabled={!!videoGenId}
                             className="text-muted-foreground hover:text-primary transition-colors p-1 disabled:opacity-40"
                             title="Produire une vraie vidéo MP4 (narration + montage)"
+                            aria-label="Produire une vraie vidéo MP4"
                           >
                             {videoGenId === course.id ? (
                               <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -356,6 +394,7 @@ const Formations = () => {
                           onClick={() => setVideoFormation(course)}
                           className="text-primary hover:text-primary/80 transition-colors p-1"
                           title="Aperçu diaporama (navigateur)"
+                          aria-label="Aperçu diaporama"
                         >
                           <Play className="h-4 w-4" />
                         </button>
@@ -363,6 +402,7 @@ const Formations = () => {
                           onClick={() => setAgentFormation(agentFormation?.id === course.id ? null : course)}
                           className={`transition-colors p-1 ${agentFormation?.id === course.id ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
                           title="Produire vidéo via agent local"
+                          aria-label="Produire la vidéo via l'agent local"
                         >
                           <Monitor className="h-4 w-4" />
                         </button>
@@ -370,27 +410,43 @@ const Formations = () => {
                           onClick={() => handleExportPdf(course)}
                           className="text-muted-foreground hover:text-foreground transition-colors p-1"
                           title="Exporter en fichier texte"
+                          aria-label="Exporter en fichier texte"
                         >
                           <FileDown className="h-4 w-4" />
                         </button>
-                        <button onClick={() => setExpandedId(expandedId === course.id ? null : course.id)} className="text-muted-foreground hover:text-foreground transition-colors p-1">
+                        <button
+                          onClick={() => setExpandedId(expandedId === course.id ? null : course.id)}
+                          className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                          aria-label={expandedId === course.id ? "Replier les leçons" : "Afficher les leçons"}
+                          aria-expanded={expandedId === course.id}
+                        >
                           {expandedId === course.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </button>
                       </>
                     )}
-                    <button onClick={() => handleDelete(course.id, course.title)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <ConfirmAction
+                      title="Supprimer cette formation ?"
+                      description={`« ${course.title} » sera définitivement supprimée.`}
+                      onConfirm={() => handleDelete(course.id, course.title)}
+                      trigger={
+                        <button
+                          className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                          aria-label={`Supprimer la formation « ${course.title} »`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      }
+                    />
                   </div>
                 </div>
 
                 {/* Expanded lesson content */}
-                {expandedId === course.id && course.content && Array.isArray(course.content) && (
+                {expandedId === course.id && lessons.length > 0 && (
                   <div className="border-t border-border px-4 pb-4 pt-3 space-y-4">
                     {course.description && (
                       <p className="text-xs text-muted-foreground">{course.description}</p>
                     )}
-                    {(course.content as Lesson[]).map((lesson, li) => (
+                    {lessons.map((lesson, li) => (
                       <div key={li} className="rounded-md bg-secondary/50 p-3 space-y-2">
                         <h4 className="text-xs font-semibold text-foreground">
                           Leçon {li + 1} : {lesson.title}
@@ -425,7 +481,8 @@ const Formations = () => {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -446,7 +503,7 @@ const Formations = () => {
             open={!!videoFormation}
             onOpenChange={(open) => { if (!open) setVideoFormation(null); }}
             title={videoFormation.title}
-            lessons={(videoFormation.content as Lesson[]) || []}
+            lessons={Array.isArray(videoFormation.content) ? (videoFormation.content as Lesson[]) : []}
           />
         )}
       </div>

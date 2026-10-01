@@ -4,15 +4,21 @@ import { requireUser } from "../auth";
 import { generateFormationVideo, generateFormationPdf, ServiceError } from "../clients/iaClient";
 import { buildDemoTasks } from "../services/formation/demoTasks";
 import { logEvent } from "../services/logs";
+import { isUuid } from "../lib/sanitize";
+import { config } from "../config";
+
+// Production vidéo/PDF et mise en file de démos : coûteux → limite stricte par utilisateur.
+const formationRateLimit = { rateLimit: { max: Math.max(1, Math.floor(config.rateLimitExpensive / 4)), timeWindow: "1 minute" } };
 
 // Production de la vraie vidéo MP4 d'une formation (narration TTS + diapos + montage).
 // Node vérifie l'auth, récupère le contenu, délègue la production à Python, puis
 // enregistre l'URL du fichier (servi statiquement sous /media).
 
 export async function formationVideoRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/api/formations/:id/video", { preHandler: requireUser }, async (request, reply) => {
+  app.post("/api/formations/:id/video", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
 
     const { rows } = await pool.query(
       `SELECT title, content FROM formations WHERE id = $1 AND user_id = $2`,
@@ -45,15 +51,15 @@ export async function formationVideoRoutes(app: FastifyInstance): Promise<void> 
       return { success: true, video_url: videoUrl, slides: result.slides, duration_s: result.duration_s };
     } catch (e) {
       if (e instanceof ServiceError) return reply.status(e.status).send({ error: e.message });
-      request.log.error(e);
-      return reply.status(500).send({ error: e instanceof Error ? e.message : "Erreur production vidéo" });
+      throw e; // → gestionnaire d'erreurs global (message générique, détail journalisé)
     }
   });
 
   // --- Mettre en file les démonstrations de la formation pour l'agent local ---
-  app.post("/api/formations/:id/demos", { preHandler: requireUser }, async (request, reply) => {
+  app.post("/api/formations/:id/demos", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
 
     const { rows } = await pool.query(
       `SELECT title, curriculum FROM formations WHERE id = $1 AND user_id = $2`,
@@ -80,9 +86,10 @@ export async function formationVideoRoutes(app: FastifyInstance): Promise<void> 
   });
 
   // --- Support PDF de la formation (curriculum complet) ---
-  app.post("/api/formations/:id/pdf", { preHandler: requireUser }, async (request, reply) => {
+  app.post("/api/formations/:id/pdf", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
 
     const { rows } = await pool.query(
       `SELECT title, description, duration, curriculum, content FROM formations WHERE id = $1 AND user_id = $2`,
@@ -132,8 +139,7 @@ export async function formationVideoRoutes(app: FastifyInstance): Promise<void> 
       return { success: true, pdf_url: pdfUrl, pages: result.pages };
     } catch (e) {
       if (e instanceof ServiceError) return reply.status(e.status).send({ error: e.message });
-      request.log.error(e);
-      return reply.status(500).send({ error: e instanceof Error ? e.message : "Erreur génération PDF" });
+      throw e; // → gestionnaire d'erreurs global (message générique, détail journalisé)
     }
   });
 }

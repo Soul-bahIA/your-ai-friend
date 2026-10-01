@@ -25,7 +25,7 @@ import os
 import sys
 import time
 
-from skills.base import Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult, cancel_event
 
 # Emplacements par defaut du scripting Resolve sous Windows.
 _DEFAULT_API = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting"
@@ -73,10 +73,20 @@ class ResolveMontageSkill(Skill):
     step_types = ("resolve_montage",)
     category = "video"  # chemins (clips/audio/output) verifies par le gate
     sensitive = True
+    timeout_s = _RENDER_TIMEOUT + 120.0
 
     def describe(self, step: dict) -> str:
         n = len(step.get("clips") or [])
         return f"montage DaVinci Resolve de {n} clip(s) -> {step.get('output', '?')}"
+
+    def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        output = step.get("output")
+        if not isinstance(output, str) or not output.lower().endswith(".mp4"):
+            return "champ 'output' invalide (fichier .mp4 attendu)"
+        project = step.get("project")
+        if project is not None and (not isinstance(project, str) or len(project) > 100):
+            return "champ 'project' invalide"
+        return None
 
     def run(self, step: dict) -> SkillResult:
         clips = step.get("clips") or []
@@ -86,8 +96,13 @@ class ResolveMontageSkill(Skill):
 
         if not isinstance(clips, list) or not clips:
             return SkillResult(ok=False, detail="champ 'clips' (liste de medias) requis")
-        if not output:
+        if not isinstance(output, str) or not output.lower().endswith(".mp4"):
             return SkillResult(ok=False, detail="champ 'output' (chemin .mp4) requis")
+        if not all(isinstance(c, str) for c in clips):
+            return SkillResult(ok=False, detail="champ 'clips' invalide (liste de chemins)")
+        if audio is not None and not isinstance(audio, str):
+            return SkillResult(ok=False, detail="champ 'audio' invalide")
+        project_name = str(project_name)[:100]
         media = [c for c in clips if os.path.isfile(c)]
         if audio and os.path.isfile(audio):
             media_audio = audio
@@ -162,7 +177,12 @@ class ResolveMontageSkill(Skill):
             while project.IsRenderingInProgress():
                 if time.monotonic() - start > _RENDER_TIMEOUT:
                     return SkillResult(ok=False, detail="rendu trop long (timeout)")
-                time.sleep(3)
+                if cancel_event.wait(3):
+                    try:
+                        project.StopRendering()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return SkillResult(ok=False, detail="rendu interrompu (arrêt demandé)")
 
         except Exception as e:  # noqa: BLE001
             return SkillResult(ok=False, detail=f"echec montage Resolve : {e}")

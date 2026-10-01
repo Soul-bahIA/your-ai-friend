@@ -13,26 +13,52 @@ Node se connecte au Postgres Supabase et vérifie les JWT Supabase via `/auth/v1
 | Edge function (avant) | Endpoint backend (après) | Auth | Service |
 |---|---|---|---|
 | `POST /functions/v1/chat` | `POST /api/chat` | JWT | Node (+Python pour les actions) |
-| `POST /functions/v1/generate-formation` | `POST /api/generate/formation` | JWT | Node → Python |
+| `POST /functions/v1/generate-formation` | `POST /api/generate/formation` (asynchrone) | JWT | Node → Python |
 | `POST /functions/v1/generate-application` | `POST /api/generate/application` | JWT | Node → Python |
 | `POST /functions/v1/manage-database` (body `{action}`) | `POST /api/database` (body `{action}`) | JWT | Node |
-| `agent-tasks` créer (POST + JWT) | `POST /api/agent-tasks` | JWT | Node |
-| `agent-tasks` lister (GET + JWT) | `GET /api/agent-tasks` | JWT | Node |
-| `agent-tasks?action=poll` (x-agent-key) | `GET /api/agent-tasks/poll?user_id=…` | agent-key | Node |
-| `agent-tasks?action=update` (x-agent-key) | `POST /api/agent-tasks/update` | agent-key | Node |
+| `agent-tasks` créer (POST + JWT) | `POST /api/agent-tasks` (étapes validées) | JWT | Node |
+| `agent-tasks` lister (GET + JWT) | `GET /api/agent-tasks[?status=]` | JWT | Node |
+| `agent-tasks?action=poll` | `GET /api/agent-tasks/poll` | clé agent | Node |
+| `agent-tasks?action=update` | `POST /api/agent-tasks/update` | clé agent | Node |
 
-Les **corps de requête et de réponse sont identiques** à ceux des edge functions
-(mêmes champs, mêmes formes), pour minimiser les changements côté clients.
+Routes ajoutées depuis : `POST /api/agent-tasks/announce|event`, `GET|POST /api/agent-tasks/:id/control`,
+`GET /api/agent-tasks/:id/events`, `GET|POST|DELETE /api/agent-keys`, `POST /api/agent/goal`,
+`GET|POST|PATCH|DELETE /api/agent/memory`, `POST /api/agent/self-improve`,
+`POST /api/formations/:id/{video,pdf,demos}`, `/api/knowledge*`, `/api/knowledge-domains`,
+`POST /api/research`, `GET /api/research/status`, `POST /api/orchestrator/route`,
+`POST /api/analyze` + `GET /api/analyze/:id` (JWT, scopés par utilisateur). Liste complète : `README.md`.
+
+### Contrat agent local (clé + tentative)
+- **Authentification** : en-tête `x-agent-key: sbk_…`. Seul le **hash SHA-256** est stocké
+  (`agent_keys.key_hash`) ; le `user_id` est **déduit de la clé** (plus jamais transmis par l'agent).
+  Clés gérées par l'utilisateur via `/api/agent-keys` (la clé en clair n'est renvoyée qu'à la création).
+- **Poll** : chaque tâche renvoyée contient `requeue_count` (= numéro de tentative, `attempt`).
+- **Claim** : `POST /update {task_id, status:"in_progress"}` n'aboutit que si la tâche est `pending`
+  (sinon 409) ; la réponse contient `requeue_count`.
+- **update / event** acceptent un champ optionnel `attempt` (entier). Si `attempt` ≠ `requeue_count`
+  courant, ou si la tâche n'est plus `in_progress` (évènements, heartbeat, fin `completed|failed|cancelled`)
+  → **409** `{error}`. Tâche d'un autre compte / inexistante → 404.
+- Statuts autorisés : `pending, in_progress, completed, failed, cancelled` (400 sinon).
+- `type: "heartbeat"` rafraîchit le signe de vie sans créer de ligne `agent_events`.
+- Les tâches ne sont créées **que** via l'API (policy RLS INSERT retirée côté Supabase).
 
 ## Configuration requise (`backend/.env`)
+
+Voir `backend/.env.example` (commenté) pour la liste complète. Minimum :
 
 ```
 DATABASE_URL=postgres://postgres.<ref>:<password>@…pooler.supabase.com:6543/postgres
 DATABASE_SSL=true
+PG_SSL_CA=/chemin/vers/supabase-ca.pem   # recommandé : vérification TLS stricte
 SUPABASE_URL=https://<ref>.supabase.co
 SUPABASE_ANON_KEY=<clé anon>
-LOVABLE_API_KEY=<clé passerelle IA>
+IA_SERVICE_URL=http://localhost:8000
+IA_SERVICE_TOKEN=<secret partagé avec python-ia>
+OPENAI_API_KEY=<clé>                      # ou une autre clé de fournisseur
+CORS_ORIGINS=http://localhost:8080
 ```
+
+(`LOVABLE_API_KEY` / `LOVABLE_GATEWAY_URL` ne sont plus utilisés.)
 
 `DATABASE_URL` : Supabase > Project Settings > Database > Connection string (URI).
 
@@ -55,7 +81,7 @@ Remplacer les appels aux edge functions par le backend. Points à modifier :
 
 ### Agent local (`agent/`)
 Le worker poll/update. Repointer sa base d'URL :
-- `poll` : `GET {API}/api/agent-tasks/poll?user_id=…` (en-tête `x-agent-key`)
+- `poll` : `GET {API}/api/agent-tasks/poll` (en-tête `x-agent-key` ; le user_id est déduit de la clé)
 - `update` : `POST {API}/api/agent-tasks/update` (en-tête `x-agent-key`)
 
 ## Décommissionnement des edge functions
@@ -64,7 +90,12 @@ peuvent être retirées du déploiement. **Ne pas les supprimer avant** d'avoir 
 que chaque flux passe par le backend (voir la table ci-dessus).
 
 ## Sécurité
-- Le filtrage par `user_id` est fait explicitement dans chaque requête SQL
-  (le pool tourne en direct, donc hors RLS — comportement identique aux edge functions).
-- Dette connue conservée : `x-agent-key` n'est vérifiée qu'en présence, pas en valeur.
-  À durcir (hash de clé par utilisateur) — cf. `docs/SOULBAH_AI_ARCHITECTURE.md`.
+- Le filtrage par `user_id` est fait explicitement dans chaque requête SQL (le pool tourne
+  en direct, hors RLS). Les écritures croisées sont vérifiées (ex. `insert_data` exige que
+  le `schema_id` appartienne à l'utilisateur ; `knowledge-domains` réservé aux admins `has_role`).
+- Clé agent : vérifiée en valeur (hash SHA-256), `user_id` déduit de la clé.
+- Erreurs 5xx : message générique côté client, détail uniquement dans les logs.
+- Limitation de débit (`@fastify/rate-limit`), CORS par liste blanche, corps limité à 2 Mo
+  (15 Mo pour `/api/agent-tasks/update|event`, qui transportent des captures).
+- python-ia : jeton inter-services `IA_SERVICE_TOKEN` (en-tête `x-ia-token`) ; un 401/403/5xx
+  de python-ia est renvoyé au client en 502 (429 → 429, 503 → 503), jamais en 401.

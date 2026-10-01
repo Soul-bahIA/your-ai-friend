@@ -5,6 +5,9 @@ import { planGoal, evaluateGoal, ServiceError, type AgentStep } from "../clients
 import { logEvent } from "../services/logs";
 import { getMemoryContext, writeMemory } from "./agentMemory";
 import { getUserAllowedDirs } from "../services/agentKeys";
+import { clampAndValidatePlanSteps, validateGoalBody } from "../lib/agentSteps";
+import { stripImageB64 } from "../lib/sanitize";
+import { config } from "../config";
 
 // Moteur de raisonnement — côté orchestration :
 //   POST /api/agent/goal : objectif en langage naturel → plan (Claude) → agent_task
@@ -197,7 +200,18 @@ export async function planAndQueueGoal(userId: string, goal: string): Promise<Go
     };
   }
 
-  const steps = plan.steps.map(compactStep);
+  const checked = clampAndValidatePlanSteps(plan.steps.map(compactStep));
+  if (!checked.ok) {
+    await logEvent(userId, "Agent", `Plan rejeté (invalide) : ${checked.error}`, "warning");
+    return {
+      ok: false,
+      status: 422,
+      error: "Le plan généré contient des actions non supportées, réessayez en reformulant",
+      understanding: plan.understanding,
+      reason: checked.error,
+    };
+  }
+  const steps = checked.value;
   const invalid = findInvalidStep(steps);
   if (invalid) {
     await logEvent(userId, "Agent", `Plan rejeté (incomplet) : ${invalid}`, "warning");
@@ -221,10 +235,14 @@ export async function planAndQueueGoal(userId: string, goal: string): Promise<Go
 }
 
 export async function agentGoalRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/api/agent/goal", { preHandler: requireUser }, async (request, reply) => {
+  app.post(
+    "/api/agent/goal",
+    { preHandler: requireUser, config: { rateLimit: { max: config.rateLimitExpensive, timeWindow: "1 minute" } } },
+    async (request, reply) => {
     const userId = request.user!.id;
-    const { goal } = (request.body ?? {}) as { goal?: string };
-    const outcome = await planAndQueueGoal(userId, goal ?? "");
+    const parsed = validateGoalBody(request.body);
+    if (!parsed.ok) return reply.status(400).send({ error: parsed.error });
+    const outcome = await planAndQueueGoal(userId, parsed.value);
     if (!outcome.ok) {
       return reply.status(outcome.status).send({
         error: outcome.error,
@@ -238,7 +256,8 @@ export async function agentGoalRoutes(app: FastifyInstance): Promise<void> {
       understanding: outcome.understanding,
       steps: outcome.steps,
     };
-  });
+    },
+  );
 }
 
 /**
@@ -260,11 +279,14 @@ export async function maybeEvaluateGoalTask(taskId: string, userId: string): Pro
   const meta = payload?.goal_meta;
   if (!meta || !["completed", "failed"].includes(status)) return;
 
+  // Les captures ne passent QUE par le champ vision dédié (screenshots, max 3) ;
+  // le rapport texte est débarrassé de tout image_b64 (sinon des Mo de base64 en prompt).
   const screenshots = extractScreenshots(result);
+  const textResult = stripImageB64(result ?? { status });
 
   let evaluation;
   try {
-    evaluation = await evaluateGoal(meta.goal, payload.steps ?? [], result ?? { status }, screenshots);
+    evaluation = await evaluateGoal(meta.goal, payload.steps ?? [], textResult, screenshots);
   } catch (e) {
     await logEvent(userId, "Agent", `Évaluation impossible (${(e as Error).message})`, "error");
     return;
@@ -274,8 +296,8 @@ export async function maybeEvaluateGoalTask(taskId: string, userId: string): Pro
   await pool.query(
     `UPDATE agent_tasks
      SET result = COALESCE(result, '{}'::jsonb) || jsonb_build_object('evaluation', $1::jsonb)
-     WHERE id = $2`,
-    [JSON.stringify({ verdict: evaluation.verdict, reason: evaluation.reason }), taskId],
+     WHERE id = $2 AND user_id = $3`,
+    [JSON.stringify({ verdict: evaluation.verdict, reason: evaluation.reason }), taskId, userId],
   );
 
   if (evaluation.verdict === "success") {
@@ -291,8 +313,9 @@ export async function maybeEvaluateGoalTask(taskId: string, userId: string): Pro
   }
 
   if (evaluation.verdict === "retry" && meta.attempt < meta.max_attempts && evaluation.corrective_steps.length > 0) {
-    const steps = evaluation.corrective_steps.map(compactStep);
-    const invalid = findInvalidStep(steps);
+    const checked = clampAndValidatePlanSteps(evaluation.corrective_steps.map(compactStep));
+    const steps = checked.ok ? checked.value : [];
+    const invalid = checked.ok ? findInvalidStep(steps) : checked.error;
     if (invalid) {
       await writeMemory(userId, "error", meta.goal, `Plan correctif incomplet : ${invalid}`, { taskId });
       await logEvent(userId, "Agent", `Correction abandonnée (plan incomplet) : ${invalid}`, "error");

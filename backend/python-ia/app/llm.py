@@ -21,6 +21,17 @@ __all__ = [
 ]
 
 
+def _as_object(value) -> dict:
+    """Garantit un objet JSON (dict). Les appelants font .setdefault/.get dessus :
+    une liste ou un scalaire provoquerait sinon une AttributeError -> 500."""
+    if isinstance(value, dict):
+        return value
+    # Tolérance : le modèle enveloppe parfois l'objet attendu dans une liste.
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+        return value[0]
+    raise LLMError(502, "Réponse IA invalide : un objet JSON était attendu")
+
+
 def _parse_json(text: str) -> dict:
     raw = text.strip()
     # Retire d'éventuelles balises markdown ```json ... ```
@@ -28,12 +39,12 @@ def _parse_json(text: str) -> dict:
         raw = re.sub(r"^```[a-zA-Z]*\n?", "", raw)
         raw = re.sub(r"\n?```\s*$", "", raw).strip()
     try:
-        return json.loads(raw)
+        return _as_object(json.loads(raw))
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", raw, re.S)  # premier objet {...}
         if m:
             try:
-                return json.loads(m.group(0))
+                return _as_object(json.loads(m.group(0)))
             except json.JSONDecodeError:
                 pass
         raise LLMError(502, "Réponse IA non parsable")

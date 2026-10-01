@@ -13,16 +13,44 @@ avant usage en production.
 """
 from __future__ import annotations
 
-import shutil
+import os
+import re
+import shlex
 import subprocess
+import sys
 
-from skills.base import Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult
 
 _TIMEOUT = 20
 
+# `adb shell a b c` concatène les arguments en UNE ligne exécutée par le shell du
+# téléphone : chaque valeur issue de la tâche doit donc être validée/échappée.
+_DEVICE_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+_KEYCODE_RE = re.compile(r"^(KEYCODE_[A-Z0-9_]{1,40}|[0-9]{1,3})$")
+_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+_MAX_TEXT = 1000
+
+
+def _find_adb() -> str | None:
+    """adb dans le PATH (dossiers absolus uniquement, jamais le dossier courant)."""
+    name = "adb.exe" if sys.platform == "win32" else "adb"
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        d = d.strip().strip('"')
+        if d and os.path.isabs(d) and os.path.isfile(os.path.join(d, name)):
+            return os.path.join(d, name)
+    return None
+
+
+def _check_device(device_id: object) -> str | None:
+    if device_id is None or device_id == "":
+        return None
+    if not isinstance(device_id, str) or not _DEVICE_RE.match(device_id):
+        return "champ 'device_id' invalide"
+    return None
+
 
 def _adb(args: list[str], device_id: str | None = None, capture_stdout: bool = False):
-    adb = shutil.which("adb")
+    adb = _find_adb()
     if not adb:
         raise FileNotFoundError("adb")
     cmd = [adb]
@@ -75,9 +103,29 @@ class PhoneSkill(Skill):
     def describe(self, step: dict) -> str:
         return f"{step.get('type')} sur le téléphone"
 
+    def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        err = _check_device(step.get("device_id"))
+        if err:
+            return err
+        t = step.get("type")
+        if t == "phone_key" and not _KEYCODE_RE.match(str(step.get("keycode") or "")):
+            return "champ 'keycode' invalide (ex. KEYCODE_BACK, KEYCODE_HOME, KEYCODE_ENTER)"
+        if t == "phone_open_app" and not _PACKAGE_RE.match(str(step.get("package") or "")):
+            return "champ 'package' invalide (ex. com.android.chrome)"
+        if t == "phone_screenshot":
+            path = step.get("path")
+            if not isinstance(path, str) or not path.lower().endswith(".png"):
+                return "champ 'path' invalide (fichier .png attendu)"
+        if t == "phone_type" and len(str(step.get("text") or "")) > _MAX_TEXT:
+            return f"texte trop long (max {_MAX_TEXT} caractères)"
+        return None
+
     def run(self, step: dict) -> SkillResult:
         t = step.get("type")
-        device_id = step.get("device_id")
+        device_id = step.get("device_id") or None
+        err = self.validate(step, lambda _p: True)
+        if err:
+            return SkillResult(ok=False, detail=err)
 
         try:
             if t == "phone_tap":
@@ -100,7 +148,9 @@ class PhoneSkill(Skill):
                 text = step.get("text")
                 if not text:
                     return SkillResult(ok=False, detail="champ 'text' manquant")
-                safe = str(text).replace(" ", "%s")  # adb input text n'accepte pas les espaces bruts
+                # adb input text n'accepte pas les espaces bruts (%s), puis échappement
+                # POSIX : le texte reste un littéral pour le shell du téléphone.
+                safe = shlex.quote(str(text).replace(" ", "%s"))
                 proc = _adb(["shell", "input", "text", safe], device_id)
 
             elif t == "phone_key":

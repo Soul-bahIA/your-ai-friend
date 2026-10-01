@@ -89,6 +89,17 @@ export interface KnowledgeStore {
   remove(userId: string, id: string): Promise<boolean>;
   search(userId: string, query: SearchQuery): Promise<KnowledgeEntry[]>;
   findByHash(userId: string, hash: string): Promise<KnowledgeEntry | null>;
+  /**
+   * Déduplication ATOMIQUE par empreinte : sous verrou (pas de doublon en cas d'appels
+   * concurrents), met à jour l'entrée de même empreinte (patch = onExisting(existante))
+   * ou en crée une nouvelle.
+   */
+  upsertByHash(
+    userId: string,
+    input: KnowledgeInput & { content_hash: string },
+    onExisting: (existing: KnowledgeEntry) => Partial<KnowledgeInput>,
+    changeNote?: string,
+  ): Promise<{ entry: KnowledgeEntry; deduped: boolean }>;
   listVersions(userId: string, entryId: string): Promise<KnowledgeVersion[]>;
   restoreVersion(userId: string, entryId: string, version: number): Promise<KnowledgeEntry | null>;
   listDomains(): Promise<KnowledgeDomain[]>;

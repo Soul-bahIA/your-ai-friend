@@ -1,4 +1,7 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import { config } from "../config";
+import { mapUpstreamStatus } from "../lib/upstream";
+import { logger } from "../lib/logger";
 
 /** Erreur portant un code HTTP à propager (429/402/502…). */
 export class ServiceError extends Error {
@@ -9,20 +12,49 @@ export class ServiceError extends Error {
   }
 }
 
-async function postIa<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
+// Délais par appel (AbortSignal.timeout) — plus de timeout global de 900 s.
+const DEFAULT_TIMEOUT_MS = 120_000; // planification, évaluation, routage, synthèse…
+const LONG_TIMEOUT_MS = 900_000; // génération de contenu / vidéo / PDF (plusieurs minutes)
+
+// Dispatcher dédié aux appels longs : le dispatcher par défaut coupe à 300 s
+// (headersTimeout/bodyTimeout), insuffisant pour la production vidéo.
+const longDispatcher = new Agent({ headersTimeout: LONG_TIMEOUT_MS, bodyTimeout: LONG_TIMEOUT_MS });
+
+/** En-têtes communs vers python-ia (jeton inter-services si IA_SERVICE_TOKEN est défini). */
+export function iaHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const h: Record<string, string> = { ...extra };
+  if (config.iaServiceToken) h["x-ia-token"] = config.iaServiceToken;
+  return h;
+}
+
+async function postIa<T>(path: string, body: unknown, opts: { long?: boolean } = {}): Promise<T> {
+  const timeoutMs = opts.long ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(`${config.iaServiceUrl}${path}`, {
+    res = await undiciFetch(`${config.iaServiceUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: iaHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+      ...(opts.long ? { dispatcher: longDispatcher } : {}),
     });
-  } catch {
+  } catch (e) {
+    const err = e as Error;
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new ServiceError(504, "Le service IA n'a pas répondu à temps");
+    }
+    logger.warn({ path, err: err.message }, "python-ia injoignable");
     throw new ServiceError(502, "Service IA injoignable");
   }
   if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { detail?: string; error?: string };
-    throw new ServiceError(res.status, data.detail ?? data.error ?? `Service IA ${res.status}`);
+    const data = (await res.json().catch(() => ({}))) as { detail?: unknown; error?: unknown };
+    const detail = typeof data.detail === "string" ? data.detail : typeof data.error === "string" ? data.error : "";
+    const mapped = mapUpstreamStatus(res.status);
+    logger.warn({ path, upstreamStatus: res.status, detail: detail.slice(0, 500) }, "python-ia a répondu en erreur");
+    throw new ServiceError(
+      mapped.status,
+      mapped.exposeDetail && detail ? `${mapped.message} : ${detail.slice(0, 300)}` : mapped.message,
+    );
   }
   return (await res.json()) as T;
 }
@@ -49,7 +81,7 @@ export async function generateFormation(input: {
   topic: string;
   details?: string | null;
 }): Promise<FormationContent> {
-  const data = await postIa<{ formation: FormationContent }>("/generate/formation", input);
+  const data = await postIa<{ formation: FormationContent }>("/generate/formation", input, { long: true });
   return data.formation;
 }
 
@@ -68,7 +100,7 @@ export async function generateApplication(input: {
   conversationHistory?: unknown[] | null;
   existingArchitecture?: unknown;
 }): Promise<ApplicationContent> {
-  const data = await postIa<{ application: ApplicationContent }>("/generate/application", input);
+  const data = await postIa<{ application: ApplicationContent }>("/generate/application", input, { long: true });
   return data.application;
 }
 
@@ -84,7 +116,7 @@ export async function generateFormationVideo(input: {
   lessons: unknown[];
   max_slides?: number | null;
 }): Promise<FormationVideoResult> {
-  return postIa<FormationVideoResult>("/generate/formation-video", input);
+  return postIa<FormationVideoResult>("/generate/formation-video", input, { long: true });
 }
 
 // --- Cerveau central (Chief Agent) : routage vers l'agent spécialisé ---
@@ -111,7 +143,7 @@ export async function generateFormationPdf(input: {
   formationId: string;
   curriculum: unknown;
 }): Promise<{ filename: string; pages: number }> {
-  return postIa<{ filename: string; pages: number }>("/formation/pdf", input);
+  return postIa<{ filename: string; pages: number }>("/formation/pdf", input, { long: true });
 }
 
 // --- Moteur de raisonnement (objectif → plan ; rapport → verdict) ---
@@ -202,7 +234,7 @@ export async function buildProgram(input: {
   research_notes: unknown[];
   provider?: string | null;
 }): Promise<Record<string, unknown>> {
-  const data = await postIa<{ program: Record<string, unknown> }>("/formation/program", input);
+  const data = await postIa<{ program: Record<string, unknown> }>("/formation/program", input, { long: true });
   return data.program;
 }
 
@@ -212,7 +244,7 @@ export async function buildModule(input: {
   research_notes: unknown[];
   provider?: string | null;
 }): Promise<Record<string, unknown>> {
-  const data = await postIa<{ module: Record<string, unknown> }>("/formation/module", input);
+  const data = await postIa<{ module: Record<string, unknown> }>("/formation/module", input, { long: true });
   return data.module;
 }
 

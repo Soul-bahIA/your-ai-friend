@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --- Application web (Vite + React, racine du dépôt) ---------------------------
+  frontend:
+    name: Frontend (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # --- API Node (Fastify / TypeScript) ------------------------------------------
+  node-api:
+    name: Backend node-api
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/node-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/node-api/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test --if-present
+
+  # --- Service IA (FastAPI) -----------------------------------------------------
+  python-ia:
+    name: Backend python-ia (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: backend/python-ia
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: backend/python-ia/requirements.txt
+      - run: pip install -r requirements.txt pytest
+      - name: Compilation (erreurs de syntaxe)
+        run: python -m compileall -q app
+      - name: Tests
+        run: |
+          if [ -d tests ]; then
+            python -m pytest tests -q
+          else
+            echo "Pas de dossier tests/ — étape ignorée."
+          fi
+
+  # --- Agent local (worker Python) ----------------------------------------------
+  # Les libs de contrôle du poste (pyautogui, mss, pygetwindow…) exigent un
+  # affichage et échouent souvent sur un runner Linux headless : on installe les
+  # dépendances légères requises au démarrage, puis le reste en best-effort
+  # (les skills importent ces libs à la demande).
+  agent:
+    name: Agent local
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: agent/requirements.txt
+      - name: Dépendances légères
+        run: pip install pytest requests python-dotenv Pillow
+      - name: Dépendances GUI (best-effort)
+        continue-on-error: true
+        run: pip install -r requirements.txt
+      - name: Compilation (erreurs de syntaxe)
+        run: python -m compileall -q -x '(__pycache__|\.venv)' .
+      - name: Tests
+        run: |
+          if [ -d tests ]; then
+            python -m pytest tests -q
+          else
+            echo "Pas de dossier tests/ — étape ignorée."
+          fi

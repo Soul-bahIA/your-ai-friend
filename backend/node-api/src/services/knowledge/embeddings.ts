@@ -4,6 +4,7 @@
 
 const EMBED_MODEL = process.env.EMBEDDING_MODEL ?? "text-embedding-3-small";
 const EMBED_URL = process.env.EMBEDDING_URL ?? "https://api.openai.com/v1/embeddings";
+const EMBED_TIMEOUT_MS = 30_000;
 
 export async function embed(text: string): Promise<number[] | null> {
   const key = process.env.OPENAI_API_KEY;
@@ -13,6 +14,7 @@ export async function embed(text: string): Promise<number[] | null> {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model: EMBED_MODEL, input: text.slice(0, 8000) }),
+      signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { data?: { embedding?: number[] }[] };

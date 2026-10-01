@@ -6,7 +6,7 @@ from typing import Any
 import anthropic
 from anthropic import AsyncAnthropic
 
-from .base import LLMError, LLMProvider
+from .base import LLMError, LLMProvider, upstream_error
 
 
 class AnthropicProvider(LLMProvider):
@@ -52,19 +52,18 @@ class AnthropicProvider(LLMProvider):
 
         try:
             resp = await self._client.messages.create(**kwargs)
-        except anthropic.RateLimitError:
-            raise LLMError(429, "Trop de requêtes. Réessayez dans quelques instants.")
         except anthropic.APIConnectionError:
             raise LLMError(502, "Service IA (Anthropic) injoignable")
         except anthropic.BadRequestError as e:
             msg = str(e)
             if "credit balance" in msg.lower():
                 raise LLMError(402, "Crédits Anthropic épuisés. Ajoutez des crédits sur console.anthropic.com.")
-            raise LLMError(400, f"Requête IA invalide : {msg[:200]}")
-        except anthropic.AuthenticationError:
-            raise LLMError(401, "Clé Anthropic invalide.")
+            # Requête rejetée par le fournisseur : c'est NOTRE appel amont qui est en
+            # cause, pas la requête du client -> 502.
+            raise LLMError(502, f"Requête IA rejetée par Anthropic : {msg[:200]}")
         except anthropic.APIStatusError as e:
-            raise LLMError(502, f"Erreur du service IA Anthropic ({e.status_code})")
+            # 401/403 (clé invalide) -> 502 ; 429 -> 429 ; reste -> 502.
+            raise upstream_error(self.id, e.status_code)
 
         if getattr(resp, "stop_reason", None) == "refusal":
             raise LLMError(400, "Requête refusée par le modèle IA")

@@ -149,13 +149,47 @@ async def plan_goal(goal: str, context: str | None = None) -> dict:
     return plan
 
 
+_MAX_FIELD_CHARS = 4_000      # par chaîne du rapport (sorties de commandes, fichiers lus…)
+_MAX_SECTION_CHARS = 40_000   # par bloc JSON injecté dans le prompt
+_MAX_DEPTH = 12
+
+
+def _is_binary_key(key) -> bool:
+    k = str(key).lower()
+    return k == "image_b64" or k.endswith("_b64") or k == "base64"
+
+
+def _scrub(value, depth: int = 0):
+    """Nettoie un rapport avant de l'injecter dans le prompt (défense en profondeur) :
+    retire les captures base64 (clés image_b64/*_b64 — les images passent par le canal
+    vision, pas par le texte) et tronque les chaînes trop longues."""
+    if depth > _MAX_DEPTH:
+        return "[…]"
+    if isinstance(value, dict):
+        return {
+            k: _scrub(v, depth + 1) for k, v in value.items() if not _is_binary_key(k)
+        }
+    if isinstance(value, list):
+        return [_scrub(v, depth + 1) for v in value]
+    if isinstance(value, str) and len(value) > _MAX_FIELD_CHARS:
+        return value[:_MAX_FIELD_CHARS] + f"… [tronqué, {len(value)} caractères]"
+    return value
+
+
+def _dump_for_prompt(value) -> str:
+    text = json.dumps(_scrub(value), ensure_ascii=False)
+    if len(text) > _MAX_SECTION_CHARS:
+        text = text[:_MAX_SECTION_CHARS] + " … [tronqué]"
+    return text
+
+
 async def evaluate_execution(
     goal: str, steps: list, result: dict, screenshots: list[str] | None = None
 ) -> dict:
     user = (
         f"OBJECTIF :\n{goal}\n\n"
-        f"PLAN EXECUTE :\n{json.dumps(steps, ensure_ascii=False)}\n\n"
-        f"RAPPORT D'EXECUTION :\n{json.dumps(result, ensure_ascii=False)}"
+        f"PLAN EXECUTE :\n{_dump_for_prompt(steps)}\n\n"
+        f"RAPPORT D'EXECUTION :\n{_dump_for_prompt(result)}"
     )
 
     if screenshots:

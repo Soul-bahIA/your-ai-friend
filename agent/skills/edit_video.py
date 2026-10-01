@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from skills.base import Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult
 
 
 def _make_title_clip(title: str, size: tuple[int, int], duration: float = 2.0):
@@ -38,10 +38,17 @@ class EditVideoSkill(Skill):
     step_types = ("edit_video", "montage")
     category = "video"
     sensitive = True
+    timeout_s = 1800.0  # un rendu peut être long
 
     def describe(self, step: dict) -> str:
         n = len(step.get("clips") or [])
         return f"montage de {n} clip(s) → {step.get('output', '?')}"
+
+    def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        output = step.get("output")
+        if not isinstance(output, str) or not output.lower().endswith(".mp4"):
+            return "champ 'output' invalide (fichier .mp4 attendu)"
+        return None
 
     def run(self, step: dict) -> SkillResult:
         clips_paths = step.get("clips") or []
@@ -50,10 +57,10 @@ class EditVideoSkill(Skill):
 
         if not isinstance(clips_paths, list) or not clips_paths:
             return SkillResult(ok=False, detail="champ 'clips' (liste de chemins) requis")
-        if not output:
-            return SkillResult(ok=False, detail="champ 'output' manquant")
+        if not isinstance(output, str) or not output.lower().endswith(".mp4"):
+            return SkillResult(ok=False, detail="champ 'output' invalide (fichier .mp4 attendu)")
         for p in clips_paths:
-            if not os.path.isfile(p):
+            if not isinstance(p, str) or not os.path.isfile(p):
                 return SkillResult(ok=False, detail=f"clip introuvable : {p}")
 
         try:

@@ -30,7 +30,7 @@ class WindowSkill(Skill):
             return SkillResult(ok=False, detail="dépendance 'pygetwindow' non installée")
 
         title = step.get("window_title") or step.get("title")
-        if not title:
+        if not title or not isinstance(title, str):
             return SkillResult(ok=False, detail="champ 'window_title' manquant")
 
         try:

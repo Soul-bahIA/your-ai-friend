@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { User, Shield, Bell } from "lucide-react";
+import { errorMessage } from "@/lib/api";
 
 const Settings = () => {
   const { user, signOut } = useAuth();
@@ -17,16 +18,21 @@ const Settings = () => {
   const [bio, setBio] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
+    let ignore = false;
     (async () => {
       const { data, error } = await supabase
         .from("profiles")
         .select("display_name, bio")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .maybeSingle();
+      if (ignore) return;
       if (error) {
         console.error("[Settings] Chargement du profil échoué:", error.message);
+        toast({ title: "Profil indisponible", description: error.message, variant: "destructive" });
         return;
       }
       if (data) {
@@ -34,19 +40,22 @@ const Settings = () => {
         setBio(data.bio || "");
       }
     })();
-  }, [user]);
+    return () => {
+      ignore = true;
+    };
+  }, [userId, toast]);
 
   const handleSave = async () => {
-    if (!user) return;
+    if (!userId) return;
     setLoading(true);
     try {
       const { error } = await supabase
         .from("profiles")
-        .upsert({ user_id: user.id, display_name: displayName, bio }, { onConflict: "user_id" });
+        .upsert({ user_id: userId, display_name: displayName, bio }, { onConflict: "user_id" });
       if (error) throw error;
       toast({ title: "Profil mis à jour" });
-    } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } catch (e) {
+      toast({ title: "Erreur", description: errorMessage(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }

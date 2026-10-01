@@ -73,7 +73,11 @@ async def route_request(request: str, provider: str | None = None) -> dict:
         provider=provider,
     )
     # Enrichit avec les métadonnées de l'agent choisi (label + capacité d'exécution).
-    agent = AGENTS.get(result.get("agent", ""), {})
-    result["agent_label"] = agent.get("label", result.get("agent", ""))
+    agent_id = result.get("agent", "")
+    if not isinstance(agent_id, str):
+        agent_id = ""
+        result["agent"] = ""
+    agent = AGENTS.get(agent_id, {})
+    result["agent_label"] = agent.get("label", agent_id)
     result["capability"] = agent.get("capability", "")
     return result

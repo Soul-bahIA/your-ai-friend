@@ -2,6 +2,23 @@
 // Activée par WEB_SEARCH_PROVIDER + clé correspondante. Sans clé : `available=false`
 // et le moteur de recherche se rabat sur la KB + la synthèse du modèle.
 
+import { logger } from "../../lib/logger";
+
+const WEB_SEARCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Exécute la recherche d'un fournisseur en isolant ses pannes : erreur réseau,
+ * délai dépassé (15 s) ou JSON invalide → [] (journalisé), jamais d'exception.
+ */
+async function safeSearch(id: string, run: (signal: AbortSignal) => Promise<WebResult[]>): Promise<WebResult[]> {
+  try {
+    return await run(AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS));
+  } catch (e) {
+    logger.warn({ provider: id, err: (e as Error).message }, "recherche web échouée");
+    return [];
+  }
+}
+
 export interface WebResult {
   title: string;
   url: string;
@@ -27,7 +44,9 @@ class TavilyProvider implements WebSearchProvider {
   available = true;
   constructor(private apiKey: string) {}
   async search(query: string, limit: number): Promise<WebResult[]> {
+    return safeSearch(this.id, async (signal) => {
     const res = await fetch("https://api.tavily.com/search", {
+      signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -37,13 +56,17 @@ class TavilyProvider implements WebSearchProvider {
         search_depth: "advanced",
       }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logger.warn({ provider: this.id, status: res.status }, "recherche web : réponse en erreur");
+      return [];
+    }
     const data = (await res.json()) as { results?: { title?: string; url?: string; content?: string }[] };
     return (data.results ?? []).map((r) => ({
       title: r.title ?? "",
       url: r.url ?? "",
       snippet: r.content ?? "",
     }));
+    });
   }
 }
 
@@ -52,18 +75,24 @@ class SerperProvider implements WebSearchProvider {
   available = true;
   constructor(private apiKey: string) {}
   async search(query: string, limit: number): Promise<WebResult[]> {
+    return safeSearch(this.id, async (signal) => {
     const res = await fetch("https://google.serper.dev/search", {
+      signal,
       method: "POST",
       headers: { "X-API-KEY": this.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ q: query, num: limit }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logger.warn({ provider: this.id, status: res.status }, "recherche web : réponse en erreur");
+      return [];
+    }
     const data = (await res.json()) as { organic?: { title?: string; link?: string; snippet?: string }[] };
     return (data.organic ?? []).slice(0, limit).map((r) => ({
       title: r.title ?? "",
       url: r.link ?? "",
       snippet: r.snippet ?? "",
     }));
+    });
   }
 }
 
@@ -72,11 +101,16 @@ class BraveProvider implements WebSearchProvider {
   available = true;
   constructor(private apiKey: string) {}
   async search(query: string, limit: number): Promise<WebResult[]> {
+    return safeSearch(this.id, async (signal) => {
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
     const res = await fetch(url, {
+      signal,
       headers: { "X-Subscription-Token": this.apiKey, Accept: "application/json" },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      logger.warn({ provider: this.id, status: res.status }, "recherche web : réponse en erreur");
+      return [];
+    }
     const data = (await res.json()) as {
       web?: { results?: { title?: string; url?: string; description?: string }[] };
     };
@@ -85,6 +119,7 @@ class BraveProvider implements WebSearchProvider {
       url: r.url ?? "",
       snippet: r.description ?? "",
     }));
+    });
   }
 }
 

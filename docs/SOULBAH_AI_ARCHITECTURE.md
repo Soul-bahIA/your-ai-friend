@@ -13,29 +13,51 @@
 |---|---|---|
 | Interface utilisateur | `src/` (React/Vite/TS) | ✅ Dashboard complet (Chat, Formations, Applications, KnowledgeBase, DatabaseAdmin, Automation…) |
 | Auth & permissions | `useAuth`, RLS SQL, `user_roles` | ✅ JWT + Row Level Security par `user_id` |
-| Moteur IA (LLM) | `supabase/functions/chat` | ✅ Appel Gateway (Gemini) + **tool-calling** (create_formation/application, save_knowledge) |
-| Générateur de code | `supabase/functions/generate-application` | ✅ Génère architecture d'app par IA |
-| Générateur de formation | `supabase/functions/generate-formation` | ✅ |
+| Moteur IA (LLM) | `backend/node-api` → `POST /api/chat` | ✅ Chat streaming multi-fournisseurs + **tool-calling** (create_formation/application, save_knowledge) |
+| Générateur de code | `POST /api/generate/application` (Node → `python-ia`) | ✅ Génère architecture d'app par IA |
+| Générateur de formation | `POST /api/generate/formation` (Node → `python-ia`) | ✅ |
 | Mémoire (permanente) | table `knowledge_base` | ✅ Contexte injecté dans le chat |
 | Mémoire (conversation) | `chat_conversations` / `chat_messages` | ✅ |
 | Journalisation | table `system_logs` + `ActivityFeed` | ✅ Historique d'événements temps réel |
-| BDD dynamique | `manage-database` + `user_schemas/…` | ✅ CRUD de tables utilisateur |
-| **File de tâches agent** | table `agent_tasks` + `supabase/functions/agent-tasks` | ⚠️ **Germe de l'agent** (voir §2) |
+| BDD dynamique | `POST /api/database` + `user_schemas/…` | ✅ CRUD de tables utilisateur |
+| **File de tâches agent** | table `agent_tasks` + routes `/api/agent-tasks/*` (Node) | ✅ Agent local opérationnel (voir §2) |
 | Backend polyglotte | `backend/` (Node/Python/Rust/Postgres) | ✅ Scaffold récent, prêt à héberger raisonnement/vision |
 
 ### Le germe déjà présent : `agent_tasks`
-La table et l'edge function `agent-tasks` implémentent **déjà** le bon patron pour un agent :
+La table `agent_tasks` et les routes `/api/agent-tasks/*` de `backend/node-api` implémentent le patron
+d'un agent :
 
 ```
-Web app (JWT) ── crée une tâche ──▶ agent_tasks (file, status=pending)
+Web app (JWT) ── POST /api/agent-tasks ──▶ agent_tasks (file, status=pending)
                                           ▲
-Worker LOCAL ── poll (x-agent-key) ───────┘
-   exécute ── update(status: in_progress → completed/failed) ──▶ realtime ──▶ UI
+Worker LOCAL ── GET /api/agent-tasks/poll (x-agent-key) ─┘
+   exécute ── POST /api/agent-tasks/update (in_progress → completed/failed) ──▶ realtime ──▶ UI
 ```
 - `task_type` prévus : `screen_recording`, `demo_execution`, `video_production`, `tts_generation`.
 - Cycle de vie : `pending → in_progress → completed | failed | cancelled`.
 - `payload` JSONB = instructions ; `result` / `error_message` = retour.
-- Auth worker par clé (`x-agent-key`), séparée du JWT web.
+- Auth worker par clé (`x-agent-key`, validée par hash dans `agent_keys`), séparée du JWT web.
+- Création/modification **uniquement via l'API Node** : la RLS n'autorise plus INSERT/UPDATE
+  directs sur `agent_tasks` (migration `20261001000000_hardening.sql`) ; l'app lit (Realtime) et supprime.
+- Contrôle d'exécution : colonne `control` (`none|pause|stop`) ; reprise des tâches orphelines
+  via `updated_at` (heartbeat) et `requeue_count`.
+
+### Remplacement des edge functions Supabase par le backend Node
+Les 5 edge functions Deno (`chat`, `generate-formation`, `generate-application`,
+`manage-database`, `agent-tasks`) ont été **retirées du dépôt** : leur logique vit dans
+`backend/node-api` (Fastify/TypeScript), qui se connecte au Postgres Supabase (`DATABASE_URL`)
+et vérifie les JWT Supabase. Supabase reste le fournisseur **d'authentification et de base
+de données** (RLS, Realtime) ; la génération IA sans état est déléguée à `backend/python-ia`.
+
+| Ancienne edge function | Remplacement (backend Node) |
+|---|---|
+| `chat` | `POST /api/chat` |
+| `generate-formation` | `POST /api/generate/formation` (→ python-ia) |
+| `generate-application` | `POST /api/generate/application` (→ python-ia) |
+| `manage-database` | `POST /api/database` |
+| `agent-tasks` | `POST/GET /api/agent-tasks`, `GET /api/agent-tasks/poll`, `POST /api/agent-tasks/update`, `/api/agent-tasks/:id/control`, `/api/agent-tasks/:id/events` |
+
+Correspondance détaillée : [`backend/MIGRATION.md`](../backend/MIGRATION.md).
 
 **Conclusion : l'ossature d'orchestration existe. Ce qui manque, c'est le worker local qui
 touche réellement la machine, la vision, et la boucle de raisonnement.**
@@ -80,21 +102,21 @@ poste de l'utilisateur**. D'où deux plans :
 
 | # | Composant cible | Statut | Base réutilisable / à créer |
 |---|---|---|---|
-| 1 | Moteur IA (LLM) | 🟡 Partiel | `chat` edge fn → généraliser en client LLM multi-fournisseur |
+| 1 | Moteur IA (LLM) | 🟢 Bon | `POST /api/chat` (Node) + routeur multi-fournisseurs (`python-ia`) |
 | 2 | Moteur de raisonnement | 🔴 À créer | boucle ReAct/planner (Python) |
 | 3 | Planificateur | 🔴 À créer | décompose objectif → DAG de sous-tâches |
 | 4 | Mémoire | 🟢 Bon | `knowledge_base`, `chat_*`, `system_logs` ; +ajouter mémoire tâches/erreurs/préférences |
 | 5 | Vision | 🔴 À créer | capture (`mss`) + OCR (`tesseract`) + détection UI (template/OCR/modèle) |
 | 6 | Contrôle ordinateur | 🟡 Germe | file `agent_tasks` ✅ ; **worker local à écrire** (`pyautogui`/OS APIs) |
 | 7 | Gestionnaire d'outils | 🟡 Partiel | 3 outils codés en dur → **registre + plugins** |
-| 8 | Générateur de code | 🟢 Bon | `generate-application` réutilisable |
+| 8 | Générateur de code | 🟢 Bon | `POST /api/generate/application` réutilisable |
 | 9 | Moteur vidéo | 🟡 Germe | `task_type` vidéo + `FormationVideoPlayer` ; exécuteur local à écrire |
 | 10 | Système de plugins | 🔴 À créer | interface `Skill`/`Tool` chargée dynamiquement |
 | 11 | Système de permissions | 🟡 Partiel | RLS + `x-agent-key` ✅ ; **+gate d'approbation d'actions sensibles** |
 | 12 | Moteur d'apprentissage | 🔴 À créer | post-mortem → `knowledge_base` (erreurs/corrections) |
 | 13 | Journalisation | 🟢 Bon | `system_logs` + `ActivityFeed` |
 | 14 | Observabilité | 🟡 Partiel | logs ✅ ; +métriques/traces (health deep existe) |
-| 15 | API interne | 🟢 Bon | edge functions + `backend/node-api` |
+| 15 | API interne | 🟢 Bon | `backend/node-api` (remplace les anciennes edge functions Supabase) |
 | 16 | Interface utilisateur | 🟢 Bon | dashboard React |
 
 Légende : 🟢 réutilisable tel quel · 🟡 à étendre · 🔴 nouveau.
@@ -157,7 +179,8 @@ Un agent qui contrôle la machine est **sensible par nature**. Principes :
 ## 6. Améliorations proposées sur l'existant (sans rien retirer)
 
 Détectées pendant l'audit — à traiter en continu :
-1. **Lint edge functions** : 57 erreurs `any`/regex (Deno). Typage à renforcer.
+1. ~~**Lint edge functions**~~ : edge functions **supprimées** (logique portée dans `backend/node-api`,
+   voir `backend/MIGRATION.md`). Le typage strict s'applique désormais au backend TypeScript (CI : `tsc --noEmit`).
 2. **Découplage LLM** : le modèle est codé en dur (`google/gemini-3-flash-preview`) dans plusieurs fonctions → centraliser dans un client configurable.
 3. **Données factices** du dashboard (CPU/RAM/menaces) → brancher sur de vraies métriques (lien avec l'observabilité, Phase 6).
 4. **Code-splitting** du bundle front (689 KB) → lazy-load des pages.

@@ -1,7 +1,8 @@
 // Implémentation Supabase (PostgreSQL) de KnowledgeStore.
 // Toutes les requêtes sont scopées par user_id (le backend se connecte en direct au
 // pooler, hors RLS — le scoping est donc appliqué explicitement, comme ailleurs).
-import { pool } from "../../db";
+import { pool, withTransaction, type Queryable } from "../../db";
+import { sanitizeLimit } from "../../lib/sanitize";
 import { embed, toVectorLiteral } from "./embeddings";
 import type {
   KnowledgeStore,
@@ -40,10 +41,47 @@ function mapRow(r: Record<string, unknown>): KnowledgeEntry {
   };
 }
 
+/** Texte indexé pour l'embedding d'une entrée. */
+function embedText(m: { title: string; summary?: string | null; content: string }): string {
+  return `${m.title}\n${m.summary ?? ""}\n${m.content}`;
+}
+
+/** Embedding pré-calculé (hors transaction) réutilisé si le texte n'a pas changé. */
+interface PreEmbedding {
+  text: string;
+  emb: number[] | null;
+}
+async function embedFor(text: string, pre?: PreEmbedding): Promise<number[] | null> {
+  return pre && pre.text === text ? pre.emb : embed(text);
+}
+
+function mergeEntry(current: KnowledgeEntry, patch: Partial<KnowledgeInput>): KnowledgeInput {
+  return {
+    title: patch.title ?? current.title,
+    content: patch.content ?? current.content,
+    description: patch.description ?? current.description,
+    summary: patch.summary ?? current.summary,
+    domain: patch.domain ?? current.domain,
+    category: patch.category ?? current.category,
+    keywords: patch.keywords ?? current.keywords,
+    tags: patch.tags ?? current.tags,
+    sources: patch.sources ?? current.sources,
+    source: patch.source ?? current.source,
+    confidence: patch.confidence ?? current.confidence,
+    links: patch.links ?? current.links,
+    content_hash: patch.content_hash ?? current.content_hash,
+  };
+}
+
 export class SupabaseKnowledgeStore implements KnowledgeStore {
-  async create(userId: string, input: KnowledgeInput): Promise<KnowledgeEntry> {
-    const emb = await embed(`${input.title}\n${input.summary ?? ""}\n${input.content}`);
-    const { rows } = await pool.query(
+  async create(
+    userId: string,
+    input: KnowledgeInput,
+    db: Queryable = pool,
+    pre?: PreEmbedding,
+  ): Promise<KnowledgeEntry> {
+    const emb = await embedFor(embedText(input), pre);
+    const { rows } = await db.query(
       `INSERT INTO knowledge_base
          (user_id, title, content, description, summary, domain, category, keywords, tags,
           sources, source, confidence, links, content_hash, last_verified_at, embedding)
@@ -78,41 +116,52 @@ export class SupabaseKnowledgeStore implements KnowledgeStore {
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
+  /**
+   * Mise à jour versionnée, atomique : la ligne est verrouillée (SELECT … FOR UPDATE)
+   * pendant l'archivage de la version courante + l'application du patch, pour que deux
+   * mises à jour concurrentes ne produisent ni version perdue ni numéro dupliqué.
+   * L'embedding (appel réseau) est calculé AVANT la transaction pour ne pas tenir le verrou.
+   */
   async update(
     userId: string,
     id: string,
     patch: Partial<KnowledgeInput>,
     changeNote?: string,
   ): Promise<KnowledgeEntry | null> {
-    const current = await this.getById(userId, id);
-    if (!current) return null;
+    const before = await this.getById(userId, id);
+    if (!before) return null;
+    const text = embedText(mergeEntry(before, patch));
+    const pre: PreEmbedding = { text, emb: await embed(text) };
+    return withTransaction((client) => this.updateLocked(client, userId, id, patch, changeNote, pre));
+  }
+
+  /** Corps de update() — à appeler DANS une transaction (db = client transactionnel). */
+  private async updateLocked(
+    db: Queryable,
+    userId: string,
+    id: string,
+    patch: Partial<KnowledgeInput>,
+    changeNote: string | undefined,
+    pre?: PreEmbedding,
+  ): Promise<KnowledgeEntry | null> {
+    const locked = await db.query(
+      `SELECT ${ENTRY_COLS} FROM knowledge_base WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+      [id, userId],
+    );
+    if (!locked.rows[0]) return null;
+    const current = mapRow(locked.rows[0]);
 
     // 1) Archive la version courante (historique / restauration)
-    await pool.query(
+    await db.query(
       `INSERT INTO knowledge_versions (entry_id, user_id, version, snapshot, change_note)
        VALUES ($1,$2,$3,$4::jsonb,$5)`,
       [id, userId, current.version, JSON.stringify(current), changeNote ?? null],
     );
 
     // 2) Applique le patch (champs fournis uniquement), incrémente la version
-    const merged: KnowledgeInput = {
-      title: patch.title ?? current.title,
-      content: patch.content ?? current.content,
-      description: patch.description ?? current.description,
-      summary: patch.summary ?? current.summary,
-      domain: patch.domain ?? current.domain,
-      category: patch.category ?? current.category,
-      keywords: patch.keywords ?? current.keywords,
-      tags: patch.tags ?? current.tags,
-      sources: patch.sources ?? current.sources,
-      source: patch.source ?? current.source,
-      confidence: patch.confidence ?? current.confidence,
-      links: patch.links ?? current.links,
-      content_hash: patch.content_hash ?? current.content_hash,
-    };
-
-    const emb = await embed(`${merged.title}\n${merged.summary ?? ""}\n${merged.content}`);
-    const { rows } = await pool.query(
+    const merged = mergeEntry(current, patch);
+    const emb = await embedFor(embedText(merged), pre);
+    const { rows } = await db.query(
       `UPDATE knowledge_base SET
          title=$1, content=$2, description=$3, summary=$4, domain=$5, category=$6,
          keywords=$7, tags=$8, sources=$9::jsonb, source=$10, confidence=$11,
@@ -142,6 +191,31 @@ export class SupabaseKnowledgeStore implements KnowledgeStore {
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
+  /**
+   * Pas de contrainte UNIQUE sur (user_id, content_hash) : on sérialise par verrou
+   * consultatif transactionnel (pg_advisory_xact_lock) sur la paire utilisateur+empreinte.
+   */
+  async upsertByHash(
+    userId: string,
+    input: KnowledgeInput & { content_hash: string },
+    onExisting: (existing: KnowledgeEntry) => Partial<KnowledgeInput>,
+    changeNote?: string,
+  ): Promise<{ entry: KnowledgeEntry; deduped: boolean }> {
+    const text = embedText(input);
+    const pre: PreEmbedding = { text, emb: await embed(text) };
+    return withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `knowledge:${userId}:${input.content_hash}`,
+      ]);
+      const existing = await this.findByHash(userId, input.content_hash, client);
+      if (existing) {
+        const updated = await this.updateLocked(client, userId, existing.id, onExisting(existing), changeNote, pre);
+        return { entry: updated ?? existing, deduped: true };
+      }
+      return { entry: await this.create(userId, input, client, pre), deduped: false };
+    });
+  }
+
   async remove(userId: string, id: string): Promise<boolean> {
     const { rowCount } = await pool.query(
       "DELETE FROM knowledge_base WHERE id = $1 AND user_id = $2",
@@ -150,8 +224,8 @@ export class SupabaseKnowledgeStore implements KnowledgeStore {
     return (rowCount ?? 0) > 0;
   }
 
-  async findByHash(userId: string, hash: string): Promise<KnowledgeEntry | null> {
-    const { rows } = await pool.query(
+  async findByHash(userId: string, hash: string, db: Queryable = pool): Promise<KnowledgeEntry | null> {
+    const { rows } = await db.query(
       `SELECT ${ENTRY_COLS} FROM knowledge_base WHERE user_id = $1 AND content_hash = $2 LIMIT 1`,
       [userId, hash],
     );
@@ -207,7 +281,7 @@ export class SupabaseKnowledgeStore implements KnowledgeStore {
       }
     }
 
-    const limit = Math.min(Math.max(query.limit ?? 10, 1), 100);
+    const limit = sanitizeLimit(query.limit, 10, 100); // NaN / hors bornes → défaut / borné
     const { rows } = await pool.query(
       `SELECT ${ENTRY_COLS}, ${rank} AS _rank FROM knowledge_base
        WHERE ${where.join(" AND ")}

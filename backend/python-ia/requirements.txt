@@ -1,14 +1,17 @@
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
 httpx==0.28.1
-pydantic==2.10.3
-anthropic>=0.40.0
+pydantic==2.13.5
+# output_config (sorties structurées) nécessite un SDK récent ; 1.x non validé ici.
+anthropic>=0.116.0,<1.0
 
 # Production vidéo des formations (narration TTS + diapos + montage MP4)
 moviepy==1.0.3
-opencv-python-headless==4.10.0.84
-Pillow==10.4.0
-numpy>=1.26
+opencv-python-headless==4.14.0.94
+Pillow==12.3.0
+numpy>=1.26,<3
+# Dépendance transitive de moviepy — épinglée sur une version corrigée (CVE-2024-47081).
+requests==2.34.2
 
 # Supports PDF des formations
-fpdf2==2.8.7
+fpdf2==2.8.9

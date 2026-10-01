@@ -52,23 +52,17 @@ export class KnowledgeService {
     input: KnowledgeInput,
   ): Promise<{ entry: KnowledgeEntry; deduped: boolean }> {
     const hash = input.content_hash ?? knowledgeHash(input.title, input.content);
-    const existing = await this.store.findByHash(userId, hash);
-    if (existing) {
-      const updated = await this.store.update(
-        userId,
-        existing.id,
-        {
-          ...input,
-          content_hash: hash,
-          // La confiance ne peut que se renforcer lors d'une reconfirmation.
-          confidence: Math.max(existing.confidence, input.confidence ?? existing.confidence),
-        },
-        "Reconfirmation (déduplication)",
-      );
-      return { entry: updated ?? existing, deduped: true };
-    }
-    const entry = await this.store.create(userId, { ...input, content_hash: hash });
-    return { entry, deduped: false };
+    return this.store.upsertByHash(
+      userId,
+      { ...input, content_hash: hash },
+      (existing) => ({
+        ...input,
+        content_hash: hash,
+        // La confiance ne peut que se renforcer lors d'une reconfirmation.
+        confidence: Math.max(existing.confidence, input.confidence ?? existing.confidence),
+      }),
+      "Reconfirmation (déduplication)",
+    );
   }
 
   create(userId: string, input: KnowledgeInput) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import { toast } from "sonner";
+import ConfirmAction from "@/components/ConfirmAction";
+import ErrorState from "@/components/ErrorState";
 
 type Knowledge = {
   id: string;
@@ -29,7 +31,10 @@ const CATEGORIES = ["general", "formation", "application", "code", "recherche", 
 
 const KnowledgeBase = () => {
   const { user } = useAuth();
+  const userId = user?.id;
   const [items, setItems] = useState<Knowledge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   useCommandPrefill(setSearch);
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -38,26 +43,35 @@ const KnowledgeBase = () => {
   const [viewing, setViewing] = useState<Knowledge | null>(null);
   const [form, setForm] = useState({ title: "", content: "", category: "general", source: "", tags: "" });
 
-  const loadItems = async () => {
-    if (!user) return;
-    const { data } = await supabase
+  const loadItems = useCallback(async () => {
+    if (!userId) return;
+    setLoadError(null);
+    const { data, error } = await supabase
       .from("knowledge_base")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("updated_at", { ascending: false });
-    if (data) setItems(data as Knowledge[]);
-  };
+    if (error) {
+      console.error("Error loading knowledge base:", error);
+      setLoadError(error.message);
+    } else {
+      setItems((data ?? []) as Knowledge[]);
+    }
+    setLoading(false);
+  }, [userId]);
 
-  useEffect(() => { loadItems(); }, [user]);
+  useEffect(() => {
+    loadItems();
+  }, [loadItems]);
 
   const handleSave = async () => {
-    if (!user || !form.title.trim() || !form.content.trim()) {
+    if (!userId || !form.title.trim() || !form.content.trim()) {
       toast.error("Titre et contenu requis");
       return;
     }
     const tags = form.tags.split(",").map(t => t.trim()).filter(Boolean);
     const payload = {
-      user_id: user.id,
+      user_id: userId,
       title: form.title,
       content: form.content,
       category: form.category,
@@ -67,11 +81,11 @@ const KnowledgeBase = () => {
 
     if (editing) {
       const { error } = await supabase.from("knowledge_base").update(payload).eq("id", editing.id);
-      if (error) { toast.error("Erreur mise à jour"); return; }
+      if (error) { toast.error("Erreur lors de la mise à jour", { description: error.message }); return; }
       toast.success("Connaissance mise à jour");
     } else {
       const { error } = await supabase.from("knowledge_base").insert(payload);
-      if (error) { toast.error("Erreur création"); return; }
+      if (error) { toast.error("Erreur lors de la création", { description: error.message }); return; }
       toast.success("Connaissance ajoutée");
     }
     setIsOpen(false);
@@ -82,9 +96,10 @@ const KnowledgeBase = () => {
 
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from("knowledge_base").delete().eq("id", id);
-    if (error) { toast.error("Erreur suppression"); return; }
-    toast.success("Supprimé");
-    loadItems();
+    if (error) { toast.error("Erreur lors de la suppression", { description: error.message }); return; }
+    toast.success("Connaissance supprimée");
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    if (viewing?.id === id) setViewing(null);
   };
 
   const openEdit = (item: Knowledge) => {
@@ -154,7 +169,7 @@ const KnowledgeBase = () => {
         <div className="flex flex-col gap-3 sm:flex-row mb-6">
           <div className="relative flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+            <Input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" aria-label="Rechercher une connaissance" />
           </div>
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
@@ -176,12 +191,26 @@ const KnowledgeBase = () => {
                     <h3 className="font-semibold text-sm text-foreground truncate">{item.title}</h3>
                   </div>
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => openEdit(item)} className="text-muted-foreground hover:text-primary transition-colors">
+                    <button
+                      onClick={() => openEdit(item)}
+                      className="text-muted-foreground hover:text-primary transition-colors"
+                      aria-label={`Modifier « ${item.title} »`}
+                    >
                       <Edit className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(item.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <ConfirmAction
+                      title="Supprimer cette connaissance ?"
+                      description={`« ${item.title} » sera définitivement supprimée.`}
+                      onConfirm={() => handleDelete(item.id)}
+                      trigger={
+                        <button
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                          aria-label={`Supprimer « ${item.title} »`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      }
+                    />
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground line-clamp-3">{item.content}</p>
@@ -200,7 +229,18 @@ const KnowledgeBase = () => {
               </Card>
             ))}
           </div>
-          {filtered.length === 0 && (
+          {loading && <p className="text-xs text-muted-foreground">Chargement...</p>}
+          {!loading && loadError && (
+            <ErrorState
+              message="Impossible de charger la base de connaissances."
+              detail={loadError}
+              onRetry={() => {
+                setLoading(true);
+                loadItems();
+              }}
+            />
+          )}
+          {!loading && !loadError && filtered.length === 0 && (
             <div className="text-center py-16">
               <BookOpen className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Aucune connaissance trouvée</p>

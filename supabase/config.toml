@@ -1,16 +1,4 @@
 project_id = "ntvwbafvjgzsjoumtcmb"
 
-[functions.generate-formation]
-verify_jwt = false
-
-[functions.generate-application]
-verify_jwt = false
-
-[functions.chat]
-verify_jwt = false
-
-[functions.manage-database]
-verify_jwt = false
-
-[functions.agent-tasks]
-verify_jwt = false
+# Les edge functions Supabase ont été retirées : toute la logique serveur vit
+# désormais dans backend/node-api (voir backend/MIGRATION.md).

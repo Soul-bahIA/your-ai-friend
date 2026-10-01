@@ -72,7 +72,7 @@ const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
         {user && (
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs text-foreground truncate max-w-[160px]">{user.email}</span>
-            <button onClick={signOut} className="text-muted-foreground hover:text-destructive transition-colors">
+            <button onClick={signOut} className="text-muted-foreground hover:text-destructive transition-colors" aria-label="Se déconnecter" title="Se déconnecter">
               <LogOut className="h-4 w-4" />
             </button>
           </div>

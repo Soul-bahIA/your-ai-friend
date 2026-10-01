@@ -3,16 +3,43 @@ name: soulbah-backend
 # Orchestration complète de l'architecture polyglotte.
 # Lance : PostgreSQL + Rust (calculs) + Python (IA) + Node (API principale).
 # Démarrage : `docker compose up --build`
+#
+# Seule l'API Node est publiée sur l'hôte (port ${NODE_API_PORT}). python-ia et
+# rust-compute restent internes au réseau docker ; postgres n'est publié que sur
+# 127.0.0.1 (outils locaux).
+
+x-llm-env: &llm-env
+  # Fournisseurs d'IA — un fournisseur est actif dès que sa clé est renseignée.
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+  MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-large-latest}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+  XAI_API_KEY: ${XAI_API_KEY:-}
+  XAI_MODEL: ${XAI_MODEL:-grok-2-latest}
+  QWEN_API_KEY: ${QWEN_API_KEY:-}
+  QWEN_MODEL: ${QWEN_MODEL:-qwen-max}
+  LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
+  LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.1}
+  LOCAL_LLM_KEY: ${LOCAL_LLM_KEY:-}
+  # Jeton partagé node-api → python-ia (en-tête x-ia-token). Fortement recommandé.
+  IA_SERVICE_TOKEN: ${IA_SERVICE_TOKEN:-}
 
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-soulbah}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soulbah}
       POSTGRES_DB: ${POSTGRES_DB:-soulbah}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -24,46 +51,94 @@ services:
 
   rust-compute:
     build: ./rust-compute
-    ports:
-      - "8080:8080"
+    restart: unless-stopped
+    # Interne uniquement (appelé par python-ia via le réseau docker).
+    expose:
+      - "8080"
 
   python-ia:
     build: ./python-ia
+    restart: unless-stopped
     environment:
+      <<: *llm-env
       RUST_SERVICE_URL: http://rust-compute:8080
-      # Génération via Claude (Anthropic)
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
-    ports:
-      - "8000:8000"
+      LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-}
+      LLM_ROUTING: ${LLM_ROUTING:-}
+      TTS_MODEL: ${TTS_MODEL:-tts-1}
+      TTS_VOICE: ${TTS_VOICE:-alloy}
+      OPENAI_TTS_URL: ${OPENAI_TTS_URL:-https://api.openai.com/v1/audio/speech}
+      # Volume média partagé : python-ia ÉCRIT (dossier possédé par l'utilisateur non-root
+      # de l'image, uid 10001), node-api le monte en lecture seule et le sert sous /media/.
+      MEDIA_DIR: /app/media
+    volumes:
+      - media:/app/media
+    # Interne uniquement (pas de port publié) : seul node-api l'appelle, avec x-ia-token.
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       rust-compute:
         condition: service_started
 
   node-api:
     build: ./node-api
+    restart: unless-stopped
     environment:
+      <<: *llm-env
       PORT: 3000
       HOST: 0.0.0.0
-      # Après migration : pointez DATABASE_URL vers le Postgres de Supabase (SSL requis).
-      # Par défaut, le Postgres local (démo /api/analyze).
+      # Origines web autorisées (CORS), séparées par des virgules.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173}
+      # Postgres de Supabase (SSL) ; par défaut le Postgres local (démo /api/analyze).
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-soulbah}:${POSTGRES_PASSWORD:-soulbah}@postgres:5432/${POSTGRES_DB:-soulbah}}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      # Vérification TLS stricte : chemin DANS le conteneur (monter le fichier CA en volume).
+      PG_SSL_CA: ${PG_SSL_CA:-}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
       # Auth Supabase (vérification des JWT)
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
-      # Chat via OpenAI (ChatGPT)
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Chat streaming (famille compatible OpenAI) — cf. .env.example
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-}
+      CHAT_MODEL: ${CHAT_MODEL:-}
       OPENAI_URL: ${OPENAI_URL:-https://api.openai.com/v1/chat/completions}
-      CHAT_MODEL: ${CHAT_MODEL:-gpt-4o}
+      # Embeddings (RAG)
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_URL: ${EMBEDDING_URL:-https://api.openai.com/v1/embeddings}
+      # Recherche web
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      KNOWLEDGE_STORE_PROVIDER: ${KNOWLEDGE_STORE_PROVIDER:-supabase}
+      # Agent local / maintenance / limitation de débit
+      AGENT_TASK_STALE_SECONDS: ${AGENT_TASK_STALE_SECONDS:-180}
+      STALE_GENERATION_MINUTES: ${STALE_GENERATION_MINUTES:-30}
+      RATE_LIMIT_GLOBAL: ${RATE_LIMIT_GLOBAL:-300}
+      RATE_LIMIT_AGENT: ${RATE_LIMIT_AGENT:-1200}
+      RATE_LIMIT_EXPENSIVE: ${RATE_LIMIT_EXPENSIVE:-20}
       IA_SERVICE_URL: http://python-ia:8000
+      MEDIA_DIR: /data/media
+    volumes:
+      - media:/data/media:ro
     ports:
-      - "3000:3000"
+      - "${NODE_API_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
       python-ia:
-        condition: service_started
+        condition: service_healthy
 
   # Console web React/TypeScript (équivalent web du client Flutter).
   # Le contexte pointe vers ../frontend, sibling du dossier backend.
@@ -72,7 +147,8 @@ services:
       context: ../frontend
       args:
         # VITE_API_URL est figée au build : le navigateur appelle l'hôte, pas le réseau docker.
-        VITE_API_URL: http://localhost:3000
+        VITE_API_URL: http://localhost:${NODE_API_PORT:-3000}
+    restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:
@@ -80,3 +156,4 @@ services:
 
 volumes:
   pgdata:
+  media:

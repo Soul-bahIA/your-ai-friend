@@ -6,12 +6,15 @@ narration synthétisée) — remplace l'ancien diaporama navigateur + voix Chrom
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import textwrap
+import uuid
 
 import httpx
 
 from .llm import LLMError
+from .providers.base import upstream_error
 
 OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL", "https://api.openai.com/v1/audio/speech")
 TTS_MODEL = os.getenv("TTS_MODEL", "tts-1")
@@ -51,7 +54,9 @@ def _synthesize(text: str, out_path: str) -> None:
     except httpx.HTTPError as e:
         raise LLMError(502, f"Service TTS injoignable : {e}")
     if r.status_code != 200:
-        raise LLMError(r.status_code, f"Erreur TTS ({r.status_code}) : {r.text[:200]}")
+        # Ne jamais propager tel quel le code amont (un 401 OpenAI ferait croire au
+        # client que SA session est invalide) ni le corps d'un 401/403.
+        raise upstream_error("TTS OpenAI", r.status_code, r.text[:200])
     with open(out_path, "wb") as f:
         f.write(r.content)
 
@@ -145,14 +150,19 @@ def build_formation_video(title: str, lessons: list[dict], out_path: str, max_sl
 
     tmpdir = tempfile.mkdtemp(prefix="soulbah_video_")
     clips = []
-    audio_files = []
+    audios = []
+    final = None
+    # Écriture dans un fichier temporaire du MÊME dossier, puis os.replace atomique :
+    # un lecteur (Node /media) ne voit jamais un MP4 à moitié écrit.
+    out_dir = os.path.dirname(os.path.abspath(out_path))
+    partial = os.path.join(out_dir, f".{os.path.basename(out_path)}.{uuid.uuid4().hex}.part.mp4")
     try:
         for idx, s in enumerate(slides):
             frame = _render_slide(s["kind"], s["heading"], s["title"], s["bullets"])
             mp3 = os.path.join(tmpdir, f"n{idx}.mp3")
             _synthesize(s["narration"], mp3)
-            audio_files.append(mp3)
             audio = AudioFileClip(mp3)
+            audios.append(audio)
             # Un court battement après la narration
             dur = audio.duration + 0.8
             clip = ImageClip(frame).set_duration(dur).set_audio(audio)
@@ -160,16 +170,24 @@ def build_formation_video(title: str, lessons: list[dict], out_path: str, max_sl
 
         final = concatenate_videoclips(clips, method="compose")
         final.write_videofile(
-            out_path, fps=24, codec="libx264", audio_codec="aac", logger=None,
+            partial, fps=24, codec="libx264", audio_codec="aac", logger=None,
             temp_audiofile=os.path.join(tmpdir, "final_audio.m4a"),
         )
         duration = final.duration
-        final.close()
+        os.replace(partial, out_path)
     finally:
-        for c in clips:
+        for c in [final, *clips, *audios]:
+            if c is None:
+                continue
             try:
                 c.close()
             except Exception:  # noqa: BLE001
                 pass
+        if os.path.exists(partial):
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     return {"path": out_path, "slides": len(slides), "duration_s": float(round(duration, 1))}

@@ -1,65 +1,98 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Brain, Search, GraduationCap, AppWindow, Monitor, Video,
-  Film, RefreshCw, Database, Shield, Cloud, Zap,
+  Film, RefreshCw, Database, Shield, Cloud, Zap, type LucideIcon,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import ModuleCard from "@/components/ModuleCard";
 import StatCard from "@/components/StatCard";
 import ActivityFeed from "@/components/ActivityFeed";
+import ErrorState from "@/components/ErrorState";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useBackendHealth } from "@/hooks/useSystemStatus";
+import {
+  computeOverallStatus,
+  deepCheck,
+  overallLabels,
+  type ServiceState,
+} from "@/lib/systemStatus";
 
-const moduleIcons: Record<string, any> = {
-  "IA Centrale": Brain,
-  "Recherche Internet": Search,
-  "Génération de Cours": GraduationCap,
-  "Génération d'Apps": AppWindow,
-  "Automatisation PC": Monitor,
-  "Capture Vidéo": Video,
-  "Montage Automatique": Film,
-  "Auto-Optimisation": RefreshCw,
-  "Base de Données": Database,
-  "Sécurité": Shield,
-  "Cloud Hybride": Cloud,
-  "Microservices": Zap,
-};
+type ModuleStatus = "active" | "idle" | "processing";
 
-const defaultModules = [
-  { icon: Brain, title: "IA Centrale", description: "Orchestration et prise de décision autonome", status: "active" as const, stats: "Prêt" },
-  { icon: Search, title: "Recherche Internet", description: "Analyse et extraction de connaissances", status: "active" as const, stats: "Prêt" },
-  { icon: GraduationCap, title: "Génération de Cours", description: "Création automatique de formations structurées", status: "idle" as const, stats: "En attente" },
-  { icon: AppWindow, title: "Génération d'Apps", description: "Création d'applications complètes", status: "idle" as const, stats: "En attente" },
-  { icon: Monitor, title: "Automatisation PC", description: "Contrôle et exécution sur le système", status: "idle" as const, stats: "En attente" },
-  { icon: Video, title: "Capture Vidéo", description: "Enregistrement automatique des sessions", status: "idle" as const, stats: "En attente" },
-  { icon: Film, title: "Montage Automatique", description: "Post-production intelligente", status: "idle" as const, stats: "En attente" },
-  { icon: RefreshCw, title: "Auto-Optimisation", description: "Amélioration continue des performances", status: "active" as const, stats: "Prêt" },
-  { icon: Database, title: "Base de Données", description: "PostgreSQL + Redis — stockage et cache", status: "active" as const, stats: "Connecté" },
-  { icon: Shield, title: "Sécurité", description: "Monitoring et protection en temps réel", status: "active" as const, stats: "0 menaces" },
-  { icon: Cloud, title: "Cloud Hybride", description: "Synchronisation locale et cloud", status: "active" as const, stats: "Connecté" },
-  { icon: Zap, title: "Microservices", description: "Services haute performance Rust/Go", status: "idle" as const, stats: "En attente" },
-];
+interface ModuleDef {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  status: ModuleStatus;
+  stats: string;
+}
+
+const stateToModule = (s: ServiceState): ModuleStatus =>
+  s === "ok" ? "active" : s === "unknown" ? "processing" : "idle";
+
+const stateLabel = (s: ServiceState, okLabel = "Connecté") =>
+  s === "ok" ? okLabel : s === "unknown" ? "Vérification…" : "Hors ligne";
+
+async function fetchStats() {
+  const [f, a, l] = await Promise.all([
+    supabase.from("formations").select("id", { count: "exact", head: true }),
+    supabase.from("applications").select("id", { count: "exact", head: true }),
+    supabase.from("system_logs").select("id", { count: "exact", head: true }),
+  ]);
+  const err = f.error ?? a.error ?? l.error;
+  if (err) throw new Error(err.message || "Supabase injoignable");
+  return { formations: f.count ?? 0, applications: a.count ?? 0, logs: l.count ?? 0 };
+}
 
 const Index = () => {
   const { user } = useAuth();
-  const [formationsCount, setFormationsCount] = useState(0);
-  const [appsCount, setAppsCount] = useState(0);
-  const [logsCount, setLogsCount] = useState(0);
+  const userId = user?.id;
 
-  useEffect(() => {
-    if (!user) return;
-    const fetchStats = async () => {
-      const [f, a, l] = await Promise.all([
-        supabase.from("formations").select("id", { count: "exact", head: true }),
-        supabase.from("applications").select("id", { count: "exact", head: true }),
-        supabase.from("system_logs").select("id", { count: "exact", head: true }),
-      ]);
-      setFormationsCount(f.count || 0);
-      setAppsCount(a.count || 0);
-      setLogsCount(l.count || 0);
-    };
-    fetchStats();
-  }, [user]);
+  const stats = useQuery({
+    queryKey: ["dashboard-stats", userId],
+    queryFn: fetchStats,
+    enabled: !!userId,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+  const health = useBackendHealth();
+
+  const supabaseState: ServiceState = stats.isPending ? "unknown" : stats.isError ? "down" : "ok";
+  const overall = computeOverallStatus({
+    backend: health.backend,
+    deep: health.deep,
+    supabase: supabaseState,
+  });
+  const postgres = health.backend === "down" ? "down" : deepCheck(health.deep, "postgres");
+  const pythonIa = health.backend === "down" ? "down" : deepCheck(health.deep, "python_ia");
+  const backendModuleState: ServiceState = health.backend;
+
+  const modules: ModuleDef[] = [
+    { icon: Brain, title: "IA Centrale", description: "Orchestration et prise de décision autonome", status: stateToModule(pythonIa), stats: `Service IA : ${stateLabel(pythonIa, "Prêt")}` },
+    { icon: Search, title: "Recherche Internet", description: "Analyse et extraction de connaissances", status: stateToModule(pythonIa), stats: stateLabel(pythonIa, "Prêt") },
+    { icon: GraduationCap, title: "Génération de Cours", description: "Création automatique de formations structurées", status: stateToModule(backendModuleState), stats: stateLabel(backendModuleState, "Disponible") },
+    { icon: AppWindow, title: "Génération d'Apps", description: "Création d'applications complètes", status: stateToModule(backendModuleState), stats: stateLabel(backendModuleState, "Disponible") },
+    { icon: Monitor, title: "Automatisation PC", description: "Contrôle et exécution sur le système", status: "idle", stats: "Nécessite l'agent local" },
+    { icon: Video, title: "Capture Vidéo", description: "Enregistrement automatique des sessions", status: "idle", stats: "Nécessite l'agent local" },
+    { icon: Film, title: "Montage Automatique", description: "Post-production intelligente", status: "idle", stats: "En attente" },
+    { icon: RefreshCw, title: "Auto-Optimisation", description: "Amélioration continue des performances", status: "idle", stats: "En attente" },
+    { icon: Database, title: "Base de Données", description: "PostgreSQL — stockage du backend", status: stateToModule(postgres), stats: `PostgreSQL : ${stateLabel(postgres)}` },
+    { icon: Shield, title: "Sécurité", description: "Monitoring et protection", status: "idle", stats: "Détection de menaces : non disponible" },
+    { icon: Cloud, title: "Cloud Hybride", description: "Synchronisation locale et cloud (Supabase)", status: stateToModule(supabaseState), stats: `Supabase : ${stateLabel(supabaseState)}` },
+    { icon: Zap, title: "Microservices", description: "Services haute performance", status: "idle", stats: "Non déployé" },
+  ];
+
+  const subtitle =
+    overall === "operational"
+      ? "Plateforme IA autonome — tous les services répondent"
+      : overall === "checking"
+        ? "Plateforme IA autonome — vérification des services…"
+        : overall === "offline"
+          ? "Plateforme IA autonome — services injoignables"
+          : "Plateforme IA autonome — certains services ne répondent pas";
+
+  const statValue = (n: number | undefined) => (stats.isError ? "—" : stats.isPending ? "…" : String(n ?? 0));
 
   return (
     <DashboardLayout>
@@ -68,16 +101,31 @@ const Index = () => {
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
             Centre de <span className="text-gradient-primary">Commande</span>
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Plateforme IA autonome — tous les modules opérationnels
-          </p>
+          <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
         </div>
 
+        {stats.isError && (
+          <div className="mb-4">
+            <ErrorState
+              compact
+              message="Impossible de charger les statistiques (Supabase injoignable)."
+              detail={stats.error instanceof Error ? stats.error.message : null}
+              onRetry={() => stats.refetch()}
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
-          <StatCard label="Formations" value={String(formationsCount)} change="Base de données" delay={100} />
-          <StatCard label="Applications" value={String(appsCount)} change="Base de données" delay={150} />
-          <StatCard label="Événements" value={String(logsCount)} change="Logs système" delay={200} />
-          <StatCard label="Système" value="100%" change="Opérationnel" positive delay={250} />
+          <StatCard label="Formations" value={statValue(stats.data?.formations)} change="Base de données" delay={100} />
+          <StatCard label="Applications" value={statValue(stats.data?.applications)} change="Base de données" delay={150} />
+          <StatCard label="Événements" value={statValue(stats.data?.logs)} change="Logs système" delay={200} />
+          <StatCard
+            label="Système"
+            value={overallLabels[overall]}
+            change={`Backend : ${stateLabel(health.backend, "OK")} · Supabase : ${stateLabel(supabaseState, "OK")}`}
+            positive={overall === "operational" || overall === "checking"}
+            delay={250}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -86,7 +134,7 @@ const Index = () => {
               Modules du Système
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-              {defaultModules.map((mod, i) => (
+              {modules.map((mod, i) => (
                 <ModuleCard key={mod.title} {...mod} delay={350 + i * 50} />
               ))}
             </div>

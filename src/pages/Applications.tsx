@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import type { Json } from "@/integrations/supabase/types";
+import ConfirmAction from "@/components/ConfirmAction";
+import ErrorState from "@/components/ErrorState";
+import { apiFetch, errorMessage } from "@/lib/api";
+import type { GenerateApplicationResponse, GeneratedApplication } from "@/types/application";
 
 interface AppArchitecture {
   frontend?: {
@@ -36,39 +40,48 @@ interface Application {
 }
 
 const Applications = () => {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
+  const userId = user?.id;
   const { toast } = useToast();
   const [appName, setAppName] = useState("");
   useCommandPrefill(setAppName);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [chatOpenId, setChatOpenId] = useState<string | null>(null);
   const [previewApp, setPreviewApp] = useState<Application | null>(null);
 
+  const fetchApps = useCallback(async () => {
+    if (!userId) return;
+    setLoadError(null);
+    const { data, error } = await supabase
+      .from("applications")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Error loading applications:", error);
+      setLoadError(error.message);
+    } else {
+      setApps(data ?? []);
+    }
+    setLoading(false);
+  }, [userId]);
+
   useEffect(() => {
-    if (!user) return;
-    const fetchApps = async () => {
-      const { data } = await supabase
-        .from("applications")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (data) setApps(data);
-      setLoading(false);
-    };
     fetchApps();
-  }, [user]);
+  }, [fetchApps]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!appName.trim() || !user || !session) return;
+    if (!appName.trim() || !userId) return;
     setCreating(true);
 
     const { data, error } = await supabase
       .from("applications")
       .insert({
-        user_id: user.id,
+        user_id: userId,
         title: appName,
         description: "Génération en cours...",
         app_type: "Web App",
@@ -88,31 +101,23 @@ const Applications = () => {
     const applicationId = data.id;
 
     try {
-      const response = await fetch(
-        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/application`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ appName, applicationId }),
-        }
-      );
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Échec de la génération");
+      const result = await apiFetch<GenerateApplicationResponse>("/api/generate/application", {
+        method: "POST",
+        json: { appName, applicationId },
+      });
+      const generated = result?.application;
+      if (!generated) throw new Error(result?.error || "Échec de la génération");
 
       setApps((prev) =>
         prev.map((a) =>
           a.id === applicationId
             ? {
                 ...a,
-                title: result.application.title || appName,
-                description: result.application.description,
-                app_type: result.application.app_type || "Web App",
-                tech_stack: result.application.tech_stack || "React + TypeScript",
-                source_code: result.application.architecture || {},
+                title: generated.title || appName,
+                description: generated.description ?? null,
+                app_type: generated.app_type || "Web App",
+                tech_stack: generated.tech_stack || "React + TypeScript",
+                source_code: (generated.architecture ?? {}) as Json,
                 status: "Généré",
               }
             : a
@@ -122,10 +127,10 @@ const Applications = () => {
       setAppName("");
       toast({
         title: "Application générée !",
-        description: `« ${result.application.title} » — Utilisez le chat pour l'améliorer.`,
+        description: `« ${generated.title || appName} » — Utilisez le chat pour l'améliorer.`,
       });
-    } catch (err: any) {
-      toast({ title: "Erreur IA", description: err.message, variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Erreur IA", description: errorMessage(err), variant: "destructive" });
       setApps((prev) =>
         prev.map((a) => (a.id === applicationId ? { ...a, status: "Erreur" } : a))
       );
@@ -137,22 +142,27 @@ const Applications = () => {
 
   const handleDelete = async (id: string, title: string) => {
     const { error } = await supabase.from("applications").delete().eq("id", id);
-    if (!error) {
-      setApps((prev) => prev.filter((a) => a.id !== id));
-      if (chatOpenId === id) setChatOpenId(null);
-      if (user) {
-        await supabase.from("system_logs").insert({
-          user_id: user.id,
-          module: "Applications",
-          event: `Application « ${title} » supprimée`,
-          level: "warning",
-        });
-      }
+    if (error) {
+      toast({ title: "Suppression impossible", description: error.message, variant: "destructive" });
+      return;
+    }
+    setApps((prev) => prev.filter((a) => a.id !== id));
+    if (chatOpenId === id) setChatOpenId(null);
+    if (previewApp?.id === id) setPreviewApp(null);
+    toast({ title: "Application supprimée", description: `« ${title} » a été supprimée.` });
+    if (userId) {
+      const { error: logError } = await supabase.from("system_logs").insert({
+        user_id: userId,
+        module: "Applications",
+        event: `Application « ${title} » supprimée`,
+        level: "warning",
+      });
+      if (logError) console.error("Error writing system log:", logError);
     }
   };
 
-  const handleAppUpdated = (appId: string, result: any) => {
-    const updater = (a: Application) =>
+  const handleAppUpdated = (appId: string, result: GeneratedApplication) => {
+    const updater = (a: Application): Application =>
       a.id === appId
         ? {
             ...a,
@@ -160,7 +170,7 @@ const Applications = () => {
             description: result.description || a.description,
             app_type: result.app_type || a.app_type,
             tech_stack: result.tech_stack || a.tech_stack,
-            source_code: result.architecture || a.source_code,
+            source_code: result.architecture ? (result.architecture as Json) : a.source_code,
             status: "Généré",
           }
         : a;
@@ -170,7 +180,7 @@ const Applications = () => {
     // Also update previewApp if it's the one being modified
     setPreviewApp((prev) => {
       if (prev && prev.id === appId) {
-        return updater(prev) as Application;
+        return updater(prev);
       }
       return prev;
     });
@@ -236,6 +246,15 @@ const Applications = () => {
         </h2>
         {loading ? (
           <p className="text-xs text-muted-foreground">Chargement...</p>
+        ) : loadError ? (
+          <ErrorState
+            message="Impossible de charger vos applications."
+            detail={loadError}
+            onRetry={() => {
+              setLoading(true);
+              fetchApps();
+            }}
+          />
         ) : apps.length === 0 ? (
           <p className="text-xs text-muted-foreground">Aucune application créée.</p>
         ) : (
@@ -297,13 +316,25 @@ const Applications = () => {
                         <button
                           onClick={() => setExpandedId(expandedId === app.id ? null : app.id)}
                           className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                          aria-label={expandedId === app.id ? "Replier les détails" : "Afficher les détails"}
+                          aria-expanded={expandedId === app.id}
                         >
                           {expandedId === app.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </button>
                       )}
-                      <button onClick={() => handleDelete(app.id, app.title)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <ConfirmAction
+                        title="Supprimer cette application ?"
+                        description={`« ${app.title} » sera définitivement supprimée.`}
+                        onConfirm={() => handleDelete(app.id, app.title)}
+                        trigger={
+                          <button
+                            className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                            aria-label={`Supprimer l'application « ${app.title} »`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        }
+                      />
                     </div>
                   </div>
 

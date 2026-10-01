@@ -5,12 +5,14 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  // Échoue tôt avec un message clair plutôt qu'une erreur cryptique au runtime
-  throw new Error(
-    "[Supabase] Variables d'environnement manquantes. Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY dans .env, puis redémarrez le serveur."
-  );
-}
+/**
+ * Configuration manquante : on n'échoue PAS à l'import (page blanche). main.tsx
+ * affiche un écran d'erreur explicite à la place de l'application.
+ */
+export const supabaseConfigError: string | null =
+  !SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY
+    ? "Variables d'environnement manquantes : VITE_SUPABASE_URL et/ou VITE_SUPABASE_PUBLISHABLE_KEY. Renseignez-les dans le fichier .env puis redémarrez le serveur (ou relancez le build)."
+    : null;
 
 // Stockage résilient : si localStorage est indisponible (mode privé, cookies/site
 // data bloqués, extension de confidentialité...), on bascule sur un stockage mémoire
@@ -43,10 +45,16 @@ const getSafeStorage = () => {
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: getSafeStorage(),
-    persistSession: true,
-    autoRefreshToken: true,
-  }
-});
+// Valeurs factices si la config manque : le client est créé mais jamais utilisé
+// (l'application n'est pas montée, voir main.tsx).
+export const supabase = createClient<Database>(
+  SUPABASE_URL || "http://localhost:54321",
+  SUPABASE_PUBLISHABLE_KEY || "missing-key",
+  {
+    auth: {
+      storage: getSafeStorage(),
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  },
+);

@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCommandPrefill } from "@/hooks/useCommandPrefill";
@@ -6,22 +8,31 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, Sparkles } from "lucide-react";
+import { Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, Sparkles, type LucideIcon } from "lucide-react";
+import { apiFetch, errorMessage } from "@/lib/api";
+import ErrorState from "@/components/ErrorState";
+
+interface AgentTaskResult {
+  file?: string;
+  evaluation?: { verdict?: string; reason?: string };
+}
+
+interface AgentTaskPayload {
+  goal_meta?: { goal?: string; attempt?: number };
+}
 
 interface AgentTask {
   id: string;
   task_type: string;
   status: string;
-  payload: any;
-  result: any;
+  payload: AgentTaskPayload | null;
+  result: AgentTaskResult | null;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
 }
 
-const TASK_URL = `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/agent-tasks`;
-
-const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
+const statusConfig: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   pending: { label: "En attente", color: "bg-warning/10 text-warning", icon: Clock },
   in_progress: { label: "En cours", color: "bg-primary/10 text-primary", icon: Loader2 },
   completed: { label: "Terminé", color: "bg-success/10 text-success", icon: CheckCircle2 },
@@ -40,7 +51,25 @@ const taskTypeLabels: Record<string, string> = {
   goal: "🧠 Objectif (plan IA)",
 };
 
-const GOAL_URL = `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/agent/goal`;
+const MAX_TASKS = 200;
+
+/** Applique un événement temps réel à la liste (sans refetch complet). */
+function applyTaskChange(
+  prev: AgentTask[],
+  payload: RealtimePostgresChangesPayload<Record<string, unknown>>,
+): AgentTask[] {
+  if (payload.eventType === "DELETE") {
+    const id = (payload.old as { id?: string }).id;
+    return id ? prev.filter((t) => t.id !== id) : prev;
+  }
+  const row = payload.new as unknown as AgentTask;
+  if (!row?.id) return prev;
+  const idx = prev.findIndex((t) => t.id === row.id);
+  if (idx === -1) return [row, ...prev].slice(0, MAX_TASKS);
+  const next = prev.slice();
+  next[idx] = { ...prev[idx], ...row };
+  return next;
+}
 
 interface AgentTasksPanelProps {
   formationId?: string;
@@ -49,84 +78,81 @@ interface AgentTasksPanelProps {
 }
 
 const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: AgentTasksPanelProps) => {
-  const { session } = useAuth();
+  const { user } = useAuth();
+  const userId = user?.id;
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [goal, setGoal] = useState("");
   useCommandPrefill(setGoal);
   const [planning, setPlanning] = useState(false);
   const [goalFeedback, setGoalFeedback] = useState<string | null>(null);
 
+  const fetchTasks = useCallback(async () => {
+    if (!userId) return;
+    setLoadError(null);
+    try {
+      const data = await apiFetch<{ tasks?: AgentTask[] }>("/api/agent-tasks");
+      setTasks(data?.tasks ?? []);
+    } catch (e) {
+      console.error("Error fetching tasks:", e);
+      setLoadError(errorMessage(e));
+    }
+    setLoading(false);
+  }, [userId]);
+
   const sendGoal = async () => {
-    if (!session || !goal.trim() || planning) return;
+    if (!userId || !goal.trim() || planning) return;
     setPlanning(true);
     setGoalFeedback(null);
     try {
-      const resp = await fetch(GOAL_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ goal: goal.trim() }),
-      });
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        setGoalFeedback(`✅ Plan créé (${data.steps.length} étapes) : ${data.understanding}`);
+      const data = await apiFetch<{
+        success?: boolean;
+        steps?: unknown[];
+        understanding?: string;
+        reason?: string;
+        error?: string;
+      }>("/api/agent/goal", { method: "POST", json: { goal: goal.trim() } });
+      if (data?.success) {
+        setGoalFeedback(`✅ Plan créé (${data.steps?.length ?? 0} étapes) : ${data.understanding ?? ""}`);
         setGoal("");
         fetchTasks();
       } else {
-        setGoalFeedback(`❌ ${data.reason || data.error || "Échec de la planification"}`);
+        setGoalFeedback(`❌ ${data?.reason || data?.error || "Échec de la planification"}`);
       }
-    } catch {
-      setGoalFeedback("❌ Backend injoignable");
+    } catch (e) {
+      setGoalFeedback(`❌ ${errorMessage(e, "Backend injoignable")}`);
     }
     setPlanning(false);
   };
 
-  const fetchTasks = async () => {
-    if (!session) return;
-    try {
-      const resp = await fetch(TASK_URL, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      const data = await resp.json();
-      if (data.tasks) setTasks(data.tasks);
-    } catch (e) {
-      console.error("Error fetching tasks:", e);
-    }
-    setLoading(false);
-  };
-
   useEffect(() => {
+    if (!userId) return;
     fetchTasks();
-    // Subscribe to realtime updates
+    // Temps réel : uniquement les tâches de l'utilisateur, appliquées directement à l'état.
     const channel = supabase
-      .channel("agent-tasks-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "agent_tasks" }, () => {
-        fetchTasks();
-      })
+      .channel(`agent-tasks-realtime-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "agent_tasks", filter: `user_id=eq.${userId}` },
+        (payload) => setTasks((prev) => applyTaskChange(prev, payload)),
+      )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [session]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, fetchTasks]);
 
   const sendTrainingVideoTask = async () => {
-    if (!session || !formationTitle) return;
+    if (!userId || !formationTitle) return;
     setSending(true);
 
     try {
-      const resp = await fetch(TASK_URL, {
+      const data = await apiFetch<{ success?: boolean; task?: AgentTask; error?: string }>("/api/agent-tasks", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        json: {
           task_type: "full_training_video",
           priority: 1,
           payload: {
@@ -138,15 +164,17 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
               { type: "wait", seconds: 3, description: "Attendre le chargement" },
             ],
           },
-        }),
+        },
       });
-
-      const data = await resp.json();
-      if (data.success) {
-        setTasks((prev) => [data.task, ...prev]);
+      const task = data?.task;
+      if (data?.success && task) {
+        setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [task, ...prev]));
+      } else {
+        toast.error("Envoi de la tâche impossible", { description: data?.error });
       }
     } catch (e) {
       console.error("Error sending task:", e);
+      toast.error("Envoi de la tâche impossible", { description: errorMessage(e) });
     }
     setSending(false);
   };
@@ -155,6 +183,7 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
     const { error } = await supabase.from("agent_tasks").delete().eq("id", taskId);
     if (error) {
       console.error("Error deleting task:", error);
+      toast.error("Suppression impossible", { description: error.message });
       return;
     }
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
@@ -168,7 +197,7 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
           <h3 className="text-sm font-semibold">Agent Local</h3>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchTasks}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fetchTasks} aria-label="Rafraîchir les tâches">
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           {formationTitle && (
@@ -192,9 +221,10 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
             placeholder="Objectif (ex: Ouvre le bloc-notes et écris Bonjour)"
             className="bg-secondary border-border text-xs h-8"
             disabled={planning}
+            aria-label="Objectif pour l'agent"
           />
           <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={planning || !goal.trim()}>
-            {planning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Sparkles className="h-3.5 w-3.5 mr-1" /> Planifier</>}
+            {planning ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Planification en cours" /> : <><Sparkles className="h-3.5 w-3.5 mr-1" /> Planifier</>}
           </Button>
         </div>
         {goalFeedback && (
@@ -204,6 +234,8 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
 
       {loading ? (
         <p className="text-xs text-muted-foreground">Chargement...</p>
+      ) : loadError ? (
+        <ErrorState compact message="Impossible de charger les tâches de l'agent." detail={loadError} onRetry={fetchTasks} />
       ) : tasks.length === 0 ? (
         <div className="text-center py-6">
           <Monitor className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
@@ -220,6 +252,8 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
             {tasks.map((task) => {
               const config = statusConfig[task.status] || statusConfig.pending;
               const Icon = config.icon;
+              const evaluation = task.result?.evaluation;
+              const goalMeta = task.payload?.goal_meta;
               return (
                 <div key={task.id} className="flex items-center gap-3 rounded-md bg-secondary/50 px-3 py-2">
                   <Icon className={`h-4 w-4 flex-shrink-0 ${task.status === "in_progress" ? "animate-spin" : ""} ${config.color.split(" ")[1]}`} />
@@ -236,22 +270,26 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
                     {task.result?.file && (
                       <p className="text-[10px] text-success mt-0.5">📁 {task.result.file}</p>
                     )}
-                    {task.payload?.goal_meta?.goal && (
+                    {goalMeta?.goal && (
                       <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">
-                        🎯 {task.payload.goal_meta.goal}
-                        {task.payload.goal_meta.attempt > 1 && ` (tentative ${task.payload.goal_meta.attempt})`}
+                        🎯 {goalMeta.goal}
+                        {(goalMeta.attempt ?? 0) > 1 && ` (tentative ${goalMeta.attempt})`}
                       </p>
                     )}
-                    {task.result?.evaluation && (
-                      <p className={`text-[10px] mt-0.5 ${task.result.evaluation.verdict === "success" ? "text-success" : task.result.evaluation.verdict === "retry" ? "text-warning" : "text-destructive"}`}>
-                        🧠 {task.result.evaluation.verdict === "success" ? "Objectif atteint" : task.result.evaluation.verdict === "retry" ? "Correction lancée" : "Abandonné"} — {task.result.evaluation.reason}
+                    {evaluation && (
+                      <p className={`text-[10px] mt-0.5 ${evaluation.verdict === "success" ? "text-success" : evaluation.verdict === "retry" ? "text-warning" : "text-destructive"}`}>
+                        🧠 {evaluation.verdict === "success" ? "Objectif atteint" : evaluation.verdict === "retry" ? "Correction lancée" : "Abandonné"} — {evaluation.reason}
                       </p>
                     )}
                   </div>
                   <Badge variant="outline" className={`text-[9px] ${config.color}`}>
                     {config.label}
                   </Badge>
-                  <button onClick={() => deleteTask(task.id)} className="text-muted-foreground hover:text-destructive">
+                  <button
+                    onClick={() => deleteTask(task.id)}
+                    className="text-muted-foreground hover:text-destructive"
+                    aria-label="Supprimer la tâche"
+                  >
                     <Trash2 className="h-3 w-3" />
                   </button>
                 </div>

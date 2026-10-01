@@ -31,7 +31,7 @@ Architecture microservices auto-hébergée pour l'application mobile Flutter.
 
 | Service | Techno | Port | Responsabilité |
 |---|---|---|---|
-| **node-api** | Node.js 20 + Fastify + TypeScript | 3000 | Point d'entrée unique pour Flutter. Validation, orchestration, accès Postgres, appel du service IA. |
+| **node-api** | Node.js 22 + Fastify 5 + TypeScript | 3000 | Point d'entrée unique pour Flutter. Validation, orchestration, accès Postgres, appel du service IA. |
 | **python-ia** | Python 3.12 + FastAPI | 8000 | Inférence / traitement IA. Délègue les calculs lourds à Rust. |
 | **rust-compute** | Rust + Axum + Tokio | 8080 | Calculs numériques intensifs (CPU-bound), isolés pour la performance. |
 | **postgres** | PostgreSQL 16 | 5432 | Stockage relationnel persistant. |
@@ -52,17 +52,38 @@ Au premier lancement, Docker construit les 4 images (le build Rust prend quelque
 
 ## 🔌 Endpoints (exposés par node-api)
 
-| Méthode | Route | Description |
-|---|---|---|
-| `GET` | `/health` | Liveness de l'API |
-| `GET` | `/health/deep` | Vérifie Postgres + service Python |
-| `POST` | `/api/analyze` | Flux complet : persiste la requête → appelle Python IA (→ Rust) → stocke et renvoie le résultat |
-| `GET` | `/api/analyze/:id` | Relit un résultat d'analyse par son id |
+Auth : **JWT** = `Authorization: Bearer <access_token Supabase>` ; **clé agent** = `x-agent-key: sbk_…`
+(hash SHA-256 en base, `user_id` déduit de la clé). Toutes les données sont scopées par utilisateur.
+
+| Méthode | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | — | Liveness (sans dépendance) |
+| `GET` | `/health/deep` | — | État Postgres + python-ia (`degraded` si l'un est `down`) |
+| `POST` | `/api/analyze` · `GET /api/analyze/:id` | JWT | Démo Node → Python → Rust (lignes rattachées à l'utilisateur) |
+| `POST` | `/api/chat` | JWT | Chat streaming SSE (+ exécution d'actions `{action}`) |
+| `POST` | `/api/generate/formation` · `/api/generate/application` | JWT | Génération (formation : asynchrone, progression temps réel) |
+| `POST` | `/api/formations/:id/video` · `/pdf` · `/demos` | JWT | Vidéo MP4, support PDF, démos pour l'agent |
+| `POST` | `/api/database` (`{action}`) | JWT | Tables utilisateur (schémas, lignes, migrations) |
+| `GET/POST/PATCH/DELETE` | `/api/knowledge`, `/api/knowledge/:id`, `/:id/versions`, `/:id/restore` | JWT | Base de connaissances versionnée |
+| `GET/POST` | `/api/knowledge-domains` | JWT (POST : admin) | Référentiel de domaines |
+| `POST` | `/api/research` · `GET /api/research/status` | JWT | Recherche KB-first (KB → web → synthèse) |
+| `POST` | `/api/orchestrator/route` | JWT | Chief Agent (routage / dispatch) |
+| `POST` | `/api/agent/goal` | JWT | Objectif → plan validé → tâche agent |
+| `GET/POST/PATCH/DELETE` | `/api/agent/memory[/:id]` · `POST /api/agent/self-improve` | JWT | Mémoire d'exécution |
+| `GET/POST/DELETE` | `/api/agent-keys[/:id]` | JWT | Clés de l'agent local |
+| `GET/POST` | `/api/agent-tasks` | JWT | Lister (captures retirées) / créer (étapes validées) |
+| `POST` | `/api/agent-tasks/:id/control` · `GET /api/agent-tasks/:id/events` | JWT | Pause/stop, timeline |
+| `POST` | `/api/agent-tasks/announce` · `GET /poll` · `POST /update` · `POST /event` · `GET /:id/control` | clé agent | Worker local (contrat `attempt` : voir `MIGRATION.md`) |
+| `GET` | `/media/*` | — | Fichiers produits (MP4/PDF) |
+
+Limites : 300 req/min global (par utilisateur, sinon IP), 20/min sur les routes coûteuses,
+corps 2 Mo (15 Mo pour `update`/`event` de l'agent). Erreurs 5xx : message générique.
 
 ### Exemple — le flux de bout en bout
 
 ```bash
 curl -X POST http://localhost:3000/api/analyze \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "Cette application est vraiment géniale"}'
 ```
@@ -118,7 +139,10 @@ backend/
 │       ├── config.ts
 │       ├── db.ts
 │       ├── clients/iaClient.ts
-│       └── routes/{health,analyze}.ts
+│       ├── lib/          # validation & utilitaires purs (testés)
+│       ├── services/     # connaissances, recherche, formation, maintenance…
+│       └── routes/       # une route par domaine fonctionnel
+│   └── test/             # tests vitest
 ├── python-ia/              # service IA (FastAPI)
 │   └── app/{main,config,rust_client}.py
 ├── rust-compute/           # calculs intensifs (Axum)
@@ -149,4 +173,16 @@ cd python-ia && pip install -r requirements.txt && uvicorn app.main:app --reload
 cd rust-compute && cargo run
 ```
 
-Pensez à renseigner les variables d'environnement (`DATABASE_URL`, `IA_SERVICE_URL`, `RUST_SERVICE_URL`) pour pointer vers `localhost` au lieu des noms de services Docker.
+Pensez à renseigner les variables d'environnement (`DATABASE_URL`, `IA_SERVICE_URL`, `RUST_SERVICE_URL`, `IA_SERVICE_TOKEN`, `CORS_ORIGINS`…) pour pointer vers `localhost` au lieu des noms de services Docker — liste commentée dans `.env.example`. Hors Docker, node-api écoute sur `127.0.0.1` (définir `HOST=0.0.0.0` pour l'exposer).
+
+node-api démarre même si Postgres est injoignable (mode dégradé : `/health` = 200, `/health/deep` signale `postgres: down`, nouvel essai toutes les 30 s). Au retour de la DB puis toutes les heures : générations bloquées → `Erreur`, purge des `agent_events` (> 3 jours). Arrêt propre sur SIGINT/SIGTERM.
+
+### Tests (node-api)
+
+```bash
+cd node-api
+npm test            # vitest : validation des étapes, garde attempt, chat, CORS, limites…
+npm run typecheck   # tsc --noEmit
+```
+
+`test_rag.ts` est une vérification manuelle live (DB + OpenAI) : `RAG_TEST_USER_ID=<uuid> npx tsx test_rag.ts`.

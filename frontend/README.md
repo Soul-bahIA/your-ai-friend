@@ -1,7 +1,13 @@
-# SOULBAH IA — Frontend (React + TypeScript)
+# SOULBAH IA — Console de test du backend (`frontend/`)
 
-Console web de test qui consomme l'API Node du backend polyglotte.
-Elle sert d'équivalent web au client Flutter : même API, mêmes endpoints.
+> ⚠️ **Ce dossier N'EST PAS l'application SoulBah AI.**
+> L'application web (dashboard, chat, formations, agent…) se trouve à la **racine du dépôt**
+> (`src/`, `npm run dev` → http://localhost:8080). Voir le [README principal](../README.md).
+>
+> `frontend/` est une **petite console de test** du backend polyglotte : elle appelle
+> `POST /api/analyze` et `GET /health/deep` de `backend/node-api` pour vérifier la chaîne
+> Node → Python IA → Rust → Postgres. Elle sert d'équivalent web au client Flutter
+> (même API, mêmes endpoints). Le nom historique `frontend/` est conservé.
 
 ## Stack
 - **React 18** + **TypeScript**

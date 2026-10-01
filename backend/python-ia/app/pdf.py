@@ -7,6 +7,7 @@ Police Unicode (Arial Windows) pour gérer accents et symboles ; repli latin-1 s
 from __future__ import annotations
 
 import os
+import uuid
 
 from fpdf import FPDF
 
@@ -154,5 +155,15 @@ def build_formation_pdf(curriculum: dict, out_path: str) -> dict:
             write(str(f.get("answer", "")), 10, "", _MUTED)
             gap(1)
 
-    pdf.output(out_path)
+    # Écriture atomique : fichier temporaire du même dossier puis os.replace.
+    partial = f"{out_path}.{uuid.uuid4().hex}.part"
+    try:
+        pdf.output(partial)
+        os.replace(partial, out_path)
+    finally:
+        if os.path.exists(partial):
+            try:
+                os.remove(partial)
+            except OSError:
+                pass
     return {"path": out_path, "pages": pdf.page_no(), "modules": len(modules)}

@@ -19,6 +19,23 @@ class LLMError(Exception):
         self.message = message
 
 
+def upstream_error(provider: str, status: int, detail: str = "") -> LLMError:
+    """Traduit un code HTTP d'un fournisseur amont en erreur pour NOTRE appelant.
+
+    Un 401/403 du fournisseur signifie que NOTRE clé API est mauvaise : ce n'est pas
+    une erreur d'authentification du client, on renvoie donc 502 (jamais 401, qui
+    ferait croire au front que la session utilisateur a expiré).
+    """
+    if status in (401, 403):
+        return LLMError(502, f"Clé API du fournisseur invalide ({provider}).")
+    if status == 429:
+        return LLMError(429, f"Trop de requêtes ({provider}). Réessayez dans quelques instants.")
+    if status == 402:
+        return LLMError(402, f"Crédits épuisés pour {provider}.")
+    suffix = f" : {detail}" if detail else ""
+    return LLMError(502, f"Erreur du fournisseur {provider} ({status}){suffix}")
+
+
 class LLMProvider:
     """Un fournisseur de modèle. `complete` unifie texte, JSON structuré et vision."""
 

@@ -10,9 +10,21 @@ from __future__ import annotations
 
 import os
 
-from skills.base import Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult
 
 _MAX_READ = 8000
+_WRITE_OPS = ("write_file", "make_dir")
+
+
+def touches_git_dir(path: str) -> bool:
+    """True si le chemin (résolu) passe par un dossier `.git`. Y écrire permettrait
+    de planter un hook (pre-commit…) exécuté ensuite par un `git commit` autorisé."""
+    try:
+        resolved = os.path.realpath(path)
+    except (OSError, ValueError):
+        return True
+    parts = os.path.normcase(resolved).replace("\\", "/").split("/")
+    return ".git" in parts
 
 
 class FileOpsSkill(Skill):
@@ -24,11 +36,21 @@ class FileOpsSkill(Skill):
     def describe(self, step: dict) -> str:
         return f"{step.get('type')} : {step.get('path', '?')}"
 
+    def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
+        path = step.get("path")
+        if not isinstance(path, str) or not path.strip():
+            return "champ 'path' manquant"
+        if str(step.get("type")) in _WRITE_OPS and touches_git_dir(path):
+            return f"écriture refusée dans un dossier .git : {path}"
+        return None
+
     def run(self, step: dict) -> SkillResult:
         t = str(step.get("type"))
         path = step.get("path")
-        if not path:
+        if not path or not isinstance(path, str):
             return SkillResult(ok=False, detail="champ 'path' manquant")
+        if t in _WRITE_OPS and touches_git_dir(path):
+            return SkillResult(ok=False, detail=f"écriture refusée dans un dossier .git : {path}")
 
         try:
             if t == "write_file":

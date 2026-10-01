@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { apiUrl } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Play, Pause, Square, Monitor, CheckCircle2, XCircle, Loader2,
-  Camera, Flag, ChevronRight, Circle,
+  Camera, Flag, ChevronRight, Circle, type LucideIcon,
 } from "lucide-react";
 
 interface AgentEvent {
@@ -16,7 +17,28 @@ interface AgentEvent {
   created_at: string;
 }
 
-const typeMeta: Record<string, { icon: any; color: string; label: string }> = {
+/** Nombre maximal d'évènements conservés en mémoire (timeline). */
+const MAX_EVENTS = 500;
+
+const SAFE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+const toDataUrl = (ev: AgentEvent) => {
+  const b64 = ev.data?.image_b64;
+  if (!b64) return null;
+  const type = ev.data.media_type && SAFE_IMAGE_TYPES.has(ev.data.media_type) ? ev.data.media_type : "image/jpeg";
+  return `data:${type};base64,${b64}`;
+};
+
+/** Retire la capture base64 (lourde) de l'évènement stocké : seule la dernière image est gardée à part. */
+const stripImage = (ev: AgentEvent): AgentEvent => {
+  if (!ev.data?.image_b64) return ev;
+  const { image_b64, ...rest } = ev.data;
+  return { ...ev, data: rest };
+};
+
+const capEvents = (list: AgentEvent[]) => (list.length > MAX_EVENTS ? list.slice(-MAX_EVENTS) : list);
+
+const typeMeta: Record<string, { icon: LucideIcon; color: string; label: string }> = {
   task_started: { icon: Flag, color: "text-primary", label: "Démarrage" },
   step_started: { icon: ChevronRight, color: "text-warning", label: "Étape" },
   step_done: { icon: CheckCircle2, color: "text-success", label: "OK" },
@@ -28,7 +50,8 @@ const typeMeta: Record<string, { icon: any; color: string; label: string }> = {
 };
 
 const AgentCockpit = () => {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
+  const userId = user?.id;
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [liveImage, setLiveImage] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -38,42 +61,43 @@ const AgentCockpit = () => {
 
   // Reprise après rafraîchissement : recharge la tâche en cours et sa timeline.
   useEffect(() => {
-    if (!session) return;
+    if (!userId) return;
+    let ignore = false;
     (async () => {
       try {
-        const headers = { Authorization: `Bearer ${session.access_token}` };
-        const r = await fetch(apiUrl("/api/agent-tasks?status=in_progress"), { headers });
-        const d = await r.json();
-        const task = d.tasks?.[0];
-        if (!task) return;
+        const d = await apiFetch<{ tasks?: { id: string }[] }>("/api/agent-tasks?status=in_progress");
+        const task = d?.tasks?.[0];
+        if (!task || ignore) return;
         setTaskId(task.id);
         setRunning(true);
-        const er = await fetch(apiUrl(`/api/agent-tasks/${task.id}/events`), { headers });
-        const ed = await er.json();
-        if (ed.events?.length) {
-          setEvents(ed.events as AgentEvent[]);
-          const lastImg = [...ed.events].reverse().find((e: AgentEvent) => e.data?.image_b64);
-          if (lastImg) {
-            setLiveImage(`data:${lastImg.data.media_type ?? "image/jpeg"};base64,${lastImg.data.image_b64}`);
-          }
-        }
-      } catch {
-        /* pas de tâche en cours : cockpit au repos */
+        const ed = await apiFetch<{ events?: AgentEvent[] }>(`/api/agent-tasks/${task.id}/events`);
+        const list = ed?.events ?? [];
+        if (ignore || list.length === 0) return;
+        const lastImg = [...list].reverse().find((e) => e.data?.image_b64);
+        if (lastImg) setLiveImage(toDataUrl(lastImg));
+        setEvents(capEvents(list.map(stripImage)));
+      } catch (err) {
+        // Pas de tâche en cours ou backend injoignable : cockpit au repos.
+        console.warn("[Cockpit] Reprise impossible :", errorMessage(err));
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+    return () => {
+      ignore = true;
+    };
+  }, [userId]);
 
   // Abonnement temps réel aux évènements de l'agent (INSERT sur agent_events).
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     const channel = supabase
-      .channel("agent-events-live")
+      .channel(`agent-events-live-${userId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "agent_events", filter: `user_id=eq.${user.id}` },
+        { event: "INSERT", schema: "public", table: "agent_events", filter: `user_id=eq.${userId}` },
         (payload) => {
-          const ev = payload.new as AgentEvent;
+          const raw = payload.new as AgentEvent;
+          const image = toDataUrl(raw);
+          const ev = stripImage(raw);
           // Nouvelle tâche : on réinitialise la timeline.
           if (ev.type === "task_started") {
             setEvents([ev]);
@@ -81,17 +105,15 @@ const AgentCockpit = () => {
             setLiveImage(null);
             setRunning(true);
           } else {
-            setEvents((prev) => [...prev, ev]);
+            setEvents((prev) => capEvents([...prev, ev]));
             if (ev.type === "task_completed" || ev.type === "task_failed") setRunning(false);
           }
-          if (ev.data?.image_b64) {
-            setLiveImage(`data:${ev.data.media_type ?? "image/jpeg"};base64,${ev.data.image_b64}`);
-          }
+          if (image) setLiveImage(image);
         },
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [userId]);
 
   // Auto-scroll de la timeline.
   useEffect(() => {
@@ -99,15 +121,16 @@ const AgentCockpit = () => {
   }, [events]);
 
   const control = async (value: "pause" | "resume" | "stop") => {
-    if (!taskId || !session) return;
+    if (!taskId || !userId) return;
     setBusy(true);
     try {
-      await fetch(apiUrl(`/api/agent-tasks/${taskId}/control`), {
+      await apiFetch(`/api/agent-tasks/${taskId}/control`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ control: value }),
+        json: { control: value },
       });
       if (value === "stop") setRunning(false);
+    } catch (err) {
+      toast.error("Commande de l'agent impossible", { description: errorMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -127,15 +150,15 @@ const AgentCockpit = () => {
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => control("pause")} disabled={!running || busy}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-warning disabled:opacity-30" title="Pause">
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-warning disabled:opacity-30" title="Pause" aria-label="Mettre l'agent en pause">
             <Pause className="h-4 w-4" />
           </button>
           <button onClick={() => control("resume")} disabled={!running || busy}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-success disabled:opacity-30" title="Reprendre">
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-success disabled:opacity-30" title="Reprendre" aria-label="Reprendre l'agent">
             <Play className="h-4 w-4" />
           </button>
           <button onClick={() => control("stop")} disabled={!running || busy}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-destructive disabled:opacity-30" title="Arrêter">
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-destructive disabled:opacity-30" title="Arrêter" aria-label="Arrêter l'agent">
             <Square className="h-4 w-4" />
           </button>
         </div>

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db";
 import { requireUser } from "../auth";
-import { analyzePerformance } from "../clients/iaClient";
+import { analyzePerformance, ServiceError } from "../clients/iaClient";
+import { isUuid } from "../lib/sanitize";
 import { logEvent } from "../services/logs";
 
 // Mémoire d'exécution de l'agent : erreurs, solutions validées, bonnes pratiques.
@@ -104,7 +105,16 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
       status?: MemoryStatus;
       metadata?: unknown;
     };
-    if (!body.content) return reply.status(400).send({ error: "content requis" });
+    if (typeof body.content !== "string" || !body.content.trim()) return reply.status(400).send({ error: "content requis" });
+    if (body.content.length > 10_000 || (body.goal !== undefined && (typeof body.goal !== "string" || body.goal.length > 2000))) {
+      return reply.status(400).send({ error: "content (10000 car.) ou goal (2000 car.) trop long" });
+    }
+    const TYPES = ["error", "solution", "practice"];
+    const LEVELS = ["working", "project", "user", "technical", "documentary", "workflow", "error", "optimization"];
+    const STATUSES = ["proposed", "validated", "rejected"];
+    if (body.type !== undefined && !TYPES.includes(body.type)) return reply.status(400).send({ error: "type invalide" });
+    if (body.level !== undefined && !LEVELS.includes(body.level)) return reply.status(400).send({ error: "level invalide" });
+    if (body.status !== undefined && !STATUSES.includes(body.status)) return reply.status(400).send({ error: "status invalide" });
     await writeMemory(
       userId, body.type ?? "practice", body.goal ?? "(général)", body.content,
       body.metadata ?? {}, body.level ?? "workflow", body.status ?? "validated",
@@ -116,6 +126,7 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
   app.patch("/api/agent/memory/:id", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { status } = (request.body ?? {}) as { status?: MemoryStatus };
     if (!status || !["proposed", "validated", "rejected"].includes(status)) {
       return reply.status(400).send({ error: "status valide requis (proposed|validated|rejected)" });
@@ -132,6 +143,7 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
   app.delete("/api/agent/memory/:id", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { rowCount } = await pool.query(
       "DELETE FROM agent_memory WHERE id = $1 AND user_id = $2",
       [id, userId],
@@ -141,7 +153,7 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // --- Auto-amélioration : analyse les tâches récentes, propose des optimisations ---
-  app.post("/api/agent/self-improve", { preHandler: requireUser }, async (request, reply) => {
+  app.post("/api/agent/self-improve", { preHandler: requireUser, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = request.user!.id;
 
     const { rows } = await pool.query(
@@ -171,7 +183,8 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
     try {
       report = await analyzePerformance(summary);
     } catch (e) {
-      return reply.status(502).send({ error: (e as Error).message });
+      if (e instanceof ServiceError) return reply.status(e.status).send({ error: e.message });
+      throw e;
     }
 
     // Traçable ET validée : chaque suggestion est PROPOSÉE (status='proposed'), pas

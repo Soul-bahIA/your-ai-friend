@@ -9,6 +9,8 @@ import json
 
 from .llm import structured_generate
 
+_MAX_HISTORY_CHARS = 20_000  # par message d'historique
+
 # --- Schémas de sortie (additionalProperties=false requis par les sorties structurées) ---
 
 FORMATION_SCHEMA = {
@@ -169,7 +171,21 @@ async def generate_application(
             "4. Ne retourne jamais l'architecture identique sans modification.\n\n"
             f"Architecture JSON actuelle à modifier:\n{arch_str}"
         )
-        messages = [{"role": m["role"], "content": m["content"]} for m in (conversation_history or [])]
+        # Historique fourni par le client : on ne garde que des messages bien formés
+        # (rôle user/assistant, contenu texte borné) au lieu d'un KeyError -> 500.
+        messages = [
+            {"role": m["role"], "content": m["content"][:_MAX_HISTORY_CHARS]}
+            for m in (conversation_history or [])
+            if isinstance(m, dict)
+            and m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str)
+            and m["content"].strip()
+        ]
+        if not messages or messages[-1]["role"] != "user":
+            messages.append({
+                "role": "user",
+                "content": f"Améliore l'application « {app_name} »." + (f" {app_desc}" if app_desc else ""),
+            })
     else:
         system = "Tu es un architecte logiciel expert. Tu conçois des applications complètes."
         messages = [
@@ -193,7 +209,8 @@ async def generate_application(
     content.setdefault("description", "")
     content.setdefault("app_type", "Web App")
     content.setdefault("tech_stack", "React + TypeScript")
-    content.setdefault("architecture", {})
+    if not isinstance(content.get("architecture"), dict):
+        content["architecture"] = {}
     _clean_architecture(content["architecture"])
     return content
 
@@ -206,7 +223,9 @@ def _clean_architecture(arch: dict) -> None:
         best: dict = {}
         order: list = []
         for it in items:
-            name = (it.get(key) or "").strip().lower()
+            if not isinstance(it, dict):
+                continue
+            name = str(it.get(key) or "").strip().lower()
             if not name:
                 continue
             if name not in best:
@@ -229,7 +248,9 @@ def _clean_architecture(arch: dict) -> None:
         seen = set()
         out = []
         for e in be["endpoints"]:
-            sig = ((e.get("method") or "").upper().strip(), (e.get("path") or "").strip())
+            if not isinstance(e, dict):
+                continue
+            sig = (str(e.get("method") or "").upper().strip(), str(e.get("path") or "").strip())
             if sig not in seen and sig[1]:
                 seen.add(sig)
                 out.append(e)

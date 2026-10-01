@@ -27,6 +27,19 @@ class Config:
     # Pré-autorise les actions d'entrée (souris/clavier/fenêtre/app) sans confirmation.
     # Sans ce drapeau, elles restent soumises à validation — même en mode auto.
     allow_input_control: bool = False
+    # Délai max d'exécution d'une étape (s). Au-delà, l'étape échoue et la tâche s'arrête.
+    step_timeout: float = 900.0
+    # Délai de réponse à une confirmation (s). Sans réponse : refus par défaut.
+    confirm_timeout: float = 120.0
+
+
+def _float_env(name: str, default: float, minimum: float) -> float:
+    raw = os.environ.get(name, "")
+    try:
+        value = float(raw) if raw.strip() else default
+    except ValueError:
+        value = default
+    return max(minimum, value)
 
 
 def load_config() -> Config:
@@ -49,10 +62,12 @@ def load_config() -> Config:
     return Config(
         api_url=api_url,
         agent_key=agent_key,
-        poll_interval=float(os.environ.get("SOULBAH_POLL_INTERVAL", "5")),
+        poll_interval=_float_env("SOULBAH_POLL_INTERVAL", 5.0, 0.5),
         permission_mode=os.environ.get("SOULBAH_PERMISSION_MODE", "confirm"),
         dry_run=os.environ.get("SOULBAH_DRY_RUN", "").lower() in ("1", "true", "yes"),
         allowed_dirs=allowed,
         allow_input_control=os.environ.get("SOULBAH_ALLOW_INPUT_CONTROL", "").lower()
         in ("1", "true", "yes"),
+        step_timeout=_float_env("SOULBAH_STEP_TIMEOUT", 900.0, 5.0),
+        confirm_timeout=_float_env("SOULBAH_CONFIRM_TIMEOUT", 120.0, 5.0),
     )

@@ -4,6 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Send, Loader2, Bot, User } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import type { Json } from "@/integrations/supabase/types";
+import { apiFetch, errorMessage } from "@/lib/api";
+import type { GenerateApplicationResponse, GeneratedApplication } from "@/types/application";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -14,11 +16,11 @@ interface AppChatPanelProps {
   applicationId: string;
   appTitle: string;
   existingArchitecture: Json | null;
-  onAppUpdated: (result: any) => void;
+  onAppUpdated: (result: GeneratedApplication) => void;
 }
 
 const AppChatPanel = ({ applicationId, appTitle, existingArchitecture, onAppUpdated }: AppChatPanelProps) => {
-  const { session } = useAuth();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,7 +31,7 @@ const AppChatPanel = ({ applicationId, appTitle, existingArchitecture, onAppUpda
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || loading || !session) return;
+    if (!input.trim() || loading || !user) return;
 
     const userMsg: ChatMessage = { role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
@@ -38,36 +40,29 @@ const AppChatPanel = ({ applicationId, appTitle, existingArchitecture, onAppUpda
     setLoading(true);
 
     try {
-      const response = await fetch(
-        `${(import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/generate/application`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            appName: appTitle,
-            applicationId,
-            conversationHistory: newMessages,
-            existingArchitecture: existingArchitecture || {},
-          }),
-        }
-      );
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Échec");
+      const result = await apiFetch<GenerateApplicationResponse>("/api/generate/application", {
+        method: "POST",
+        json: {
+          appName: appTitle,
+          applicationId,
+          conversationHistory: newMessages,
+          existingArchitecture: existingArchitecture || {},
+        },
+      });
+      const app = result?.application;
+      if (!app) throw new Error(result?.error || "Échec");
+      const arch = app.architecture;
 
       const assistantMsg: ChatMessage = {
         role: "assistant",
-        content: `✅ Application mise à jour !\n\n**${result.application.title}**\n${result.application.description}\n\n• ${result.application.architecture?.frontend?.components?.length || 0} composants\n• ${result.application.architecture?.backend?.endpoints?.length || 0} endpoints\n• ${result.application.architecture?.database?.tables?.length || 0} tables`,
+        content: `✅ Application mise à jour !\n\n**${app.title ?? appTitle}**\n${app.description ?? ""}\n\n• ${arch?.frontend?.components?.length || 0} composants\n• ${arch?.backend?.endpoints?.length || 0} endpoints\n• ${arch?.database?.tables?.length || 0} tables`,
       };
       setMessages((prev) => [...prev, assistantMsg]);
-      onAppUpdated(result.application);
-    } catch (err: any) {
+      onAppUpdated(app);
+    } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `❌ Erreur : ${err.message}` },
+        { role: "assistant", content: `❌ Erreur : ${errorMessage(err)}` },
       ]);
     }
 
@@ -127,7 +122,7 @@ const AppChatPanel = ({ applicationId, appTitle, existingArchitecture, onAppUpda
           className="bg-secondary border-border text-xs h-8"
           disabled={loading}
         />
-        <Button type="submit" size="sm" className="h-8 px-3 bg-accent text-accent-foreground" disabled={loading || !input.trim()}>
+        <Button type="submit" size="sm" className="h-8 px-3 bg-accent text-accent-foreground" disabled={loading || !input.trim()} aria-label="Envoyer la demande">
           <Send className="h-3.5 w-3.5" />
         </Button>
       </form>

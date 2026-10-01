@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { config } from "./config";
-import { resolveAgentKey } from "./services/agentKeys";
+import { resolveAgentKey, hashKey } from "./services/agentKeys";
+import { TtlCache } from "./lib/ttlCache";
+import { logger } from "./lib/logger";
 
 export interface AuthUser {
   id: string;
@@ -15,47 +18,113 @@ declare module "fastify" {
   }
 }
 
-/**
- * Vérifie un JWT Supabase en interrogeant l'endpoint /auth/v1/user
- * (équivalent de `supabase.auth.getUser(token)` utilisé par les edge functions).
- */
-export async function verifySupabaseToken(token: string): Promise<AuthUser | null> {
-  if (!config.supabaseUrl || !config.supabaseAnonKey) return null;
+const SUPABASE_AUTH_TIMEOUT_MS = 10_000;
+const TOKEN_CACHE_TTL_MS = 60_000;
+
+// Cache des JWT déjà vérifiés (clé = SHA-256 du jeton, jamais le jeton en clair).
+const tokenCache = new TtlCache<AuthUser>(5_000, TOKEN_CACHE_TTL_MS);
+
+export function tokenHash(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+/** Bearer token de l'en-tête Authorization ("" si absent). */
+export function bearerToken(request: FastifyRequest): string {
+  const header = request.headers["authorization"];
+  return typeof header === "string" ? header.replace(/^Bearer\s+/i, "").trim() : "";
+}
+
+/** Utilisateur déjà vérifié pour ce jeton (sans appel réseau) — utilisé par le rate-limit. */
+export function cachedUserForToken(token: string): AuthUser | undefined {
+  return token ? tokenCache.get(tokenHash(token)) : undefined;
+}
+
+/** exp (secondes epoch) lu dans la charge utile du JWT, sans vérification (sert à borner le cache). */
+function jwtExpiry(token: string): number | undefined {
   try {
-    const res = await fetch(`${config.supabaseUrl}/auth/v1/user`, {
-      headers: {
-        apikey: config.supabaseAnonKey,
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    if (!res.ok) return null;
-    const user = (await res.json()) as { id?: string; email?: string };
-    return user?.id ? { id: user.id, email: user.email } : null;
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+    return typeof payload.exp === "number" ? payload.exp : undefined;
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+export type VerifyResult = { ok: true; user: AuthUser } | { ok: false; reason: "invalid" | "unavailable" };
+
+/**
+ * Vérifie un JWT Supabase via /auth/v1/user (équivalent de `supabase.auth.getUser`).
+ * Distingue « jeton invalide » (401) de « Supabase injoignable » (503) pour que le
+ * frontend ne déconnecte pas l'utilisateur sur une panne réseau.
+ */
+export async function verifySupabaseToken(token: string): Promise<VerifyResult> {
+  if (!config.supabaseUrl || !config.supabaseAnonKey) return { ok: false, reason: "unavailable" };
+  const key = tokenHash(token);
+  const cached = tokenCache.get(key);
+  if (cached) return { ok: true, user: cached };
+
+  let res: Response;
+  try {
+    res = await fetch(`${config.supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(SUPABASE_AUTH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, "vérification Supabase injoignable");
+    return { ok: false, reason: "unavailable" };
+  }
+  if (res.status >= 500) return { ok: false, reason: "unavailable" };
+  if (!res.ok) return { ok: false, reason: "invalid" };
+  const user = (await res.json().catch(() => null)) as { id?: string; email?: string } | null;
+  if (!user?.id) return { ok: false, reason: "invalid" };
+
+  const authUser = { id: user.id, email: user.email };
+  const exp = jwtExpiry(token);
+  const ttl = exp ? Math.min(TOKEN_CACHE_TTL_MS, exp * 1000 - Date.now()) : TOKEN_CACHE_TTL_MS;
+  tokenCache.set(key, authUser, ttl);
+  return { ok: true, user: authUser };
 }
 
 /** preHandler Fastify : exige un utilisateur authentifié (JWT Supabase). */
 export async function requireUser(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const header = request.headers["authorization"];
-  const token = typeof header === "string" ? header.replace(/^Bearer\s+/i, "") : "";
+  const token = bearerToken(request);
   if (!token) {
     await reply.status(401).send({ error: "Non authentifié" });
     return;
   }
-  const user = await verifySupabaseToken(token);
-  if (!user) {
-    await reply.status(401).send({ error: "Non autorisé" });
+  const result = await verifySupabaseToken(token);
+  if (!result.ok) {
+    if (result.reason === "unavailable") {
+      await reply.status(503).send({ error: "Service d'authentification indisponible, réessayez" });
+    } else {
+      await reply.status(401).send({ error: "Non autorisé" });
+    }
     return;
   }
-  request.user = user;
+  request.user = result.user;
+}
+
+// Clés agent déjà résolues (clé = hash) — évite une requête DB par heartbeat.
+// Une clé révoquée reste donc valide au plus AGENT_KEY_CACHE_TTL_MS.
+const AGENT_KEY_CACHE_TTL_MS = 30_000;
+const agentKeyCache = new TtlCache<{ userId: string; keyId: string }>(1_000, AGENT_KEY_CACHE_TTL_MS);
+
+/** Propriétaire déjà vérifié d'une clé agent (sans appel DB) — utilisé par le rate-limit. */
+export function cachedAgentForKey(rawKey: string): { userId: string; keyId: string } | undefined {
+  return rawKey ? agentKeyCache.get(hashKey(rawKey)) : undefined;
+}
+
+const agentKeyIndex = new Map<string, string>(); // keyId → hash (pour la révocation)
+
+/** Oublie une clé du cache (après révocation) : effet immédiat sur cette instance. */
+export function forgetAgentKey(keyId: string): void {
+  const h = agentKeyIndex.get(keyId);
+  if (h) agentKeyCache.delete(h);
+  agentKeyIndex.delete(keyId);
 }
 
 /**
  * preHandler pour le worker local : valide l'en-tête x-agent-key contre le hash
  * stocké en base et déduit le user_id propriétaire (`request.agentUserId`).
- * Le user_id n'est donc plus transmis en clair par l'agent.
  */
 export async function requireAgentKey(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const header = request.headers["x-agent-key"];
@@ -64,7 +133,15 @@ export async function requireAgentKey(request: FastifyRequest, reply: FastifyRep
     await reply.status(401).send({ error: "x-agent-key requis" });
     return;
   }
-  const resolved = await resolveAgentKey(key);
+  const h = hashKey(key);
+  let resolved = agentKeyCache.get(h);
+  if (!resolved) {
+    resolved = (await resolveAgentKey(key)) ?? undefined;
+    if (resolved) {
+      agentKeyCache.set(h, resolved);
+      agentKeyIndex.set(resolved.keyId, h);
+    }
+  }
   if (!resolved) {
     await reply.status(401).send({ error: "Clé agent invalide" });
     return;

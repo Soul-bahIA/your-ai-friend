@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { pool } from "../db";
 import { requireUser } from "../auth";
 import { logEvent } from "../services/logs";
+import { clampInt, isUuid } from "../lib/sanitize";
 
 // Port de l'edge function `manage-database`. Toutes les requêtes sont scopées par
 // user_id (le pool tourne en direct sur Postgres, donc RLS non appliqué : on filtre
@@ -15,7 +16,9 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
     const body = (request.body ?? {}) as Params & { action?: string };
     const action = body.action;
 
-    try {
+    // Pas de try/catch ici : les erreurs inattendues remontent au gestionnaire global
+    // (détail journalisé, message générique au client).
+    {
       switch (action) {
         case "list_schemas":
           return await listSchemas(userId);
@@ -36,11 +39,8 @@ export async function databaseRoutes(app: FastifyInstance): Promise<void> {
         case "get_migrations":
           return await getMigrations(userId, body);
         default:
-          return reply.status(400).send({ error: `Action inconnue: ${action}` });
+          return reply.status(400).send({ error: `Action inconnue: ${String(action).slice(0, 50)}` });
       }
-    } catch (e) {
-      request.log.error(e);
-      return reply.status(500).send({ error: e instanceof Error ? e.message : "Erreur inconnue" });
     }
   });
 }
@@ -59,8 +59,11 @@ async function createSchema(userId: string, p: Params, reply: FastifyReply) {
     columns?: unknown[];
     description?: string;
   };
-  if (!table_name || !columns?.length) {
+  if (typeof table_name !== "string" || !table_name.trim() || !Array.isArray(columns) || columns.length === 0) {
     return reply.status(400).send({ error: "table_name et columns requis" });
+  }
+  if (table_name.length > 100 || columns.length > 200) {
+    return reply.status(400).send({ error: "table_name (100 car.) ou columns (200) trop long" });
   }
 
   const { rows } = await pool.query(
@@ -87,7 +90,10 @@ async function updateSchema(userId: string, p: Params, reply: FastifyReply) {
     table_name?: string;
     description?: string;
   };
-  if (!schema_id) return reply.status(400).send({ error: "schema_id requis" });
+  if (!isUuid(schema_id)) return reply.status(400).send({ error: "schema_id requis" });
+  if (columns !== undefined && (!Array.isArray(columns) || columns.length > 200)) {
+    return reply.status(400).send({ error: "columns invalide" });
+  }
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -116,20 +122,19 @@ async function updateSchema(userId: string, p: Params, reply: FastifyReply) {
 
 async function deleteSchema(userId: string, p: Params, reply: FastifyReply) {
   const { schema_id } = p as { schema_id?: string };
-  if (!schema_id) return reply.status(400).send({ error: "schema_id requis" });
-  await pool.query("DELETE FROM user_schemas WHERE id = $1 AND user_id = $2", [schema_id, userId]);
+  if (!isUuid(schema_id)) return reply.status(400).send({ error: "schema_id requis" });
+  const { rowCount } = await pool.query("DELETE FROM user_schemas WHERE id = $1 AND user_id = $2", [schema_id, userId]);
+  if (rowCount === 0) return reply.status(404).send({ error: "Schéma introuvable" });
   return { success: true };
 }
 
 async function listData(userId: string, p: Params, reply: FastifyReply) {
-  const { schema_id, page = 1, per_page = 50 } = p as {
-    schema_id?: string;
-    page?: number;
-    per_page?: number;
-  };
-  if (!schema_id) return reply.status(400).send({ error: "schema_id requis" });
+  const { schema_id } = p as { schema_id?: string };
+  if (!isUuid(schema_id)) return reply.status(400).send({ error: "schema_id requis" });
+  const page = clampInt(p.page, 1, 1, 100_000);
+  const per_page = clampInt(p.per_page, 50, 1, 200);
 
-  const from = (Number(page) - 1) * Number(per_page);
+  const from = (page - 1) * per_page;
 
   const countRes = await pool.query(
     "SELECT COUNT(*)::int AS total FROM user_table_data WHERE schema_id = $1 AND user_id = $2",
@@ -145,19 +150,28 @@ async function listData(userId: string, p: Params, reply: FastifyReply) {
 
 async function insertData(userId: string, p: Params, reply: FastifyReply) {
   const { schema_id, row_data } = p as { schema_id?: string; row_data?: unknown };
-  if (!schema_id || !row_data) return reply.status(400).send({ error: "schema_id et row_data requis" });
+  if (!isUuid(schema_id) || !row_data || typeof row_data !== "object") {
+    return reply.status(400).send({ error: "schema_id et row_data requis" });
+  }
 
+  // Le schéma cible doit appartenir à l'utilisateur (sinon on pourrait rattacher des
+  // lignes au schéma d'un autre compte).
   const { rows } = await pool.query(
     `INSERT INTO user_table_data (user_id, schema_id, row_data)
-     VALUES ($1, $2, $3::jsonb) RETURNING *`,
+     SELECT $1::uuid, $2::uuid, $3::jsonb
+      WHERE EXISTS (SELECT 1 FROM user_schemas WHERE id = $2::uuid AND user_id = $1::uuid)
+     RETURNING *`,
     [userId, schema_id, JSON.stringify(row_data)],
   );
+  if (rows.length === 0) return reply.status(404).send({ error: "Schéma introuvable" });
   return { row: rows[0] };
 }
 
 async function updateData(userId: string, p: Params, reply: FastifyReply) {
   const { row_id, row_data } = p as { row_id?: string; row_data?: unknown };
-  if (!row_id || !row_data) return reply.status(400).send({ error: "row_id et row_data requis" });
+  if (!isUuid(row_id) || !row_data || typeof row_data !== "object") {
+    return reply.status(400).send({ error: "row_id et row_data requis" });
+  }
 
   const { rows } = await pool.query(
     `UPDATE user_table_data SET row_data = $1::jsonb
@@ -170,13 +184,17 @@ async function updateData(userId: string, p: Params, reply: FastifyReply) {
 
 async function deleteData(userId: string, p: Params, reply: FastifyReply) {
   const { row_id } = p as { row_id?: string };
-  if (!row_id) return reply.status(400).send({ error: "row_id requis" });
-  await pool.query("DELETE FROM user_table_data WHERE id = $1 AND user_id = $2", [row_id, userId]);
+  if (!isUuid(row_id)) return reply.status(400).send({ error: "row_id requis" });
+  const { rowCount } = await pool.query("DELETE FROM user_table_data WHERE id = $1 AND user_id = $2", [row_id, userId]);
+  if (rowCount === 0) return reply.status(404).send({ error: "Ligne introuvable" });
   return { success: true };
 }
 
 async function getMigrations(userId: string, p: Params) {
   const { schema_id } = p as { schema_id?: string };
+  if (schema_id !== undefined && schema_id !== null && !isUuid(schema_id)) {
+    return { migrations: [] };
+  }
   if (schema_id) {
     const { rows } = await pool.query(
       `SELECT * FROM user_migrations WHERE user_id = $1 AND schema_id = $2
