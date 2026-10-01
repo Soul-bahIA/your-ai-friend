@@ -58,8 +58,6 @@ OPENAI_API_KEY=<clé>                      # ou une autre clé de fournisseur
 CORS_ORIGINS=http://localhost:8080
 ```
 
-(`LOVABLE_API_KEY` / `LOVABLE_GATEWAY_URL` ne sont plus utilisés.)
-
 `DATABASE_URL` : Supabase > Project Settings > Database > Connection string (URI).
 
 ## Ce qu'il reste à faire côté clients (étape suivante)
