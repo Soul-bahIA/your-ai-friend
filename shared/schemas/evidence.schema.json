@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://soulbah.local/schemas/evidence.schema.json",
+  "title": "Preuve d'une action SoulBah (LOT 9, audit §9.8)",
+  "description": "Un élément de preuve rattaché à une action (soulbah.actions.evidence) ou envoyé par un message EVIDENCE. Les types et niveaux de confiance sont ceux du catalogue d'outils (shared/tools/catalog.json). Aucun contenu binaire : un fichier, une capture ou une vidéo est un ARTEFACT (sha256, téléversé par PUT /api/v2/artifacts/:sha256) référencé par artifact_id / sha256.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "confidence"],
+  "properties": {
+    "kind": {
+      "enum": [
+        "command_output",
+        "device_list",
+        "dir_listing",
+        "exit_code",
+        "file_content",
+        "file_path",
+        "process",
+        "screenshot",
+        "self_report",
+        "video_probe",
+        "video_stats",
+        "window_title",
+        "http_status",
+        "sha256",
+        "test_report",
+        "ui_state"
+      ]
+    },
+    "confidence": { "enum": ["high", "medium", "low", "none"] },
+    "description": { "type": "string", "maxLength": 2000 },
+    "value": {
+      "description": "Valeur courte et textuelle ou numérique (code de sortie, titre, statut HTTP, chemin…) ; ≤ 4 000 caractères, jamais du base64.",
+      "type": ["string", "number", "boolean", "null", "object", "array"]
+    },
+    "artifact_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "step_index": { "type": "integer", "minimum": 0 },
+    "at": { "type": "string", "format": "date-time" }
+  }
+}

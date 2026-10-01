@@ -6,6 +6,7 @@
 import type { Queryable } from "../../db.js";
 import { TOOL_BY_TYPE } from "../../lib/agentSteps.js";
 import { maskTypedText } from "../../lib/redact.js";
+import { stripImageB64 } from "../../lib/sanitize.js";
 import { redactSecrets } from "../security/redactSecrets.js";
 
 export const ACTION_STATUSES = ["planned", "attempted", "executed", "verified", "failed", "skipped", "simulated"] as const;
@@ -48,7 +49,8 @@ export async function upsertAction(q: Queryable, input: ActionInput): Promise<Ac
     input.stepIndex,
   ]);
   const level = input.securityLevel ?? TOOL_BY_TYPE.get(input.tool)?.security_level ?? "L1";
-  const evidence = JSON.stringify(redactSecrets(input.evidence ?? []));
+  // Preuves déjà validées par la route (validateEvidenceList) ; ceinture et bretelles : aucun base64.
+  const evidence = JSON.stringify(redactSecrets(stripImageB64(input.evidence ?? [])));
   const simulated = input.simulated === true || input.status === "simulated";
   const confidence = Array.isArray(input.evidence) && input.evidence.length ? bestConfidence(input.evidence) : null;
   if (existing.rows.length === 0) {
@@ -59,7 +61,7 @@ export async function upsertAction(q: Queryable, input: ActionInput): Promise<Ac
                CASE WHEN $8 IN ('verified', 'failed', 'skipped', 'simulated') THEN now() END)
        RETURNING id`,
       // Paramètres : texte saisi masqué (LOT 1) puis secrets rédigés (LOT 6) — jamais en clair en base.
-      [input.taskId, input.userId, input.attempt, input.stepIndex, input.tool, JSON.stringify(redactSecrets(maskTypedText(input.params ?? {}))), level, input.status, evidence, confidence, simulated, input.error ?? null],
+      [input.taskId, input.userId, input.attempt, input.stepIndex, input.tool, JSON.stringify(redactSecrets(maskTypedText(stripImageB64(input.params ?? {})))), level, input.status, evidence, confidence, simulated, input.error ?? null],
     );
     return { ok: true, id: rows[0].id as string, status: input.status, previous: null };
   }

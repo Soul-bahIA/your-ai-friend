@@ -13,6 +13,7 @@ import { getTask } from "../tasks/repo.js";
 import { isTerminal, LEASED_STATUSES } from "../tasks/stateMachine.js";
 import { RUNTIME_PROTOCOL, checkRuntimeCompatibility } from "../runtime/version.js";
 import { isActionStatus, listActions, upsertAction } from "../runtime/actions.js";
+import { containsBinaryBlob, validateEvidenceList } from "../evidence.js";
 import { audit } from "../audit.js";
 
 function bad(reply: FastifyReply, error: string) {
@@ -143,6 +144,7 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const held = await heldTask(request, reply, id, body);
     if (!held) return;
+    if (containsBinaryBlob(body.result)) return bad(reply, "result : contenu binaire/base64 interdit (téléversez un artefact)");
     const payload = { result: body.result ?? {}, simulated: body.simulated === true };
     const out = await withTransaction(async (client) => {
       const fresh = await getTask(client, id, request.agentUserId);
@@ -160,6 +162,11 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
     if (!held) return;
     if (!isMessageType(body.type)) return bad(reply, "type : l'un des 9 types de messages attendu");
     if (!isPlainObject(body.payload)) return bad(reply, "payload : objet attendu");
+    if (containsBinaryBlob(body.payload)) return bad(reply, "payload : contenu binaire/base64 interdit (téléversez un artefact)");
+    if (body.type === "EVIDENCE") {
+      const ev = validateEvidenceList([body.payload]);
+      if (!ev.ok) return bad(reply, ev.error);
+    }
     const toRole = typeof body.to_role === "string" ? body.to_role.slice(0, 64) : null;
     const correlationId = isUuid(body.correlation_id) ? body.correlation_id : null;
     const replyTo = isUuid(body.reply_to) ? body.reply_to : null;
@@ -202,7 +209,9 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
     if (typeof body.tool !== "string" || !/^[a-z][a-z0-9_]{0,39}$/.test(body.tool)) return bad(reply, "tool : type d'étape attendu");
     if (!isActionStatus(body.status)) return bad(reply, "status : planned | attempted | executed | verified | failed | skipped | simulated");
     if (body.params !== undefined && !isPlainObject(body.params)) return bad(reply, "params : objet attendu");
-    if (body.evidence !== undefined && !Array.isArray(body.evidence)) return bad(reply, "evidence : liste attendue");
+    const ev = validateEvidenceList(body.evidence);
+    if (!ev.ok) return bad(reply, ev.error);
+    if (containsBinaryBlob(body.params)) return bad(reply, "params : contenu binaire/base64 interdit (téléversez un artefact)");
     const out = await withTransaction((client) =>
       upsertAction(client, {
         taskId: id,
@@ -212,7 +221,7 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
         tool: body.tool as string,
         params: body.params as Record<string, unknown> | undefined,
         status: body.status as never,
-        evidence: body.evidence as unknown[] | undefined,
+        evidence: ev.value,
         error: typeof body.error === "string" ? body.error.slice(0, 2000) : null,
         simulated: body.simulated === true || held.task.simulated,
       }),

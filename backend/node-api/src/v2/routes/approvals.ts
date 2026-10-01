@@ -11,7 +11,7 @@
 //
 // Chaque décision est auditée dans la même transaction (soulbah.audit_logs).
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { pool, withTransaction } from "../../db.js";
+import { pool, withTransaction, type Queryable } from "../../db.js";
 import { requireAgentKey, requireUser } from "../../auth.js";
 import { TOOL_BY_TYPE } from "../../lib/agentSteps.js";
 import { isPlainObject, isUuid, sanitizeLimit, unknownKeys } from "../../lib/sanitize.js";
@@ -19,6 +19,7 @@ import { audit, listAudit, userActor, verifyChain } from "../audit.js";
 import { createApprovalToken, payloadSha256, tokenHash, verifyApprovalToken } from "../security/approvals.js";
 import { decide, isSecurityLevel } from "../security/policy.js";
 import { redactSecrets } from "../security/redactSecrets.js";
+import { getTask, transitionTask } from "../tasks/repo.js";
 
 const APPROVAL_STATUSES = ["pending", "approved", "denied", "expired", "revoked"] as const;
 type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
@@ -92,19 +93,42 @@ function badRequest(reply: FastifyReply, error: string) {
   return reply.status(400).send({ error });
 }
 
+/**
+ * LOT 9 : la tâche V2 qui attendait cette décision reprend UNE seule fois (WAITING → RUNNING,
+ * CAS sur l'état) à l'approbation ; au refus elle passe BLOCKED (§9.4 « approbation refusée »).
+ */
+async function resumeWaitingTask(client: Queryable, perm: PermissionRow, userId: string, decision: "approved" | "denied"): Promise<void> {
+  const taskId = typeof perm.scope?.v2_task_id === "string" ? perm.scope.v2_task_id : null;
+  if (!taskId) return;
+  const task = await getTask(client, taskId, userId);
+  if (!task || task.status !== "WAITING") return;
+  if (decision === "approved") {
+    await transitionTask(client, { task, to: "RUNNING", set: { waiting_reason: null }, actor: userActor(userId), data: { approval_id: perm.id, resumed: true } });
+  } else {
+    await transitionTask(client, {
+      task,
+      to: "BLOCKED",
+      set: { blocked_reason: `approbation refusée : ${String(perm.scope?.tool ?? "action")}`, waiting_reason: null, escalate_at: new Date(Date.now() + 24 * 3600 * 1000) },
+      actor: userActor(userId),
+      data: { approval_id: perm.id, reason: "approval_denied" },
+    });
+  }
+}
+
 export async function approvalRoutes(app: FastifyInstance): Promise<void> {
   // --- Runtime / agent : demande d'approbation ------------------------------------------
   app.post("/api/v2/approvals/request", { preHandler: requireAgentKey, bodyLimit: 256 * 1024 }, async (request, reply) => {
     const userId = request.agentUserId!;
     const body = request.body;
     if (!isPlainObject(body)) return badRequest(reply, "corps JSON objet attendu");
-    const extra = unknownKeys(body, ["task_id", "attempt", "step_index", "tool", "level", "payload", "summary", "ttl_s"]);
+    const extra = unknownKeys(body, ["task_id", "attempt", "step_index", "tool", "level", "payload", "summary", "ttl_s", "v2_task_id"]);
     if (extra.length) return badRequest(reply, `champ(s) inconnu(s) : ${extra.join(", ").slice(0, 200)}`);
     if (typeof body.tool !== "string" || !TOOL_BY_TYPE.has(body.tool)) return badRequest(reply, "tool : type d'étape inconnu du catalogue");
     if (body.level !== "L2" && body.level !== "L3") return badRequest(reply, "level : L2 ou L3 attendu");
     if (!isPlainObject(body.payload)) return badRequest(reply, "payload (objet) requis");
     if (Buffer.byteLength(JSON.stringify(body.payload), "utf8") > MAX_PAYLOAD_BYTES) return badRequest(reply, "payload trop volumineux (64 Ko max)");
     if (body.task_id !== undefined && body.task_id !== null && !isUuid(body.task_id)) return badRequest(reply, "task_id : uuid attendu");
+    if (body.v2_task_id !== undefined && body.v2_task_id !== null && !isUuid(body.v2_task_id)) return badRequest(reply, "v2_task_id : uuid attendu");
     for (const k of ["attempt", "step_index"] as const) {
       const v = body[k];
       if (v !== undefined && v !== null && !(typeof v === "number" && Number.isInteger(v) && v >= 0)) return badRequest(reply, `${k} : entier ≥ 0 attendu`);
@@ -127,6 +151,7 @@ export async function approvalRoutes(app: FastifyInstance): Promise<void> {
     const scope = {
       tool: body.tool,
       v1_task_id: isUuid(body.task_id) ? body.task_id : null,
+      v2_task_id: isUuid(body.v2_task_id) ? body.v2_task_id : null,
       attempt: typeof body.attempt === "number" ? body.attempt : null,
       step_index: typeof body.step_index === "number" ? body.step_index : null,
       summary: typeof body.summary === "string" ? body.summary.slice(0, MAX_SUMMARY) : null,
@@ -141,6 +166,20 @@ export async function approvalRoutes(app: FastifyInstance): Promise<void> {
         [userId, level, JSON.stringify(scope), sha, JSON.stringify(redactSecrets(body.payload)), ttl],
       );
       const r = ins.rows[0] as PermissionRow;
+      // LOT 9 : une tâche V2 en cours attend l'approbation (RUNNING → WAITING, §9.4) ; elle
+      // reprendra UNE fois à l'approbation (WAITING → RUNNING), ou passera BLOCKED au refus.
+      if (scope.v2_task_id) {
+        const task = await getTask(client, scope.v2_task_id, userId);
+        if (task && task.status === "RUNNING" && (typeof body.attempt !== "number" || task.attempt === body.attempt)) {
+          await transitionTask(client, {
+            task,
+            to: "WAITING",
+            set: { waiting_reason: `approbation ${level} requise : ${body.tool} (demande ${r.id})` },
+            actor: `agent:${request.agentKeyId}`,
+            data: { approval_id: r.id, tool: body.tool, level },
+          });
+        }
+      }
       await audit(
         {
           userId,
@@ -248,6 +287,7 @@ export async function approvalRoutes(app: FastifyInstance): Promise<void> {
       );
       if (upd.rows.length !== 1) return null;
       const r = upd.rows[0] as PermissionRow;
+      await resumeWaitingTask(client, r, userId, "approved");
       await audit(
         {
           userId,
@@ -283,6 +323,7 @@ export async function approvalRoutes(app: FastifyInstance): Promise<void> {
       );
       if (upd.rows.length !== 1) return null;
       const r = upd.rows[0] as PermissionRow;
+      await resumeWaitingTask(client, r, userId, "denied");
       await audit(
         { userId, actor: userActor(userId), action: "permission.denied", entity: "permission", entityId: id, data: { tool: r.scope?.tool, level: r.security_level, reason } },
         client,

@@ -34,6 +34,7 @@ import { approvalRoutes } from "./v2/routes/approvals.js";
 import { sessionRoutes } from "./v2/routes/sessions.js";
 import { runtimeRoutes } from "./v2/routes/runtime.js";
 import { streamRoutes } from "./v2/routes/stream.js";
+import { artifactRoutes } from "./v2/routes/artifacts.js";
 
 /** Erreurs : 4xx → message explicite ; 5xx → message générique (détail journalisé uniquement). */
 export function errorHandler(err: FastifyError & { code?: string }, request: FastifyRequest, reply: FastifyReply) {
@@ -163,6 +164,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(sessionRoutes);
   await app.register(runtimeRoutes);
   await app.register(streamRoutes);
+  // V2 (LOT 9) : artefacts adressés par sha256 (contenu sur disque, fiche en base).
+  await app.register(artifactRoutes, { mediaDir });
 
   return app;
 }
