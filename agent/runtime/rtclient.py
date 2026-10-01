@@ -19,13 +19,14 @@ preuves et messages ne contiennent jamais un secret. Les preuves brutes sont com
 from __future__ import annotations
 
 import hashlib
+import re
 import logging
 import socket
 from typing import Any
 
 from client import AUTH, CONFLICT, GONE, OK, REJECTED, RETRY, TaskClient
 from config import Config
-from redaction import redact_obj, redact_text
+from redaction import _env_values, redact_obj, redact_text
 from runtime.journal import Journal
 from runtime.version import PROTOCOL, RUNTIME_VERSION
 
@@ -75,6 +76,30 @@ def compact_evidence(data: Any, depth: int = 0) -> Any:
     if isinstance(data, str) and len(data) > _MAX_STRING:
         return data[:_MAX_STRING] + f"… [{len(data) - _MAX_STRING} car. tronqués]"
     return data
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def redact_evidence(evidence: list[Any]) -> list[Any]:
+    """Preuves rédigées SANS masquer leurs références d'intégrité : la rédaction masque toute
+    chaîne hexadécimale de 40 caractères ou plus (clés brutes), ce qui effaçait aussi l'empreinte
+    `sha256` d'un fichier produit — le serveur rejetait alors l'action entière (preuve perdue,
+    tâche évaluée en échec alors que le fichier existait). Seuls les champs `sha256` (64 hex) et
+    `artifact_id` (uuid) sont conservés tels quels ; description et valeur restent rédigées."""
+    out: list[Any] = []
+    for e in compact_evidence(list(evidence)):
+        if not isinstance(e, dict):
+            out.append(redact_obj(e))
+            continue
+        known = _env_values()  # clé agent, SOULBAH_REDACT_VALUES : jamais transmis, même déguisés en empreinte
+        keep = {k: e[k] for k in ("sha256", "artifact_id")
+                if isinstance(e.get(k), str) and (_SHA256_RE.match(e[k]) if k == "sha256" else _UUID_RE.match(e[k]))
+                and not any(v and v.lower() in e[k].lower() for v in known)}
+        red = redact_obj({k: v for k, v in e.items() if k not in keep})
+        out.append({**red, **keep})
+    return out
 
 
 class RuntimeClient(TaskClient):
@@ -186,7 +211,7 @@ class RuntimeClient(TaskClient):
         body: dict[str, Any] = {**self._ident(attempt), "step_index": int(step_index), "tool": tool,
                                 "params": redact_obj(params or {}), "status": status}
         if evidence is not None:
-            body["evidence"] = redact_obj(compact_evidence(list(evidence)))
+            body["evidence"] = redact_evidence(list(evidence))
         if error:
             body["error"] = redact_text(str(error))[:2000]
         if simulated:

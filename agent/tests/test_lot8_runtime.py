@@ -273,3 +273,25 @@ def test_blocked_tree_killed_under_10s(tmp_path):
     elapsed = time.monotonic() - t0
     assert not pid_alive(child) and not pid_alive(grandchild)
     assert elapsed < 10
+
+
+def test_evidence_keeps_integrity_hashes_but_still_redacts(monkeypatch):
+    """Défaut trouvé en conditions réelles (V3) : la rédaction masquait l'empreinte sha256 des preuves
+    (chaîne hexadécimale de 64 caractères) ; le serveur rejetait l'action et la tâche échouait alors
+    que le fichier existait. L'empreinte et l'artefact sont conservés ; le reste reste rédigé ;
+    un secret connu n'est jamais transmis, même présenté comme une empreinte."""
+    from runtime.rtclient import redact_evidence
+
+    sha = "a196c0e47ed2398926ab70c71676a5db0bc4805e8cced51791f87e6258db2cae"
+    art = "11111111-2222-4333-8444-555555555555"
+    out = redact_evidence([
+        {"kind": "sha256", "confidence": "high", "sha256": sha, "description": "empreinte"},
+        {"kind": "screenshot", "confidence": "low", "sha256": sha, "artifact_id": art},
+        {"kind": "command_output", "confidence": "medium", "value": "clé brute " + "f" * 48},
+    ])
+    assert out[0]["sha256"] == sha and out[1]["artifact_id"] == art
+    assert "f" * 48 not in out[2]["value"]
+    canary = "c" * 64
+    monkeypatch.setenv("SOULBAH_REDACT_VALUES", canary)
+    leaked = redact_evidence([{"kind": "sha256", "confidence": "high", "sha256": canary}])
+    assert canary not in str(leaked)
