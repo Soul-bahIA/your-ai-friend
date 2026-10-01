@@ -15,6 +15,7 @@ from typing import Any
 import requests
 
 from config import Config
+from redaction import redact_obj, redact_text
 
 log = logging.getLogger("soulbah.client")
 
@@ -62,6 +63,8 @@ class TaskClient:
         self.cfg = cfg
         # Backend Node (fonctionnalité migrée depuis l'edge function agent-tasks)
         self.base = f"{cfg.api_url}/api/agent-tasks"
+        # LOT 6 : approbations distantes HMAC (routes V2 ; 404 sur un serveur V1).
+        self.approvals_base = f"{cfg.api_url}/api/v2/approvals"
         # Diagnostic du dernier échec de poll : None | AUTH | RETRY ("backend injoignable") | REJECTED
         self.last_error: str | None = None
         self.last_status: int | None = None
@@ -74,23 +77,49 @@ class TaskClient:
             "x-agent-key": self.cfg.agent_key,
         }
 
-    def _post(self, path: str, body: dict[str, Any], timeout: float) -> tuple[str, str, Any]:
-        """POST JSON. Retourne (issue, description lisible, json de réponse ou None)."""
+    def _request(self, method: str, url: str, body: dict[str, Any] | None, timeout: float
+                 ) -> tuple[str, str, Any, int | None]:
+        """Requête JSON. Retourne (issue, description lisible, json de réponse ou None,
+        code HTTP ou None si le backend est injoignable)."""
         try:
-            resp = requests.post(f"{self.base}/{path}", headers=self._headers(), json=body, timeout=timeout)
+            if method == "GET":
+                resp = requests.get(url, headers=self._headers(), timeout=timeout)
+            else:
+                resp = requests.post(url, headers=self._headers(), json=body, timeout=timeout)
         except requests.RequestException as e:
-            return RETRY, f"backend injoignable ({e.__class__.__name__})", None
+            return RETRY, f"backend injoignable ({e.__class__.__name__})", None, None
         outcome = _classify(resp.status_code)
         try:
             payload = resp.json()
         except ValueError:
             payload = None
         if outcome == OK:
-            return OK, "ok", payload
+            return OK, "ok", payload, resp.status_code
         if outcome == AUTH:
-            return AUTH, f"HTTP {resp.status_code} — {AUTH_HINT}", payload
+            return AUTH, f"HTTP {resp.status_code} — {AUTH_HINT}", payload, resp.status_code
         msg = payload.get("error") if isinstance(payload, dict) else None
-        return outcome, f"HTTP {resp.status_code}" + (f" — {msg}" if msg else ""), payload
+        return outcome, f"HTTP {resp.status_code}" + (f" — {msg}" if msg else ""), payload, resp.status_code
+
+    def _post(self, path: str, body: dict[str, Any], timeout: float) -> tuple[str, str, Any]:
+        """POST JSON sur /api/agent-tasks/<path>. Retourne (issue, description, json ou None)."""
+        outcome, detail, payload, _ = self._request("POST", f"{self.base}/{path}", body, timeout)
+        return outcome, detail, payload
+
+    # --- Approbations distantes (LOT 6) ---------------------------------------------------
+    # Mêmes conventions que _post, délais courts ; le code HTTP est renvoyé pour que
+    # l'approbateur distingue « route absente » (404, serveur V1) d'un refus.
+    def request_approval(self, body: dict[str, Any]) -> tuple[str, str, Any, int | None]:
+        """POST /api/v2/approvals/request → 201 {id, status, payload_sha256, expires_at}."""
+        return self._request("POST", f"{self.approvals_base}/request", body, timeout=10)
+
+    def get_approval(self, approval_id: str) -> tuple[str, str, Any, int | None]:
+        """GET /api/v2/approvals/<id> → {id, status, token?, expires_at, decided_at, reason}."""
+        return self._request("GET", f"{self.approvals_base}/{approval_id}", None, timeout=10)
+
+    def verify_approval(self, token: str, payload: dict[str, Any]) -> tuple[str, str, Any, int | None]:
+        """POST /api/v2/approvals/verify → {ok: true, approval_id, level} | {ok: false, reason}."""
+        return self._request("POST", f"{self.approvals_base}/verify", {"token": token, "payload": payload},
+                             timeout=10)
 
     def announce(self, allowed_dirs: list[str]) -> bool:
         """Déclare la whitelist de dossiers au backend (au démarrage).
@@ -163,10 +192,15 @@ class TaskClient:
         """Émet un évènement d'exécution (timeline + captures live, heartbeat).
 
         Best-effort : seules les issues CONFLICT (409) et GONE (410) doivent être
-        traitées par l'appelant."""
+        traitées par l'appelant.
+
+        LOT 6 : `message` et `data` sont RÉDIGÉS avant l'envoi (redaction.redact_obj :
+        textes libres masqués, motifs de secrets et valeurs connues remplacés) — le
+        serveur ne reçoit jamais un secret, même glissé dans un détail d'étape."""
         outcome, detail, _ = self._post(
             "event",
-            {"task_id": task_id, "type": type, "message": message, "data": data or {}, "attempt": attempt},
+            {"task_id": task_id, "type": type, "message": redact_text(message) if message else message,
+             "data": redact_obj(data or {}), "attempt": attempt},
             timeout=10,
         )
         if outcome not in (OK, CONFLICT, GONE):
@@ -204,12 +238,14 @@ class TaskClient:
         attempt: int = 0,
     ) -> str:
         """Met à jour le statut final d'une tâche (completed / failed / cancelled).
-        Retourne l'issue ; `last_detail` décrit l'échec éventuel."""
+        Retourne l'issue ; `last_detail` décrit l'échec éventuel.
+
+        LOT 6 : `result` et `error_message` sont rédigés avant l'envoi (comme event)."""
         body: dict[str, Any] = {"task_id": task_id, "status": status, "attempt": attempt}
         if result is not None:
-            body["result"] = result
+            body["result"] = redact_obj(result)
         if error_message is not None:
-            body["error_message"] = error_message
+            body["error_message"] = redact_text(error_message)
         outcome, detail, _ = self._post("update", body, timeout=15)
         self.last_detail = None if outcome == OK else detail
         if outcome != OK:

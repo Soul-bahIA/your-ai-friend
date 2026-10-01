@@ -17,6 +17,7 @@ import {
 } from "../lib/agentSteps.js";
 import { isPlainObject, stripImageB64 } from "../lib/sanitize.js";
 import { findMaskedPlaceholder, maskTypedText, omitTypedText, restoreMaskedParams } from "../lib/redact.js";
+import { redactSecrets } from "../v2/security/redactSecrets.js";
 import { getScreenshot } from "../services/screenshots.js";
 import { config } from "../config.js";
 
@@ -329,8 +330,10 @@ export async function maybeEvaluateGoalTask(
   // Captures : uniquement par le champ vision (3 dernières) ; rapport texte sans base64 et masqué.
   const fallbackShot = getScreenshot(taskId, userId);
   const screenshots = opts.screenshots?.length ? opts.screenshots.slice(-3) : fallbackShot ? [fallbackShot.image_b64] : [];
-  const textResult = maskTypedText(stripImageB64(task.result ?? { status: task.status }));
-  const maskedSteps = maskTypedText(plannedSteps);
+  // Masquage du texte saisi (LOT 1) puis rédaction des secrets (LOT 6) : rien de tout cela
+  // n'atteint le prompt de l'évaluateur.
+  const textResult = redactSecrets(maskTypedText(stripImageB64(task.result ?? { status: task.status })));
+  const maskedSteps = redactSecrets(maskTypedText(plannedSteps));
 
   let evaluation;
   try {

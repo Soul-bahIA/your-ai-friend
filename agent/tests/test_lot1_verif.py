@@ -409,7 +409,8 @@ def test_executor_honours_server_requires_confirmation(ws, monkeypatch, answer, 
     assert len(calls) == 1 and report["ok"] is written and target.exists() is written
     types = [t for t, _ in events]
     assert "approval_required" in types
-    assert ("approval_result", {"step_index": 0, "approved": written}) in events
+    res = dict(events)["approval_result"]  # LOT 6 : + reason / remote / approval_id
+    assert res["step_index"] == 0 and res["approved"] is written
     # Tâche sans le drapeau : le mode auto s'applique comme avant.
     target2 = root / "b.txt"
     report = executor.run_task({"steps": [{"type": "write_file", "path": str(target2), "content": "x"}]})
@@ -454,7 +455,8 @@ def test_stop_while_confirmation_pending_refuses_and_cancels(tmp_path, monkeypat
     assert EXECUTIONS["n"] == 0
     assert report["cancelled"] and report["stopped"] and not report["ok"] and report["steps"] == []
     assert [t for t, _ in events] == ["task_started", "approval_required", "approval_result", "task_cancelled"]
-    assert dict(events)["approval_result"] == {"step_index": 0, "approved": False}
+    res = dict(events)["approval_result"]  # LOT 6 : + reason / remote / approval_id
+    assert res["step_index"] == 0 and res["approved"] is False
     assert reads["n"] <= 3 < polled["n"], "lecture du contrôle limitée pendant la confirmation"
 
 

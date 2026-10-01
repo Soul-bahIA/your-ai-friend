@@ -219,6 +219,20 @@ capture est donc confirmée, **sauf** dans une tâche planifiée par le serveur 
 objectif de l'utilisateur (`payload.goal_meta` présent), où les captures font partie de la
 boucle Observer prévue. En mode `auto`, elles ne sont pas confirmées.
 
+### Secrets, clé chiffrée et approbations dans l'app (LOT 6)
+
+- **Rédaction** : tout journal (`agent/logs/agent.log`, console), tout évènement et tout rapport final passent
+  par `redaction.py` : clés d'API, jetons, mots de passe, la clé agent elle-même et les valeurs listées dans
+  `SOULBAH_REDACT_VALUES` deviennent « [secret masqué] » ; les textes saisis (`text`, `content`) restent masqués
+  « [texte masqué : N car.] » comme au LOT 1.
+- **Clé agent chiffrée (DPAPI, Windows)** : `python soulbah_agent.py --store-key` enregistre la clé dans
+  `%LOCALAPPDATA%\Soulbahgent_key.dpapi` (lisible par ce compte Windows seulement) ; retirez ensuite
+  `SOULBAH_AGENT_KEY` de `.env`. `--forget-key` l'efface.
+- **Approbations dans l'app** : `SOULBAH_APPROVAL_MODE=remote` (ou `both`) envoie chaque action sensible à
+  `POST /api/v2/approvals/request` avec l'étape complète ; l'utilisateur approuve dans la page Sécurité ; le
+  serveur délivre un jeton HMAC lié à l'empreinte du contenu, vérifié juste avant l'exécution. Sans réponse,
+  en cas d'erreur réseau ou de contenu différent : refus. Détails : `docs/LOT6_AGENT_NOTES.md`.
+
 ## Installation
 
 ```bash
@@ -269,6 +283,9 @@ Codes de sortie : 0 = arrêt normal ; 1 = plan simulé avec au moins une étape 
 | `SOULBAH_CONFIRM_TIMEOUT` | `120` | Délai de réponse à une confirmation (s), puis refus |
 | `SOULBAH_NO_DOTENV` | (vide) | `1` = ne pas charger `agent/.env` (tests hermétiques) |
 | `RESOLVE_SCRIPT_API` / `RESOLVE_SCRIPT_LIB` | chemins Resolve par défaut | Scripting DaVinci Resolve |
+| `SOULBAH_APPROVAL_MODE` | `console` (défaut) · `remote` · `both` — où confirmer les actions sensibles (LOT 6) |
+| `SOULBAH_REDACT_VALUES` | valeurs à masquer partout, séparées par `;` (LOT 6) |
+| `SOULBAH_SECRETS_DIR` | dossier du fichier de clé DPAPI, défaut `%LOCALAPPDATA%\Soulbah` (LOT 6) |
 
 ## Format d'une tâche
 

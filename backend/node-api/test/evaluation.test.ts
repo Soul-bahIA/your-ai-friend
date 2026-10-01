@@ -121,6 +121,24 @@ describe("maybeEvaluateGoalTask", () => {
     expect(evaluationWrite()).toMatchObject({ verdict: "success", action_taken: "memory_proposed" });
   });
 
+  it("LOT 6 : secrets (clé d'API, mot de passe) rédigés du résultat et des étapes avant l'envoi au LLM", async () => {
+    const t = task();
+    (t as { result?: unknown }).result = {
+      ...executed,
+      note: "clé sk-abcdefghijklmnopqrstuvwxyz0123 puis password=Hyper5ecret!",
+      token: "jeton-en-clair",
+    };
+    setupTask(t);
+    evaluate.mockResolvedValue({ verdict: "success", reason: "fait", corrective_steps: [] });
+    await maybeEvaluateGoalTask(T, U);
+    const [, steps, result] = evaluate.mock.calls[0];
+    const sent = JSON.stringify({ steps, result });
+    expect(sent).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123");
+    expect(sent).not.toContain("Hyper5ecret");
+    expect(sent).not.toContain("jeton-en-clair");
+    expect(sent).toContain("[secret masqué]");
+  });
+
   it("retry → correction liée (parent/root, même PC) EN ATTENTE D'APPROBATION ; id renvoyé dans l'évaluation", async () => {
     setupTask(task({ status: "failed" }));
     evaluate.mockResolvedValue({

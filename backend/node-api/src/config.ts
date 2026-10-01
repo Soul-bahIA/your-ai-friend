@@ -61,6 +61,12 @@ export const config = {
   devLocalUserId: (process.env.DEV_LOCAL_USER_ID ?? "").trim(),
   devLocalToken: (process.env.DEV_LOCAL_TOKEN ?? "").trim(),
 
+  // Sécurité V2 (LOT 6). Secret HMAC des jetons d'approbation (≥ 32 caractères ; obligatoire
+  // hors dev/test, sinon secret éphémère par processus). Valeurs à rédiger partout (journaux,
+  // lignes, prompts), séparées par « ; » — p. ex. un canari de test.
+  approvalSecret: (process.env.SOULBAH_APPROVAL_SECRET ?? "").trim(),
+  redactValues: (process.env.SOULBAH_REDACT_VALUES ?? "").split(";").map((s) => s.trim()).filter((s) => s.length >= 4),
+
   // Service IA Python. IA_SERVICE_TOKEN (obligatoire hors dev/test) est envoyé en x-ia-token.
   iaServiceUrl: process.env.IA_SERVICE_URL ?? "http://python-ia:8000",
   iaServiceToken: process.env.IA_SERVICE_TOKEN ?? "",

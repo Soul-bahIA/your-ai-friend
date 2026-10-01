@@ -16,6 +16,11 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { SERVICE_STATE_LABELS, statusView, type ServiceState } from "@/lib/systemStatus";
+import { useApprovals } from "@/hooks/useApprovals";
+import { pendingActionable } from "@/lib/approvals";
+
+/** Intervalle du compteur d'approbations en attente dans la barre latérale (ms). */
+const APPROVALS_BADGE_POLL_MS = 15000;
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -35,6 +40,10 @@ const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { user, signOut } = useAuth();
   const status = useSystemStatus();
   const view = statusView(status.overall);
+  // Indicateur S22 : nombre d'approbations en attente, visible depuis toutes les pages.
+  // Sur un serveur V1 (404) le hook s'arrête de lui-même et le compteur reste masqué.
+  const approvals = useApprovals("pending", { intervalMs: APPROVALS_BADGE_POLL_MS, enabled: !!user });
+  const pendingCount = approvals.unavailable ? 0 : pendingActionable(approvals.approvals).length;
   const services: [string, ServiceState][] = [
     ["API", status.backend],
     ["Base", status.postgres],
@@ -72,6 +81,15 @@ const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
+              {item.path === "/security" && pendingCount > 0 && (
+                <span
+                  className="ml-auto rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-warning"
+                  aria-label={`${pendingCount} approbation${pendingCount > 1 ? "s" : ""} en attente`}
+                  title={`${pendingCount} approbation${pendingCount > 1 ? "s" : ""} en attente`}
+                >
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}

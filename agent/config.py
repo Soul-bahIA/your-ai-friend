@@ -4,10 +4,12 @@ SOULBAH_NO_DOTENV=1 désactive le chargement de agent/.env (tests hermétiques, 
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 
 AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
+log = logging.getLogger("soulbah.config")
 _TRUE = ("1", "true", "yes", "oui")
 
 
@@ -53,6 +55,40 @@ class Config:
     step_timeout: float = 900.0
     # Délai de réponse à une confirmation (s). Sans réponse : refus par défaut.
     confirm_timeout: float = 120.0
+    # LOT 6 : où les confirmations L2/L3 sont demandées.
+    #   console = sur le PC (comportement historique) ; remote = approbation HMAC dans
+    #   l'app (/api/v2/approvals) ; both = remote d'abord, repli console si la route
+    #   n'existe pas (serveur V1, 404).
+    approval_mode: str = "console"
+    # Origine de la clé agent : "env" (SOULBAH_AGENT_KEY / agent/.env), "dpapi"
+    # (fichier chiffré, voir secrets.py) ou "" (aucune, dry-run).
+    key_source: str = ""
+
+
+APPROVAL_MODES = ("console", "remote", "both")
+
+
+def _approval_mode() -> str:
+    raw = os.environ.get("SOULBAH_APPROVAL_MODE", "console").strip().lower() or "console"
+    if raw not in APPROVAL_MODES:
+        log.warning(
+            "SOULBAH_APPROVAL_MODE=%r inconnu (console | remote | both) — « console » utilisé", raw)
+        return "console"
+    return raw
+
+
+def _dpapi_agent_key() -> str | None:
+    """Clé agent du coffre DPAPI (secrets.py), None si absente, illisible ou hors Windows."""
+    try:
+        import secrets as agent_secrets  # agent/secrets.py (voir sa docstring)
+
+        return agent_secrets.load_agent_key()
+    except NotImplementedError as e:
+        log.warning("Clé DPAPI ignorée : %s", e)
+        return None
+    except Exception:  # noqa: BLE001 - un coffre en erreur ne doit pas empêcher le diagnostic
+        log.warning("Lecture de la clé DPAPI impossible", exc_info=True)
+        return None
 
 
 def _float_env(name: str, default: float, minimum: float) -> float:
@@ -67,12 +103,18 @@ def _float_env(name: str, default: float, minimum: float) -> float:
 def load_config(require_key: bool = True) -> Config:
     # Après migration, l'agent parle au backend Node (et non plus à l'edge function).
     api_url = os.environ.get("SOULBAH_API_URL", "http://localhost:3000").rstrip("/")
-    agent_key = os.environ.get("SOULBAH_AGENT_KEY", "")
+    agent_key = os.environ.get("SOULBAH_AGENT_KEY", "").strip()
+    key_source = "env" if agent_key else ""
+    if not agent_key:
+        # LOT 6 : clé chiffrée par DPAPI (`python soulbah_agent.py --store-key`).
+        agent_key = _dpapi_agent_key() or ""
+        key_source = "dpapi" if agent_key else ""
 
     if require_key and not agent_key:
         raise SystemExit(
-            "Variable d'environnement manquante : SOULBAH_AGENT_KEY\n"
-            "Générez une clé depuis la page Sécurité de l'app, puis copiez-la dans .env."
+            "Clé agent introuvable : ni SOULBAH_AGENT_KEY (environnement / agent/.env), "
+            "ni coffre DPAPI (python soulbah_agent.py --store-key).\n"
+            "Générez une clé depuis la page Sécurité de l'app, puis enregistrez-la avec --store-key."
         )
 
     allowed = [
@@ -95,4 +137,6 @@ def load_config(require_key: bool = True) -> Config:
         allow_input_control=os.environ.get("SOULBAH_ALLOW_INPUT_CONTROL", "").lower() in _TRUE,
         step_timeout=_float_env("SOULBAH_STEP_TIMEOUT", 900.0, 5.0),
         confirm_timeout=_float_env("SOULBAH_CONFIRM_TIMEOUT", 120.0, 5.0),
+        approval_mode=_approval_mode(),
+        key_source=key_source,
     )

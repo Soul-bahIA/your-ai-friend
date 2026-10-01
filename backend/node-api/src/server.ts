@@ -4,13 +4,23 @@ import { startupEnv } from "./startupGuard.js";
 import { config } from "./config.js";
 import { initDb, pool } from "./db.js";
 import { setLogger } from "./lib/logger.js";
+import { SECRET_LABEL, redactingLogger } from "./v2/security/redactSecrets.js";
 import { buildApp } from "./app.js";
 import { runMaintenance } from "./services/maintenance.js";
 import { reapStaleTasks } from "./services/reaper.js";
 import { drainBackgroundJobs } from "./services/backgroundJobs.js";
 
-const app = await buildApp({ logger: true });
-setLogger(app.log);
+// Journaux : en-têtes d'authentification rédigés par pino ; objets et messages des services
+// rédigés par redactingLogger (LOT 6 : aucun secret dans les journaux).
+const app = await buildApp({
+  logger: {
+    redact: {
+      paths: ['req.headers.authorization', 'req.headers["x-agent-key"]', 'req.headers["x-ia-token"]', 'req.headers.cookie'],
+      censor: SECRET_LABEL,
+    },
+  },
+});
+setLogger(redactingLogger(app.log));
 
 // --- Base de données : non bloquante au démarrage ---
 // Si Postgres est injoignable, l'API démarre quand même (santé, routes sans DB) et

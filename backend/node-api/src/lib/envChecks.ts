@@ -67,6 +67,15 @@ export function checkStartupEnv(
   }
   if (ca && !fileReadable(ca)) errors.push(`PG_SSL_CA illisible : ${ca.slice(0, 200)}`);
 
+  // Jetons d'approbation HMAC (LOT 6) : secret stable obligatoire hors dev/test.
+  const approvalSecret = (env.SOULBAH_APPROVAL_SECRET ?? "").trim();
+  if (approvalSecret && approvalSecret.length < 32) {
+    errors.push("SOULBAH_APPROVAL_SECRET trop court (≥ 32 caractères) : node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"");
+  } else if (!approvalSecret) {
+    if (strict) errors.push("SOULBAH_APPROVAL_SECRET est obligatoire hors dev/test (jetons d'approbation HMAC liés au payload)");
+    else warnings.push("SOULBAH_APPROVAL_SECRET vide : secret d'approbation ÉPHÉMÈRE par processus (toléré en dev/test)");
+  }
+
   // AUTH_MODE (LOT 3) : dev-local = jeton de dev partagé à la place de Supabase. Jamais hors
   // dev/test, jamais exposé au-delà de la boucle locale, jamais avec un jeton faible.
   const authMode = (env.AUTH_MODE ?? "supabase").trim().toLowerCase() || "supabase";

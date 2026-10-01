@@ -7,6 +7,8 @@ Usage :
     python soulbah_agent.py                            # boucle continue
     python soulbah_agent.py --once                     # un seul cycle de poll puis sort
     python soulbah_agent.py --dry-run --plan plan.json # simule un plan LOCAL (aucune tâche serveur)
+    python soulbah_agent.py --store-key                # enregistre la clé agent chiffrée (DPAPI, LOT 6)
+    python soulbah_agent.py --forget-key               # efface la clé agent chiffrée
 """
 from __future__ import annotations
 
@@ -22,11 +24,14 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import secrets as agent_secrets  # agent/secrets.py : coffre DPAPI de la clé (LOT 6)
+from approvals import RemoteApprover
 from client import AUTH, AUTH_HINT, CONFLICT, CONTROL_GONE, GONE, OK, RETRY, TaskClient, task_attempt
 from config import Config, default_workspace, load_config
 from executor import Executor
 from pending import PendingUpdates
 from permissions import PermissionGate, workspace_errors
+from redaction import RedactingFormatter
 import skills
 from skills.base import CancelToken
 
@@ -69,7 +74,9 @@ def _setup_logging() -> None:
     if _logging_ready:
         return
     _logging_ready = True
-    fmt = logging.Formatter("%(asctime)s  %(levelname)-7s %(name)s  %(message)s", datefmt="%H:%M:%S")
+    # LOT 6 : les deux sorties (console, agent.log) passent par le formateur rédacteur —
+    # aucun secret (clé, jeton, canari SOULBAH_REDACT_VALUES…) n'atteint un journal.
+    fmt = RedactingFormatter("%(asctime)s  %(levelname)-7s %(name)s  %(message)s", datefmt="%H:%M:%S")
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     console = logging.StreamHandler()
@@ -81,7 +88,7 @@ def _setup_logging() -> None:
             os.path.join(LOG_DIR, "agent.log"), maxBytes=1_000_000, backupCount=5, encoding="utf-8"
         )
         file_handler.setFormatter(
-            logging.Formatter("%(asctime)s  %(levelname)-7s %(name)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+            RedactingFormatter("%(asctime)s  %(levelname)-7s %(name)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         )
         root.addHandler(file_handler)
     except OSError as e:
@@ -246,7 +253,7 @@ def handle_task(
     crash: Exception | None = None
     try:
         report = executor.run_task(payload, on_event=on_event, check_control=check_control,
-                                   abort=abort, cancel=token)
+                                   abort=abort, cancel=token, task_id=str(task_id), attempt=attempt)
     except Exception as e:  # noqa: BLE001 - une tâche ne doit jamais tuer l'agent
         log.exception("Exception non gérée sur la tâche %s", task_id)
         crash = e
@@ -329,6 +336,46 @@ def run_local_plan(plan_path: str, executor: Executor) -> int:
     return 0 if report.get("ok") else 1
 
 
+# --- Clé agent chiffrée (LOT 6) --------------------------------------------------
+def _read_key_for_store() -> str:
+    """Clé à enregistrer : SOULBAH_AGENT_KEY (environnement ou agent/.env), sinon lue sur
+    l'entrée standard (sans écho sur une console)."""
+    key = os.environ.get("SOULBAH_AGENT_KEY", "").strip()
+    if key:
+        return key
+    if sys.stdin is None:
+        return ""
+    if sys.stdin.isatty():
+        import getpass
+
+        return getpass.getpass("Clé agent (page Sécurité de l'app, saisie masquée) : ").strip()
+    return sys.stdin.readline().strip()
+
+
+def _manage_key(store: bool) -> int:
+    """--store-key / --forget-key : 0 si OK, 2 sinon. Ne journalise JAMAIS la clé."""
+    try:
+        if not store:
+            if agent_secrets.delete_agent_key():
+                print(f"Clé agent chiffrée supprimée : {agent_secrets.key_file()}")
+            else:
+                print(f"Aucune clé agent chiffrée à supprimer ({agent_secrets.key_file()})")
+            return 0
+        key = _read_key_for_store()
+        if not key:
+            log.error("Aucune clé fournie : définissez SOULBAH_AGENT_KEY ou passez la clé sur l'entrée standard.")
+            return 2
+        path = agent_secrets.store_agent_key(key)
+    except (NotImplementedError, ValueError, OSError) as e:
+        log.error("Enregistrement de la clé impossible : %s", e)
+        return 2
+    print(f"Clé agent enregistrée (chiffrée DPAPI, utilisateur Windows courant) : {path}")
+    if os.environ.get("SOULBAH_AGENT_KEY", "").strip():
+        print("Conseil : retirez maintenant SOULBAH_AGENT_KEY de agent/.env (et de l'environnement) — "
+              "l'agent lira la clé depuis ce fichier chiffré.")
+    return 0
+
+
 # --- Boucle principale ---------------------------------------------------------
 @dataclass
 class LoopState:
@@ -404,11 +451,18 @@ def _serve(cfg: Config, executor: Executor, once: bool) -> int:
     client = TaskClient(cfg)
     pending = PendingUpdates()
     state = LoopState()
+    # LOT 6 : approbations distantes (modes remote / both) — le gate reçoit l'approbateur
+    # une fois le client HTTP créé ; en mode console il reste None.
+    if cfg.approval_mode in ("remote", "both") and getattr(executor.gate, "approver", None) is None:
+        executor.gate.approver = RemoteApprover(client, timeout_s=cfg.confirm_timeout)
 
     input_ctrl = "pré-autorisé (actions à risque confirmées)" if cfg.allow_input_control else "sur confirmation"
-    log.info("SoulBah Agent démarré · mode=%s · entrée(souris/clavier/téléphone)=%s · poll=%ss · étape≤%ss · api=%s",
-             cfg.permission_mode.upper(), input_ctrl, cfg.poll_interval, int(cfg.step_timeout), cfg.api_url)
+    log.info("SoulBah Agent démarré · mode=%s · entrée(souris/clavier/téléphone)=%s · approbations=%s · "
+             "poll=%ss · étape≤%ss · api=%s",
+             cfg.permission_mode.upper(), input_ctrl, cfg.approval_mode, cfg.poll_interval,
+             int(cfg.step_timeout), cfg.api_url)
     log.info("Workspace autorisé : %s", "; ".join(cfg.allowed_dirs))
+    log.info("Clé agent chargée depuis : %s", "coffre DPAPI" if cfg.key_source == "dpapi" else "environnement / agent/.env")
     # Annonce la whitelist au backend pour que le planificateur génère des
     # chemins valides. Non bloquant : en cas d'échec, l'agent fonctionne quand même.
     if client.announce(cfg.allowed_dirs):
@@ -451,9 +505,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="pré-autorise souris/clavier/fenêtre/app/téléphone (les actions à risque restent confirmées)",
     )
+    parser.add_argument("--store-key", action="store_true",
+                        help="enregistre la clé agent (SOULBAH_AGENT_KEY ou entrée standard) chiffrée par DPAPI, puis sort")
+    parser.add_argument("--forget-key", action="store_true", help="efface la clé agent chiffrée par DPAPI, puis sort")
     args = parser.parse_args(argv)
 
     _setup_logging()
+    if args.store_key or args.forget_key:
+        return _manage_key(store=args.store_key)
     # LOT 2 : contrat d'outils unique — registre des skills et manifestes cohérents.
     problems = skills.manifest_errors()
     if problems:
@@ -470,6 +529,9 @@ def main(argv: list[str] | None = None) -> int:
         cfg.permission_mode = "auto"
     if args.allow_input_control:
         cfg.allow_input_control = True
+    if cfg.key_source == "env" and agent_secrets.has_agent_key():
+        log.warning("⚠ La clé agent vient encore de l'environnement / agent/.env alors qu'une copie chiffrée "
+                    "(DPAPI) existe : retirez SOULBAH_AGENT_KEY de agent/.env (%s)", agent_secrets.key_file())
 
     # S1 / contrat §14 : workspace hors du dépôt, jamais le dossier de l'agent.
     errors = workspace_errors(cfg.allowed_dirs)
@@ -488,7 +550,7 @@ def main(argv: list[str] | None = None) -> int:
 
     gate = PermissionGate(
         cfg.permission_mode, cfg.allowed_dirs, cfg.dry_run, cfg.allow_input_control,
-        confirm_timeout=cfg.confirm_timeout,
+        confirm_timeout=cfg.confirm_timeout, approval_mode=cfg.approval_mode,
     )
     executor = Executor(gate, step_timeout=cfg.step_timeout)
 

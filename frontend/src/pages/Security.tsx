@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Shield, Lock, Eye, KeyRound, Plus, Trash2, Copy, Check, Loader2 } from "lucide-react";
+import { Shield, Lock, Eye, KeyRound, Plus, Trash2, Copy, Check, Loader2, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { apiFetch, errorMessage } from "@/lib/api";
 import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
+import ApprovalsInbox from "@/components/ApprovalsInbox";
 import { useToast } from "@/hooks/use-toast";
 
 interface AgentKey {
@@ -91,6 +92,23 @@ const Security = () => {
     <DashboardLayout>
       <div className="space-y-6">
         <h1 className="text-3xl font-bold">Sécurité</h1>
+
+        {/* Approbations L0–L3 demandées par l'agent (LOT 6, S7/S22) : contenu complet, décision liée à l'empreinte */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5" /> Approbations en attente
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Avant toute action à effet réel (L2) ou irréversible (L3), l'agent attend votre décision ici.
+              Le contenu affiché est exactement celui qui sera exécuté ; l'approbation est liée à son
+              empreinte et refusée si le contenu a changé entre-temps.
+            </p>
+            <ApprovalsInbox />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

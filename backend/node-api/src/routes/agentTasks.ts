@@ -17,6 +17,7 @@ import {
   TERMINAL_STATUSES,
 } from "../lib/agentTaskSql.js";
 import { isUuid, stripImageB64, isPlainObject } from "../lib/sanitize.js";
+import { redactSecrets, redactText } from "../v2/security/redactSecrets.js";
 import { runInBackground } from "../services/backgroundJobs.js";
 import {
   extractEventImage,
@@ -170,7 +171,8 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
       // Les captures du rapport final ne sont JAMAIS stockées : les dernières sont passées
       // en mémoire à l'évaluation, le résultat écrit en base en est débarrassé.
       const finalShots = body.status === "completed" || body.status === "failed" ? extractResultScreenshots(body.result) : [];
-      const result = body.result === undefined ? undefined : stripImageB64(body.result);
+      // Rédaction des secrets (LOT 6) : aucun jeton/clé/canari ne doit atteindre une ligne.
+      const result = body.result === undefined ? undefined : redactSecrets(stripImageB64(body.result));
       if (result !== undefined && Buffer.byteLength(JSON.stringify(result) ?? "", "utf8") > MAX_RESULT_BYTES) {
         return reply.status(400).send({ error: "result trop volumineux (1 Mo max hors captures)" });
       }
@@ -184,7 +186,7 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
         status: body.status,
         result,
         errorMessage:
-          typeof body.error_message === "string" ? body.error_message.slice(0, 4000) : (body.error_message as null | undefined),
+          typeof body.error_message === "string" ? redactText(body.error_message.slice(0, 4000)) : (body.error_message as null | undefined),
         attempt,
         keyId: request.agentKeyId,
       });
@@ -247,7 +249,8 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
       const { data, image } = extractEventImage(body.data ?? {});
       const imageError = image ? screenshotB64Error(image.b64) : null;
       if (imageError) return reply.status(400).send({ error: imageError });
-      const stored = { ...data, source: "agent" }; // un agent ne peut pas se faire passer pour une formation
+      // Un agent ne peut pas se faire passer pour une formation ; secrets rédigés (LOT 6).
+      const stored = redactSecrets({ ...data, source: "agent" });
       if (Buffer.byteLength(JSON.stringify(stored), "utf8") > MAX_EVENT_DATA_BYTES) {
         return reply.status(400).send({ error: "data trop volumineux (64 Ko max hors capture)" });
       }
@@ -260,7 +263,7 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
           body.task_id,
           userId,
           body.type,
-          typeof body.message === "string" ? body.message.slice(0, 4000) : null,
+          typeof body.message === "string" ? redactText(body.message.slice(0, 4000)) : null,
           JSON.stringify(stored),
         ],
       );

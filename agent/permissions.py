@@ -41,6 +41,11 @@ DEFAULT_CONFIRM_TIMEOUT = 120.0
 # Réponse exigée pour une action de niveau L3 (risquée / irréversible).
 L3_ANSWER = "confirmer"
 
+# LOT 6 : où la confirmation est demandée (config.approval_mode).
+APPROVAL_CONSOLE = "console"  # sur le PC (historique)
+APPROVAL_REMOTE = "remote"  # approbation HMAC dans l'app (approvals.RemoteApprover)
+APPROVAL_BOTH = "both"  # remote d'abord ; repli console si la route n'existe pas (404)
+
 EmitFn = Callable[[str, str, dict], None]
 
 
@@ -137,8 +142,15 @@ class PermissionGate:
         dry_run: bool,
         allow_input_control: bool = False,
         confirm_timeout: float = DEFAULT_CONFIRM_TIMEOUT,
+        approval_mode: str = APPROVAL_CONSOLE,
+        approver: Any | None = None,
     ):
         self.mode = mode  # "confirm" | "auto"
+        # LOT 6 : console | remote | both ; `approver` = approvals.RemoteApprover (posé par
+        # l'agent une fois le client HTTP créé ; None = aucune approbation distante possible).
+        self.approval_mode = approval_mode if approval_mode in (APPROVAL_CONSOLE, APPROVAL_REMOTE, APPROVAL_BOTH) \
+            else APPROVAL_CONSOLE
+        self.approver = approver
         self.allowed_dirs = [normalize_dir(d) for d in allowed_dirs]
         self.dry_run = dry_run
         # Verrou dédié aux actions d'entrée (souris/clavier/fenêtre/app/téléphone) :
@@ -208,11 +220,18 @@ class PermissionGate:
 
         Évènements (contrat §13) : `approval_required` avant de demander,
         `approval_result` après. Le résumé envoyé est masqué (S8) ; le contenu
-        complet n'est affiché que sur la console locale (S7)."""
+        complet n'est affiché que sur la console locale (S7).
+
+        LOT 6 : selon `approval_mode`, la décision est prise sur la console (historique),
+        dans l'app (approbation HMAC liée au payload — approvals.RemoteApprover) ou dans
+        l'app avec repli console si le serveur n'a pas la route (404, serveur V1). Le jeton
+        obtenu est posé dans ctx["approval_token"] (jamais émis dans un évènement) et
+        l'identifiant dans ctx["approval_id"] (repris par step_started)."""
         emit: EmitFn | None = ctx.get("emit")
         index = ctx.get("step_index")
         summary = skill.describe(step)
         level = 3 if skill.confirm_level(step) >= 3 else 2
+        action = str(step.get("type", skill.name))
 
         def _emit(etype: str, message: str, data: dict) -> None:
             if emit is None:
@@ -222,13 +241,48 @@ class PermissionGate:
             except Exception:  # noqa: BLE001 - un évènement ne doit pas bloquer le gate
                 log.debug("Évènement %s non émis", etype, exc_info=True)
 
-        _emit("approval_required", f"En attente de confirmation sur le PC : {summary}", {
-            "step_index": index, "action": str(step.get("type", skill.name)), "summary": summary,
-            "level": level,
-        })
-        approved, reason = self._ask(skill, step, summary, level, why, ctx.get("stop_check"))
+        def _required(approval_id: str | None, where: str) -> None:
+            _emit("approval_required", f"En attente de confirmation {where} : {summary}", {
+                "step_index": index, "action": action, "summary": summary,
+                "level": f"L{level}", "approval_id": approval_id,
+            })
+
+        remote = False
+        approval_id: str | None = None
+        use_remote = self.approval_mode in (APPROVAL_REMOTE, APPROVAL_BOTH)
+        if use_remote and self.approver is None and self.approval_mode == APPROVAL_REMOTE:
+            approved, reason = False, "approbation distante exigée (SOULBAH_APPROVAL_MODE=remote) mais aucun client"
+            remote = True
+            _required(None, "dans l'app")
+        elif use_remote and self.approver is not None:
+            requested: dict[str, str | None] = {"id": None}
+
+            def _on_requested(new_id: str) -> None:
+                requested["id"] = new_id
+                _required(new_id, "dans l'app")
+
+            decision = self.approver.request(step, skill, level, summary, ctx, on_requested=_on_requested)
+            approval_id = getattr(decision, "approval_id", None) or requested["id"]
+            if getattr(decision, "unavailable", False) and self.approval_mode == APPROVAL_BOTH:
+                log.warning("Approbations distantes indisponibles (route absente : serveur V1) — "
+                            "repli sur la confirmation console pour cette action")
+                _required(None, "sur le PC")
+                approved, reason = self._ask(skill, step, summary, level, why, ctx.get("stop_check"))
+            else:
+                remote = True
+                if requested["id"] is None:
+                    _required(approval_id, "dans l'app")
+                approved, reason, token = decision
+                if approved and token:
+                    ctx["approval_token"] = token
+        else:
+            _required(None, "sur le PC")
+            approved, reason = self._ask(skill, step, summary, level, why, ctx.get("stop_check"))
+        if approval_id:
+            ctx["approval_id"] = approval_id
         _emit("approval_result", "Action approuvée" if approved else f"Action refusée ({reason})", {
-            "step_index": index, "approved": approved,
+            "step_index": index, "approved": approved, "reason": reason, "remote": remote,
+            "approval_id": approval_id,
         })
         return approved, reason
 

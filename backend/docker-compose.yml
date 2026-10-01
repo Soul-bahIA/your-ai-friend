@@ -157,6 +157,9 @@ services:
       # Auth Supabase (vérification des JWT)
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      # Sécurité V2 (LOT 6) : jetons d'approbation HMAC, valeurs à rédiger partout.
+      SOULBAH_APPROVAL_SECRET: ${SOULBAH_APPROVAL_SECRET:-}
+      SOULBAH_REDACT_VALUES: ${SOULBAH_REDACT_VALUES:-}
       # Chat streaming (famille compatible OpenAI) — cf. .env.example
       CHAT_PROVIDER: ${CHAT_PROVIDER:-}
       CHAT_MODEL: ${CHAT_MODEL:-}

@@ -176,6 +176,8 @@ class Executor:
         check_control: ControlFn | None = None,
         abort: threading.Event | None = None,
         cancel: CancelToken | None = None,
+        task_id: str | None = None,
+        attempt: int = 0,
     ) -> dict[str, Any]:
         """Exécute chaque étape et retourne un rapport structuré.
 
@@ -194,7 +196,9 @@ class Executor:
           = tâche supprimée ;
         - `abort` : posé par l'agent quand le backend indique (409/410) que la tâche
           n'est plus la nôtre — on s'arrête sans rien émettre ;
-        - `cancel` : jeton de la tâche (Ctrl+C) — arrêt rapide, statut `cancelled`.
+        - `cancel` : jeton de la tâche (Ctrl+C) — arrêt rapide, statut `cancelled` ;
+        - `task_id` / `attempt` : identité de la tâche V1, transmise au gate pour les
+          approbations distantes (LOT 6) — None / 0 pour un plan local.
         """
         user_emit = on_event or (lambda *_a, **_k: None)
 
@@ -315,8 +319,11 @@ class Executor:
 
                 # Autorisation AVANT step_started (S22) : une confirmation en attente
                 # est signalée par approval_required / approval_result.
-                ctx = {"emit": gate_emit, "step_index": i, "goal_meta": planned_by_server,
-                       "requires_confirmation": server_requires_confirmation, "stop_check": _stop_check}
+                ctx: dict[str, Any] = {
+                    "emit": gate_emit, "step_index": i, "goal_meta": planned_by_server,
+                    "requires_confirmation": server_requires_confirmation, "stop_check": _stop_check,
+                    "task_id": task_id, "attempt": attempt,
+                }
                 asked_before = approvals["asked"]
                 # Le contrôle vient d'être lu : prochaine lecture dans 2 s au plus tôt.
                 confirm_ctl["next"] = time.monotonic() + _CONFIRM_CONTROL_POLL_SECONDS
@@ -361,7 +368,11 @@ class Executor:
                     break
 
                 description = skill.describe(step)  # masquée (S8)
-                emit("step_started", description, {"index": i, "step_type": step_type})
+                started: dict[str, Any] = {"index": i, "step_type": step_type}
+                if ctx.get("approval_id"):
+                    # LOT 6 : référence de l'approbation distante — jamais le jeton lui-même.
+                    started["approval_id"] = ctx["approval_id"]
+                emit("step_started", description, started)
 
                 t0 = time.monotonic()
                 interrupt = None

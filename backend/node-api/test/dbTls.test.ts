@@ -22,11 +22,11 @@ const ConnectionParameters = require("pg/lib/connection-parameters.js") as new (
 
 const readable = () => true;
 const REMOTE = "postgresql://postgres.abc:secret@aws-0-eu-west-3.pooler.supabase.com:6543/postgres";
-const prodBase = { SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", DATABASE_SSL: "true", PG_SSL_CA: "/ca.pem" };
+const prodBase = { SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", SOULBAH_APPROVAL_SECRET: "s".repeat(32), DATABASE_SSL: "true", PG_SSL_CA: "/ca.pem" };
 
 describe("garde-fou de démarrage TLS (S13)", () => {
   it("production + DATABASE_SSL non défini + base distante → refus (plus de Postgres en clair silencieux)", () => {
-    const r = checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", DATABASE_URL: REMOTE }, readable);
+    const r = checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", SOULBAH_APPROVAL_SECRET: "s".repeat(32), DATABASE_URL: REMOTE }, readable);
     expect(r.errors.join(" ")).toContain("DATABASE_SSL=true est obligatoire");
     expect(r.errors.join(" ")).not.toContain("secret"); // jamais l'URL (mot de passe) dans un message
   });
@@ -48,9 +48,9 @@ describe("garde-fou de démarrage TLS (S13)", () => {
 
   it("configurations saines acceptées : CA + URL sans paramètre TLS ; Postgres du compose / local sans TLS", () => {
     expect(checkStartupEnv({ ...prodBase, DATABASE_URL: REMOTE }, readable).errors).toEqual([]);
-    expect(checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t" }, readable).errors).toEqual([]); // défaut compose
+    expect(checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", SOULBAH_APPROVAL_SECRET: "s".repeat(32) }, readable).errors).toEqual([]); // défaut compose
     for (const url of ["postgres://u:p@postgres:5432/db", "postgres://u:p@127.0.0.1/db", "postgres://u:p@[::1]:5432/db", "/var/run/postgresql db"]) {
-      expect(checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", DATABASE_URL: url }, readable).errors).toEqual([]);
+      expect(checkStartupEnv({ SOULBAH_ENV: "production", IA_SERVICE_TOKEN: "t", SOULBAH_APPROVAL_SECRET: "s".repeat(32), DATABASE_URL: url }, readable).errors).toEqual([]);
     }
   });
 

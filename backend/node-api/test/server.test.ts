@@ -59,8 +59,17 @@ describe("checkStartupEnv (contrat §1)", () => {
       "PG_SSL_CA",
     );
     expect(
-      checkStartupEnv({ SOULBAH_ENV: "staging", IA_SERVICE_TOKEN: "t", DATABASE_SSL: "true", PG_SSL_CA: "/ca.pem" }, readable).errors,
+      checkStartupEnv(
+        { SOULBAH_ENV: "staging", IA_SERVICE_TOKEN: "t", DATABASE_SSL: "true", PG_SSL_CA: "/ca.pem", SOULBAH_APPROVAL_SECRET: "s".repeat(32) },
+        readable,
+      ).errors,
     ).toEqual([]);
+    // LOT 6 : hors dev/test, le secret d'approbation HMAC est obligatoire et ≥ 32 caractères.
+    expect(checkStartupEnv({ SOULBAH_ENV: "staging", IA_SERVICE_TOKEN: "t", DATABASE_SSL: "true", PG_SSL_CA: "/ca.pem" }, readable).errors.join(" ")).toContain(
+      "SOULBAH_APPROVAL_SECRET",
+    );
+    expect(checkStartupEnv({ SOULBAH_APPROVAL_SECRET: "court" }, readable).errors.join(" ")).toContain("trop court");
+    expect(checkStartupEnv({}, readable).warnings.join(" ")).toContain("SOULBAH_APPROVAL_SECRET");
   });
 
   it("valeur inconnue → refus (traitée comme stricte) ; CA illisible → refus même en dev", () => {

@@ -623,7 +623,8 @@ def test_approval_events_before_step_started(tmp_path, monkeypatch):
     assert types.index("approval_required") < types.index("approval_result") < types.index("step_started")
     req = dict(events)["approval_required"]
     assert req["step_index"] == 0 and req["action"] == "sensitive_test" and req["summary"]
-    assert dict(events)["approval_result"] == {"step_index": 0, "approved": True}
+    res = dict(events)["approval_result"]  # LOT 6 : + reason / remote / approval_id
+    assert res["step_index"] == 0 and res["approved"] is True and res["remote"] is False and res["reason"]
 
 
 def test_refused_step_never_emits_step_started(tmp_path, monkeypatch):
@@ -634,7 +635,9 @@ def test_refused_step_never_emits_step_started(tmp_path, monkeypatch):
                                on_event=lambda t, m, d: events.append((t, d)))
     assert not report["ok"] and EXECUTIONS["n"] == 0
     types = [t for t, _ in events]
-    assert "step_started" not in types and ("approval_result", {"step_index": 0, "approved": False}) in events
+    assert "step_started" not in types
+    res = dict(events)["approval_result"]  # LOT 6 : + reason / remote / approval_id
+    assert res["step_index"] == 0 and res["approved"] is False and res["remote"] is False
 
 
 def test_typed_text_masked_everywhere(tmp_path, monkeypatch, caplog, capsys):

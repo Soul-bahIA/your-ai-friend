@@ -30,6 +30,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { researchRoutes } from "./routes/research.js";
 import { orchestratorRoutes } from "./routes/orchestrator.js";
+import { approvalRoutes } from "./v2/routes/approvals.js";
 
 /** Erreurs : 4xx → message explicite ; 5xx → message générique (détail journalisé uniquement). */
 export function errorHandler(err: FastifyError & { code?: string }, request: FastifyRequest, reply: FastifyReply) {
@@ -151,6 +152,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(knowledgeRoutes); // ← base de connaissances (KB propriétaire évolutive)
   await app.register(researchRoutes); // ← moteur de recherche KB-first (KB → web → synthèse → cache)
   await app.register(orchestratorRoutes); // ← cerveau central (Chief Agent → agents spécialisés)
+
+  // V2 (LOT 6) : approbations par action (HMAC lié au payload) et journal d'audit chaîné.
+  await app.register(approvalRoutes);
 
   return app;
 }
