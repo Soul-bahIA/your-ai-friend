@@ -11,7 +11,7 @@
 ### Plan « cloud » (Supabase + React) — mature
 | Brique | Emplacement | État |
 |---|---|---|
-| Interface utilisateur | `src/` (React/Vite/TS) | ✅ Dashboard complet (Chat, Formations, Applications, KnowledgeBase, DatabaseAdmin, Automation…) |
+| Interface utilisateur | `frontend/src/` (React/Vite/TS) | ✅ Dashboard complet (Chat, Formations, Applications, KnowledgeBase, DatabaseAdmin, Automation…) |
 | Auth & permissions | `useAuth`, RLS SQL, `user_roles` | ✅ JWT + Row Level Security par `user_id` |
 | Moteur IA (LLM) | `backend/node-api` → `POST /api/chat` | ✅ Chat streaming multi-fournisseurs + **tool-calling** (create_formation/application, save_knowledge) |
 | Générateur de code | `POST /api/generate/application` (Node → `python-ia`) | ✅ Génère architecture d'app par IA |

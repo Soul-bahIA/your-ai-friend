@@ -6,15 +6,10 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    // backend/, agent/, frontend/ et les edge functions sont lintés séparément.
     ignores: [
       "dist",
       "coverage",
       "node_modules",
-      "backend/**",
-      "agent/**",
-      "frontend/**",
-      "supabase/functions/**",
       "public/**",
     ],
   },

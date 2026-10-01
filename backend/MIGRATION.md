@@ -66,7 +66,7 @@ CORS_ORIGINS=http://localhost:8080
 
 La logique est migrée ; il faut maintenant **repointer les consommateurs** vers le backend.
 
-### Frontend existant (`src/`, app Supabase)
+### Frontend existant (`frontend/src/`, app Supabase)
 Remplacer les appels aux edge functions par le backend. Points à modifier :
 | Fichier | Changement |
 |---|---|

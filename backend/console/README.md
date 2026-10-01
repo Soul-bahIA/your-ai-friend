@@ -1,13 +1,13 @@
-# SOULBAH IA — Console de test du backend (`frontend/`)
+# SOULBAH IA — Console de test du backend (`backend/console/`)
 
 > ⚠️ **Ce dossier N'EST PAS l'application SoulBah AI.**
 > L'application web (dashboard, chat, formations, agent…) se trouve à la **racine du dépôt**
-> (`src/`, `npm run dev` → http://localhost:8080). Voir le [README principal](../README.md).
+> (`frontend/`, `npm run dev` → http://localhost:8080). Voir le [README principal](../../README.md).
 >
-> `frontend/` est une **petite console de test** du backend polyglotte : elle appelle
+> `backend/console/` est une **petite console de test** du backend polyglotte : elle appelle
 > `POST /api/analyze` et `GET /health/deep` de `backend/node-api` pour vérifier la chaîne
 > Node → Python IA → Rust → Postgres. Elle sert d'équivalent web au client Flutter
-> (même API, mêmes endpoints). Le nom historique `frontend/` est conservé.
+> (même API, mêmes endpoints). Elle s'appelait auparavant `frontend/` ; ce nom désigne désormais l'application principale.
 
 ## Stack
 - **React 18** + **TypeScript**
@@ -22,7 +22,7 @@
 ## Démarrage (dev)
 
 ```bash
-cd frontend
+cd backend/console
 cp .env.example .env          # optionnel (défaut : http://localhost:3000)
 npm install
 npm run dev
@@ -50,21 +50,21 @@ npm run preview    # sert dist/ localement pour vérifier
 Image incluse (build Vite + service nginx statique) :
 
 ```bash
-docker build --build-arg VITE_API_URL=http://localhost:3000 -t soulbah-frontend .
-docker run -p 5173:80 soulbah-frontend
+docker build --build-arg VITE_API_URL=http://localhost:3000 -t soulbah-console .
+docker run -p 5173:80 soulbah-console
 ```
 
-Ou via le `docker-compose.yml` du backend (service `frontend` déjà intégré) :
+Ou via le `docker-compose.yml` du backend (service `console` déjà intégré) :
 
 ```bash
 cd ../backend
-docker compose up --build      # lance backend + frontend d'un coup
+docker compose up --build      # lance backend + console d'un coup
 ```
 
 ## Structure
 
 ```
-frontend/
+backend/console/
 ├── index.html
 ├── vite.config.ts
 ├── src/
@@ -79,5 +79,5 @@ frontend/
 ```
 
 ## Lien avec Flutter
-Ce frontend et l'app Flutter tapent **exactement la même API Node** (port 3000).
+Cette console et l'app Flutter tapent **exactement la même API Node** (port 3000).
 Le code de `src/api/client.ts` est le pendant TypeScript de ce que fait le client HTTP Dart côté mobile.

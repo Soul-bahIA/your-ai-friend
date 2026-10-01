@@ -1,67 +1,63 @@
-import { useState, type FormEvent } from "react";
-import { analyze, type AnalyzeResponse } from "./api/client";
-import { ResultCard } from "./components/ResultCard";
-import { HealthBar } from "./components/HealthBar";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { AuthProvider } from "@/hooks/useAuth";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import Index from "./pages/Index";
+import Auth from "./pages/Auth";
 
-export default function App() {
-  const [text, setText] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+const Formations = lazy(() => import("./pages/Formations"));
+const Applications = lazy(() => import("./pages/Applications"));
+const Chat = lazy(() => import("./pages/Chat"));
+const KnowledgeBase = lazy(() => import("./pages/KnowledgeBase"));
+const DatabaseAdmin = lazy(() => import("./pages/DatabaseAdmin"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Security = lazy(() => import("./pages/Security"));
+const Video = lazy(() => import("./pages/Video"));
+const Automation = lazy(() => import("./pages/Automation"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!text.trim() || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await analyze(text.trim());
-      setResult(res);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur inconnue");
-    } finally {
-      setLoading(false);
-    }
-  };
+const queryClient = new QueryClient();
 
-  return (
-    <div className="app">
-      <header className="header">
-        <h1>
-          SOULBAH <span className="accent">IA</span>
-        </h1>
-        <p className="subtitle">
-          Console de test — backend polyglotte · Node · Python · Rust · Postgres
-        </p>
-        <HealthBar />
-      </header>
+const PageLoader = () => (
+  <div className="flex min-h-screen items-center justify-center">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+  </div>
+);
 
-      <main className="main">
-        <form className="card" onSubmit={onSubmit}>
-          <label htmlFor="text" className="label">
-            Texte à analyser
-          </label>
-          <textarea
-            id="text"
-            className="textarea"
-            placeholder="Ex : Cette application est vraiment géniale"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={4}
-            disabled={loading}
-          />
-          <button className="button" type="submit" disabled={loading || !text.trim()}>
-            {loading ? "Analyse en cours…" : "Analyser"}
-          </button>
-          {error && <p className="error">⚠ {error}</p>}
-        </form>
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <AuthProvider>
+          <ErrorBoundary>
+          <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+            <Route path="/formations" element={<ProtectedRoute><Formations /></ProtectedRoute>} />
+            <Route path="/applications" element={<ProtectedRoute><Applications /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+            <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
+            <Route path="/database" element={<ProtectedRoute><DatabaseAdmin /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/security" element={<ProtectedRoute><Security /></ProtectedRoute>} />
+            <Route path="/video" element={<ProtectedRoute><Video /></ProtectedRoute>} />
+            <Route path="/automation" element={<ProtectedRoute><Automation /></ProtectedRoute>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+          </Suspense>
+          </ErrorBoundary>
+        </AuthProvider>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
 
-        {result && <ResultCard result={result} />}
-      </main>
-
-      <footer className="footer">
-        Flutter et cette console appellent la même API Node — <code>/api/analyze</code>
-      </footer>
-    </div>
-  );
-}
+export default App;

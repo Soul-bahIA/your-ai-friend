@@ -141,10 +141,10 @@ services:
         condition: service_healthy
 
   # Console web React/TypeScript (équivalent web du client Flutter).
-  # Le contexte pointe vers ../frontend, sibling du dossier backend.
-  frontend:
+  # Console de test du backend (backend/console).
+  console:
     build:
-      context: ../frontend
+      context: ./console
       args:
         # VITE_API_URL est figée au build : le navigateur appelle l'hôte, pas le réseau docker.
         VITE_API_URL: http://localhost:${NODE_API_PORT:-3000}

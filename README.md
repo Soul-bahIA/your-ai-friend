@@ -13,7 +13,7 @@ Architecture détaillée et feuille de route : [`docs/SOULBAH_AI_ARCHITECTURE.md
 ## Architecture
 
 ```
- Navigateur ── app web (racine : Vite + React + TS, port 8080)
+ Navigateur ── app web (frontend/ : Vite + React + TS, port 8080)
      │ auth Supabase (JWT)             │ REST + JWT (VITE_API_URL)
      ▼                                 ▼
  Supabase ◀──── Postgres ─────── backend/node-api   (Fastify/TS, port 3000)
@@ -27,13 +27,13 @@ Architecture détaillée et feuille de route : [`docs/SOULBAH_AI_ARCHITECTURE.md
 
 | Composant | Dossier | Rôle |
 |---|---|---|
-| **App web** | racine (`src/`, `index.html`, `vite.config.ts`) | Interface React/Vite/TypeScript (shadcn-ui, Tailwind) : dashboard, chat, formations, applications, base de connaissances, automatisation, sécurité. |
+| **App web** | `frontend/` (`src/`, `index.html`, `vite.config.ts`) | Interface React/Vite/TypeScript (shadcn-ui, Tailwind) : dashboard, chat, formations, applications, base de connaissances, automatisation, sécurité. |
 | **Supabase** | `supabase/` | Authentification (JWT) et Postgres managé : schéma versionné dans `supabase/migrations/`, RLS par `user_id`, Realtime. Plus aucune edge function : tout passe par `backend/node-api`. |
 | **API Node** | `backend/node-api` | Point d'entrée unique : vérification des JWT Supabase, accès Postgres, chat streaming, file de tâches de l'agent, orchestration. |
 | **Service IA** | `backend/python-ia` | Génération IA sans état (formations, applications, TTS/vidéo, PDF), routeur multi-fournisseurs (Anthropic, OpenAI, Gemini, Mistral…). |
 | **Calculs** | `backend/rust-compute` | Calculs CPU intensifs appelés par le service IA. |
 | **Agent local** | `agent/` | Worker Python qui s'exécute **sur le poste** : récupère les tâches (`agent_tasks`) et les exécute via des *skills*, avec confirmation. |
-| **Console de test** | `frontend/` | Petite console web de test du backend (`/api/analyze`, `/health/deep`). **Ce n'est pas l'application** — voir [`frontend/README.md`](frontend/README.md). |
+| **Console de test** | `backend/console/` | Petite console web de test du backend (`/api/analyze`, `/health/deep`). **Ce n'est pas l'application** — voir [`backend/console/README.md`](backend/console/README.md). |
 
 ---
 
@@ -53,10 +53,10 @@ Chaque `.env` se crée à partir de son `.env.example`. **Ne jamais committer un
 
 | Fichier | Utilisé par | Contenu principal |
 |---|---|---|
-| `.env` (racine) | app web | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID`, `VITE_API_URL` (ex. `http://localhost:3000`) |
+| `frontend/.env` | app web | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID`, `VITE_API_URL` (ex. `http://localhost:3000`) |
 | `backend/.env` | node-api, python-ia, docker compose | `DATABASE_URL`, `DATABASE_SSL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, clés des fournisseurs IA (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`…), recherche web, ports |
 | `agent/.env` | agent local | `SOULBAH_API_URL`, `SOULBAH_AGENT_KEY`, `SOULBAH_PERMISSION_MODE`, `SOULBAH_ALLOWED_DIRS` |
-| `frontend/.env` | console de test | `VITE_API_URL` |
+| `backend/console/.env` | console de test | `VITE_API_URL` |
 
 > Hors Docker, ajoutez dans `backend/.env` : `IA_SERVICE_URL=http://localhost:8000` (sinon Node
 > cherche `http://python-ia:8000`, le nom du service Docker) et, pour python-ia,
@@ -68,8 +68,9 @@ Chaque `.env` se crée à partir de son `.env.example`. **Ne jamais committer un
 
 Les commandes ci-dessous sont pour **git-bash** (Windows), Linux ou macOS.
 
-### 1. App web (racine)
+### 1. App web (`frontend/`)
 ```bash
+cd frontend
 npm install
 cp .env.example .env      # puis renseigner les variables
 npm run dev               # http://localhost:8080
@@ -118,8 +119,8 @@ cp .env.example .env      # renseigner DATABASE_URL, SUPABASE_*, clés IA…
 docker compose up --build
 ```
 Démarre `postgres` (Postgres local de démo, 5432), `rust-compute` (8080), `python-ia` (8000),
-`node-api` (3000) et la console de test `frontend` (5173). L'app web principale se lance à
-part (`npm run dev` à la racine). Détails : [`backend/README.md`](backend/README.md).
+`node-api` (3000) et la console de test `console` (5173). L'app web principale se lance à
+part (`npm run dev` dans `frontend/`). Détails : [`backend/README.md`](backend/README.md).
 
 ---
 
@@ -163,7 +164,7 @@ pg_restore --no-owner --no-privileges --dbname "$DATABASE_URL" backups/soulbah_A
 ## Tests et CI
 
 ```bash
-npm run lint && npm test && npm run build                 # app web
+cd frontend && npm run lint && npm test && npm run build  # app web
 cd backend/node-api && npx tsc --noEmit                   # API Node
 python -m compileall -q backend/python-ia/app agent       # Python (syntaxe)
 ```

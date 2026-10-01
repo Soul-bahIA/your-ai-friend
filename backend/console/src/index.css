@@ -1,0 +1,221 @@
+:root {
+  --bg: #0a0a0f;
+  --card: #14141c;
+  --border: #262633;
+  --text: #e6e6ef;
+  --muted: #8a8a9a;
+  --primary: #7c5cff;
+  --primary-glow: rgba(124, 92, 255, 0.35);
+  --pos: #22c55e;
+  --neg: #f97316;
+  --down: #ef4444;
+  --warn: #eab308;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #1a1730, var(--bg));
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.header h1 {
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.accent {
+  color: var(--primary);
+  text-shadow: 0 0 24px var(--primary-glow);
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.4rem;
+}
+
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+}
+
+.health--down {
+  color: var(--down);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot--ok { background: var(--pos); box-shadow: 0 0 8px var(--pos); }
+.dot--warn { background: var(--warn); }
+.dot--down { background: var(--down); }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem;
+}
+
+.label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.textarea {
+  width: 100%;
+  background: #0f0f16;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 0.75rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.button {
+  margin-top: 0.9rem;
+  width: 100%;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 20px var(--primary-glow);
+}
+
+.button:hover:not(:disabled) { opacity: 0.92; }
+.button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+.error {
+  margin-top: 0.75rem;
+  color: var(--down);
+  font-size: 0.8rem;
+}
+
+.result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.badge {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+}
+.badge--pos { background: rgba(34, 197, 94, 0.15); color: var(--pos); }
+.badge--neg { background: rgba(249, 115, 22, 0.15); color: var(--neg); }
+
+.score {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 0.6rem;
+}
+
+.stat {
+  background: #0f0f16;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.5rem;
+  text-align: center;
+}
+
+.stat__value {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.stat__label {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.reqid {
+  margin-top: 1rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+
+.footer {
+  text-align: center;
+  margin-top: 2.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.footer code {
+  color: var(--primary);
+  font-family: ui-monospace, monospace;
+}
