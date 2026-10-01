@@ -94,8 +94,8 @@ describe.skipIf(!RUN)("sessions / scheduler / bus V2 sur Postgres réel", () => 
     expect(r.json().session.status).toBe("AWAITING_APPROVAL");
     expect(r.json().tasks.length).toBe(3);
     const bad = await app.inject({ method: "POST", url: `/api/v2/sessions/${sessionId}/plan`, headers: jwt, payload: { plan: { nodes: nodes(2), edges: [{ from: "t0", to: "t1" }, { from: "t1", to: "t0" }] } } });
-    expect(bad.statusCode).toBe(400);
-    expect(bad.json().error).toContain("cycle");
+    expect(bad.statusCode).toBe(422);
+    expect(bad.json().errors.join(" ")).toContain("cycle");
 
     const ap = await app.inject({ method: "POST", url: `/api/v2/sessions/${sessionId}/approve`, headers: jwt });
     expect(ap.statusCode).toBe(200);

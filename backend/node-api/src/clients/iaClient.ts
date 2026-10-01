@@ -285,6 +285,23 @@ export async function synthesizeKnowledge(input: {
   return data.synthesis;
 }
 
+/** LOT 11 : proposition de DAG par le modèle (python-ia /v2/planner/propose) — validée ensuite par validateDag. */
+export interface PlanProposal {
+  plan: { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  understanding: string;
+  feasible: boolean;
+  reason: string;
+}
+export async function proposePlan(input: {
+  goal: string;
+  roles: { name: string; description: string; executor: string; max_security_level: string; tools: string[] }[];
+  allowed_dirs: string[];
+  max_security_level: string;
+  context?: string;
+}): Promise<PlanProposal> {
+  return postIa<PlanProposal>("/v2/planner/propose", input);
+}
+
 /**
  * LOT 10 : jugement d'un critère llm_rubric par le routeur de modèles (rôle évaluateur). La
  * réponse est un objet {passed, reason} ; la confiance d'un tel jugement est toujours « low ».

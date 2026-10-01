@@ -9,9 +9,10 @@ import { logger } from "../../lib/logger.js";
 import { postMessage } from "../bus/messages.js";
 import { TASK_COLS, getTask, transitionTask, type TaskRow } from "../tasks/repo.js";
 import { loadActions, type RubricJudge } from "./engine.js";
+import { P1_ROLE_NAMES } from "../planner/roles.js";
 
-/** Rôles exécutés par P1 lui-même (jamais attribués à un runtime). */
-export const P1_ROLES: readonly string[] = ["qa_reviewer"];
+/** Rôles exécutés par P1 lui-même (jamais attribués à un runtime) : catalogue des rôles (LOT 11). */
+export const P1_ROLES: readonly string[] = P1_ROLE_NAMES;
 export const SYSTEM_REVIEWER = "p1:qa_reviewer";
 const REVIEW_LEASE_MS = 5 * 60 * 1000;
 
@@ -34,7 +35,7 @@ export async function runReviews(opts: { limit?: number; judge?: RubricJudge; no
              FROM soulbah.tasks t JOIN soulbah.sessions s ON s.id = t.session_id
             WHERE t.status = 'READY' AND t.role = ANY($1::text[]) AND s.status = 'RUNNING' AND NOT (t.id = ANY($2::uuid[]))
             ORDER BY t.priority, t.created_at FOR UPDATE OF t SKIP LOCKED LIMIT 1`,
-          [P1_ROLES, seen],
+          [["qa_reviewer"], seen],
         );
         if (rows.length === 0) return "empty" as const;
         const ready = rows[0] as TaskRow;

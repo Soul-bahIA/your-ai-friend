@@ -138,7 +138,22 @@ describe.skipIf(!RUN)("passerelle d'outils et preuves (LOT 9)", () => {
       method: "POST",
       url: "/api/v2/sessions",
       headers: jwt,
-      payload: { goal: "L2", plan: { nodes: [{ key: "t", title: "taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text", text: "bonjour" }] } }, { key: "u", title: "taper 2", role: "desktop_operator", security_level: "L2" }] } },
+      payload: {
+        goal: "L2",
+        plan: {
+          nodes: [
+            {
+              key: "t",
+              title: "taper",
+              role: "desktop_operator",
+              security_level: "L2",
+              spec: { steps: [{ type: "screenshot" }, { type: "type_text", text: "bonjour" }] },
+              acceptance_criteria: [{ type: "ui_element_state", window_title: "Bloc-notes" }],
+            },
+            { key: "u", title: "taper 2", role: "desktop_operator", security_level: "L2", acceptance_criteria: [{ type: "ui_element_state", window_title: "Bloc-notes" }] },
+          ],
+        },
+      },
     });
     expect(s.statusCode, s.body).toBe(201);
     const ap = await app.inject({ method: "POST", url: `/api/v2/sessions/${s.json().session.id}/approve`, headers: jwt });

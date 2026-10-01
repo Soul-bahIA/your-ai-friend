@@ -94,6 +94,9 @@ export const config = {
   streamIntervalMs: Math.max(250, num(process.env.SOULBAH_STREAM_INTERVAL_MS, 2000)),
   // LOT 8 : version minimale (semver) acceptée d'un runtime à l'enregistrement ; vide = toutes.
   runtimeMinVersion: (process.env.SOULBAH_RUNTIME_MIN_VERSION ?? "").trim() || "0.0.0",
+  // LOT 11 : `/api/agent/goal` crée une mission V2 (gabarit desktop_goal, approbation requise)
+  // au lieu d'une agent_task directe. Désactivé par défaut tant que le runtime V2 n'est pas déployé.
+  v2GoalBridge: ["1", "true", "yes"].includes((process.env.SOULBAH_V2_GOAL_BRIDGE ?? "").trim().toLowerCase()),
 
   // Générations (formations/applications) bloquées au-delà de ce délai → 'Erreur'.
   staleGenerationMinutes: num(process.env.STALE_GENERATION_MINUTES, 30),

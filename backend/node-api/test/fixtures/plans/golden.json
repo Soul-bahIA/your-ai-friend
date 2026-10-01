@@ -1,0 +1,126 @@
+{
+  "description": "Jeux « golden » de validateDag (LOT 11, audit §13) : chaque cas est un plan brut, son contexte et le résultat attendu — \"ok\" ou des fragments qui DOIVENT figurer dans les erreurs.",
+  "context": { "userId": "a0000000-0000-4000-8000-000000000001", "allowedDirs": ["C:\\w"], "sessionMaxLevel": "L2" },
+  "cases": [
+    {
+      "name": "plan valide : observer puis agir avec critère",
+      "plan": {
+        "nodes": [
+          { "key": "observe", "title": "Observer", "role": "desktop_operator", "security_level": "L1", "spec": { "steps": [{ "type": "screenshot" }] } },
+          { "key": "act", "title": "Taper", "role": "desktop_operator", "security_level": "L2", "spec": { "steps": [{ "type": "type_text", "text": "bonjour" }] }, "acceptance_criteria": [{ "type": "ui_element_state", "window_title": "Bloc-notes" }] }
+        ],
+        "edges": [{ "from": "observe", "to": "act" }]
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "cycle",
+      "plan": {
+        "nodes": [
+          { "key": "a", "title": "A", "role": "coder", "security_level": "L0" },
+          { "key": "b", "title": "B", "role": "coder", "security_level": "L0" },
+          { "key": "c", "title": "C", "role": "coder", "security_level": "L0" }
+        ],
+        "edges": [{ "from": "a", "to": "b" }, { "from": "b", "to": "c" }, { "from": "c", "to": "a" }]
+      },
+      "expect": ["cycle"]
+    },
+    {
+      "name": "rôle inconnu",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "hacker", "security_level": "L0" }] },
+      "expect": ["rôle inconnu « hacker »"]
+    },
+    {
+      "name": "outil non autorisé pour le rôle",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "researcher", "security_level": "L1", "spec": { "steps": [{ "type": "write_file", "path": "C:\\w\\x.txt", "content": "x" }] }, "acceptance_criteria": [{ "type": "file_exists", "path": "C:\\w\\x.txt" }] }] },
+      "expect": ["outil write_file non autorisé pour le rôle researcher"]
+    },
+    {
+      "name": "niveau trop élevé : outil au-dessus du niveau déclaré",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "run_command", "program": "npm", "args": ["test"], "cwd": "C:\\w" }] }, "acceptance_criteria": [{ "type": "tests_pass" }] }] },
+      "expect": ["outil run_command de niveau L2 au-dessus du niveau déclaré du nœud (L1)"]
+    },
+    {
+      "name": "niveau trop élevé : plafond du rôle",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "researcher", "security_level": "L2", "acceptance_criteria": [{ "type": "llm_rubric", "rubric": "ok" }] }] },
+      "expect": ["au-dessus du plafond du rôle researcher (L1)"]
+    },
+    {
+      "name": "niveau trop élevé : plafond de la mission",
+      "context": { "sessionMaxLevel": "L1" },
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L2", "spec": { "steps": [{ "type": "run_command", "program": "npm", "args": ["test"], "cwd": "C:\\w" }] }, "acceptance_criteria": [{ "type": "tests_pass" }] }] },
+      "expect": ["au-dessus du plafond de la mission (L1)"]
+    },
+    {
+      "name": "chemin hors workspace",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "write_file", "path": "C:\\Windows\\System32\\x.txt", "content": "x" }] }, "acceptance_criteria": [{ "type": "file_exists", "path": "C:\\Windows\\System32\\x.txt" }] }] },
+      "expect": ["chemin hors des dossiers autorisés"]
+    },
+    {
+      "name": "chemin de la deny-list dans le workspace",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "read_file", "path": "C:\\w\\.env" }] } }] },
+      "expect": ["chemin interdit", ".env"]
+    },
+    {
+      "name": "critères manquants pour une action à effet",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "move_file", "src": "C:\\w\\a", "dest": "C:\\w\\b" }] } }] },
+      "expect": ["action à effet sans critère d'acceptation requis"]
+    },
+    {
+      "name": "critères seulement facultatifs : refusé aussi",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "move_file", "src": "C:\\w\\a", "dest": "C:\\w\\b" }] }, "acceptance_criteria": [{ "type": "file_exists", "path": "C:\\w\\b", "required": false }] }] },
+      "expect": ["sans critère d'acceptation requis"]
+    },
+    {
+      "name": "critère invalide",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L0", "acceptance_criteria": [{ "type": "magic" }] }] },
+      "expect": ["acceptance_criteria[0].type inconnu"]
+    },
+    {
+      "name": "bureau sans observation préalable",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "desktop_operator", "security_level": "L2", "spec": { "steps": [{ "type": "click", "x": 10, "y": 10 }] }, "acceptance_criteria": [{ "type": "ui_element_state", "window_title": "x" }] }] },
+      "expect": ["sans observation préalable"]
+    },
+    {
+      "name": "observation par un ancêtre indirect : accepté",
+      "plan": {
+        "nodes": [
+          { "key": "o", "title": "O", "role": "desktop_operator", "security_level": "L1", "spec": { "steps": [{ "type": "screenshot" }] } },
+          { "key": "m", "title": "M", "role": "coder", "security_level": "L0" },
+          { "key": "a", "title": "A", "role": "desktop_operator", "security_level": "L2", "spec": { "steps": [{ "type": "click", "x": 10, "y": 10 }] }, "acceptance_criteria": [{ "type": "ui_element_state", "window_title": "x" }] }
+        ],
+        "edges": [{ "from": "o", "to": "m" }, { "from": "m", "to": "a" }]
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "dépendance douce : n'observe pas",
+      "plan": {
+        "nodes": [
+          { "key": "o", "title": "O", "role": "desktop_operator", "security_level": "L1", "spec": { "steps": [{ "type": "screenshot" }] } },
+          { "key": "a", "title": "A", "role": "desktop_operator", "security_level": "L2", "spec": { "steps": [{ "type": "click", "x": 10, "y": 10 }] }, "acceptance_criteria": [{ "type": "ui_element_state", "window_title": "x" }] }
+        ],
+        "edges": [{ "from": "o", "to": "a", "kind": "soft" }]
+      },
+      "expect": ["sans observation préalable"]
+    },
+    {
+      "name": "rôle exécuté par P1 avec des étapes",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "qa_reviewer", "security_level": "L0", "spec": { "steps": [{ "type": "wait", "seconds": 1 }] } }] },
+      "expect": ["exécuté par le plan de contrôle, sans étapes"]
+    },
+    {
+      "name": "étape d'un outil inconnu",
+      "plan": { "nodes": [{ "key": "a", "title": "A", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "format_disk" }] } }] },
+      "expect": ["format_disk"]
+    },
+    {
+      "name": "plusieurs violations listées ensemble",
+      "plan": { "nodes": [
+        { "key": "a", "title": "A", "role": "hacker", "security_level": "L0" },
+        { "key": "b", "title": "B", "role": "coder", "security_level": "L1", "spec": { "steps": [{ "type": "move_file", "src": "D:\\x", "dest": "D:\\y" }] } }
+      ] },
+      "expect": ["rôle inconnu", "chemin hors des dossiers autorisés", "sans critère d'acceptation requis"]
+    }
+  ]
+}

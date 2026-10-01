@@ -13,6 +13,8 @@ const formationRateLimit = { rateLimit: { max: Math.max(1, Math.floor(config.rat
 // Node vérifie l'auth, récupère le contenu, délègue la production à Python, puis
 // enregistre l'URL du fichier (servi statiquement sous /media).
 
+import { demoToSession } from "../v2/planner/bridge.js";
+
 export async function formationVideoRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/formations/:id/video", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
     const userId = request.user!.id;
@@ -54,18 +56,34 @@ export async function formationVideoRoutes(app: FastifyInstance): Promise<void> 
     }
   });
 
-  // --- Démonstrations de la formation pour l'agent local : NON DISPONIBLE (T5) ---
-  // L'ancienne version mettait en file des tâches SANS étapes : faux succès côté agent,
-  // évaluation payante et mémoire polluée. Les démos seront générées par gabarit
-  // (planner + validation) au LOT 11 ; d'ici là la route répond 501 et ne crée rien.
+  // --- Démonstrations de la formation (LOT 11) : gabarit demo_video ---
+  // { demo: "description de la démonstration", title?, output_dir?, agent_key_id? } → mission V2
+  // (observer → filmer pendant les actions → monter ; vidéo vérifiée par probe) en attente
+  // d'approbation. Plus jamais de tâche sans étapes (T5) : le plan passe par validateDag.
   app.post("/api/formations/:id/demos", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
+    const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-    return reply.status(501).send({
-      error:
-        "Les démonstrations automatiques ne sont pas encore disponibles : décrivez la démo comme un objectif " +
-        "(Automatisation → objectif) pour qu'un plan réel soit généré et validé.",
-      code: "demos_not_implemented",
+    const body = (request.body ?? {}) as { demo?: unknown; title?: unknown; output_dir?: unknown; agent_key_id?: unknown };
+    const demo = typeof body.demo === "string" ? body.demo.trim() : "";
+    if (!demo || demo.length > 2000) return reply.status(400).send({ error: "demo (description, ≤ 2000 car.) requis" });
+    const f = await pool.query("SELECT id, title FROM formations WHERE id = $1 AND user_id = $2", [id, userId]);
+    if (f.rows.length === 0) return reply.status(404).send({ error: "Formation introuvable" });
+    const agentKeyId = typeof body.agent_key_id === "string" && isUuid(body.agent_key_id) ? body.agent_key_id : undefined;
+    const out = await demoToSession(userId, {
+      formationId: id,
+      title: typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : String(f.rows[0].title ?? "Démonstration"),
+      description: demo,
+      outputDir: typeof body.output_dir === "string" && body.output_dir.trim() ? body.output_dir.trim() : undefined,
+      agentKeyId,
+    });
+    if (!out.ok) return reply.status(out.status).send({ error: out.error, errors: out.errors, reason: out.reason, agents: out.agents });
+    return reply.status(201).send({
+      success: true,
+      session_id: out.session.id,
+      status: out.session.status,
+      understanding: out.understanding,
+      tasks: out.tasks.map((t) => ({ id: t.id, node_key: t.node_key, role: t.role })),
     });
   });
 

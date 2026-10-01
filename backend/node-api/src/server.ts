@@ -11,6 +11,7 @@ import { reapStaleTasks } from "./services/reaper.js";
 import { auditSchedulerError, tick, tickSummary } from "./v2/scheduler/scheduler.js";
 import { runEvaluations } from "./v2/evaluation/engine.js";
 import { runReviews } from "./v2/evaluation/reviewer.js";
+import { runContentTasks } from "./v2/planner/contentRunner.js";
 import { defaultRubricJudge } from "./v2/evaluation/judge.js";
 import { drainBackgroundJobs } from "./services/backgroundJobs.js";
 
@@ -78,6 +79,8 @@ function runScheduler(): void {
       }
       const summary = tickSummary(r);
       if (summary) app.log.info({ scheduler: r }, `scheduler V2 : ${summary}`);
+      // LOT 11 : rédaction par P1 (modules de formation en parallèle) — sans attendre le tick suivant.
+      void runContentTasks().catch((e) => app.log.warn({ err: (e as Error).message }, "rédaction V2 : échec"));
       const reviews = await runReviews({ judge: defaultRubricJudge });
       const evals = await runEvaluations({ judge: defaultRubricJudge });
       if (reviews.reviewed || evals.evaluated || reviews.errors || evals.errors) app.log.info({ reviews, evals }, "évaluations V2");

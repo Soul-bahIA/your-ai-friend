@@ -188,11 +188,13 @@ describe("routes (application complète)", () => {
     expect(r2.json().success).toBe(false);
   });
 
-  it("POST /api/formations/:id/demos → 501, aucune tâche sans étapes mise en file (T5)", async () => {
+  it("POST /api/formations/:id/demos : description requise, formation du propriétaire ; jamais de tâche sans étapes (T5, LOT 11)", async () => {
     const r = await app.inject({ method: "POST", url: `/api/formations/${F}/demos`, headers: user });
-    expect(r.statusCode).toBe(501);
-    expect(r.json().code).toBe("demos_not_implemented");
+    expect(r.statusCode).toBe(400);
+    const missing = await app.inject({ method: "POST", url: `/api/formations/${F}/demos`, headers: user, payload: { demo: "montrer l'ouverture du bloc-notes" } });
+    expect(missing.statusCode).toBe(404); // formation absente pour cet utilisateur
     expect(fakeDb.find(/INSERT INTO agent_tasks/)).toHaveLength(0);
+    expect(fakeDb.find(/INSERT INTO soulbah\.sessions/)).toHaveLength(0);
   });
 
   it("progression d'une formation : évènements data.source='formation' (T21/T29), échec sans détail interne", async () => {

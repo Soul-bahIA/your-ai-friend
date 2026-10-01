@@ -20,14 +20,13 @@ import { userActor } from "../audit.js";
 import { answerQuestion } from "../bus/messages.js";
 import { tick } from "../scheduler/scheduler.js";
 import { isSecurityLevel } from "../security/policy.js";
-import { validatePlan } from "../sessions/dag.js";
+import { allowedDirsFor, applyPlan, draftPlan } from "../planner/planner.js";
 import {
   approveSession,
   cancelSession,
   createSession,
   getSession,
   listSessions,
-  setPlan,
   transitionSession,
   updateSessionSettings,
   TERMINAL_SESSION_STATUSES,
@@ -77,19 +76,22 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       budget = body.budget_usd;
     }
     if (body.environment !== undefined && !isPlainObject(body.environment)) return bad(reply, "environment : objet attendu");
-    const plan = body.plan === undefined ? null : validatePlan(body.plan);
-    if (plan && !plan.ok) return bad(reply, plan.error);
-
-    const out = await withTransaction(async (client) => {
-      const session = await createSession(client, userId, { goal, maxSecurityLevel: level, maxParallelAgents: maxParallel, budgetUsd: budget, environment: body.environment as Record<string, unknown> | undefined, simulated: body.simulated === true });
-      if (!plan) return { session, tasks: [] };
-      try {
-        return await setPlan(client, session, plan.value, userActor(userId));
-      } catch (e) {
-        throw Object.assign(new Error((e as Error).message), { statusCode: 400 });
-      }
-    });
-    return reply.status(201).send(out);
+    const dirs = body.plan === undefined ? [] : await allowedDirsFor(userId);
+    try {
+      const out = await withTransaction(async (client) => {
+        const session = await createSession(client, userId, { goal, maxSecurityLevel: level, maxParallelAgents: maxParallel, budgetUsd: budget, environment: body.environment as Record<string, unknown> | undefined, simulated: body.simulated === true });
+        if (body.plan === undefined) return { session, tasks: [] };
+        // LOT 11 : tout plan posé passe par validateDag (rôles, outils, niveaux, chemins, critères).
+        const applied = await applyPlan(client, session, body.plan, userId, dirs);
+        if (!applied.ok) throw Object.assign(new Error(applied.error), { statusCode: applied.status, planErrors: applied.errors });
+        return { session: applied.session, tasks: applied.tasks };
+      });
+      return reply.status(201).send(out);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; planErrors?: string[] };
+      if (err.planErrors) return reply.status(err.statusCode ?? 422).send({ error: err.message, errors: err.planErrors });
+      throw e;
+    }
   });
 
   app.get("/api/v2/sessions", { preHandler: requireUser }, async (request) => {
@@ -113,8 +115,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return bad(reply, "id invalide");
     const body = (request.body ?? {}) as { plan?: unknown };
-    const plan = validatePlan(body.plan);
-    if (!plan.ok) return bad(reply, plan.error);
+    const dirs = await allowedDirsFor(userId);
     try {
       const out = await withTransaction(async (client) => {
         const session = await getSession(client, userId, id, true);
@@ -122,17 +123,56 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
         if (!["DRAFT", "PLANNING", "AWAITING_APPROVAL"].includes(session.status)) {
           throw Object.assign(new Error(`plan non modifiable dans l'état ${session.status}`), { statusCode: 409 });
         }
-        try {
-          return await setPlan(client, session, plan.value, userActor(userId));
-        } catch (e) {
-          throw Object.assign(new Error((e as Error).message), { statusCode: 400 });
-        }
+        const applied = await applyPlan(client, session, body.plan, userId, dirs);
+        if (!applied.ok) throw Object.assign(new Error(applied.error), { statusCode: applied.status, planErrors: applied.errors });
+        return { session: applied.session, tasks: applied.tasks };
       });
       if (!out) return reply.status(404).send({ error: "Session introuvable" });
       return out;
     } catch (e) {
-      const err = e as Error & { statusCode?: number };
+      const err = e as Error & { statusCode?: number; planErrors?: string[] };
+      if (err.planErrors) return reply.status(err.statusCode ?? 422).send({ error: err.message, errors: err.planErrors });
       if (err.statusCode === 409 || err.statusCode === 400) return reply.status(err.statusCode).send({ error: err.message });
+      throw e;
+    }
+  });
+
+  // --- LOT 11 : planification par gabarit ou par le modèle, puis validateDag -------------------
+  //   POST /api/v2/sessions/:id/propose { template, params } | { goal?, context? }
+  //   → 200 { session (AWAITING_APPROVAL), tasks, source } ; 422 { errors } si validateDag refuse.
+  app.post("/api/v2/sessions/:id/propose", { preHandler: requireUser }, async (request, reply) => {
+    const userId = request.user!.id;
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return bad(reply, "id invalide");
+    const body = request.body;
+    if (!isPlainObject(body)) return bad(reply, "corps JSON objet attendu");
+    const extra = unknownKeys(body, ["template", "params", "goal", "context"]);
+    if (extra.length) return bad(reply, `champ(s) inconnu(s) : ${extra.join(", ")}`);
+    if (body.template !== undefined && typeof body.template !== "string") return bad(reply, "template : texte attendu");
+    if (body.params !== undefined && !isPlainObject(body.params)) return bad(reply, "params : objet attendu");
+    if (body.goal !== undefined && (typeof body.goal !== "string" || body.goal.length > 4000)) return bad(reply, "goal : texte (≤ 4000 car.) attendu");
+    if (body.context !== undefined && (typeof body.context !== "string" || body.context.length > 20000)) return bad(reply, "context : texte attendu");
+    const session = await getSession(pool, userId, id);
+    if (!session) return reply.status(404).send({ error: "Session introuvable" });
+    if (!["DRAFT", "PLANNING", "AWAITING_APPROVAL"].includes(session.status)) {
+      return reply.status(409).send({ error: `plan non modifiable dans l'état ${session.status}`, status: session.status });
+    }
+    const dirs = await allowedDirsFor(userId);
+    const draft = await draftPlan(session, { template: body.template as string | undefined, params: body.params as Record<string, unknown> | undefined, goal: body.goal as string | undefined, context: body.context as string | undefined }, dirs);
+    if (!draft.ok) return reply.status(draft.status).send({ error: draft.error, reason: draft.reason });
+    try {
+      const out = await withTransaction(async (client) => {
+        const locked = await getSession(client, userId, id, true);
+        if (!locked) return null;
+        const applied = await applyPlan(client, locked, draft.plan, userId, dirs);
+        if (!applied.ok) throw Object.assign(new Error(applied.error), { statusCode: applied.status, planErrors: applied.errors });
+        return applied;
+      });
+      if (!out) return reply.status(404).send({ error: "Session introuvable" });
+      return { session: out.session, tasks: out.tasks, source: draft.source, understanding: draft.understanding };
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; planErrors?: string[] };
+      if (err.planErrors) return reply.status(422).send({ error: err.message, errors: err.planErrors, plan: draft.plan, source: draft.source });
       throw e;
     }
   });

@@ -1,0 +1,114 @@
+{
+  "version": "1.0.0",
+  "generated_from": "backend/node-api/src/v2/planner/roles.ts",
+  "roles": [
+    {
+      "name": "desktop_operator",
+      "version": "1.0.0",
+      "description": "Pilote le bureau Windows (souris, clavier, fenêtres, applications) ; observe avant d'agir.",
+      "executor": "runtime",
+      "max_security_level": "L2",
+      "tools": [
+        "screenshot",
+        "click",
+        "double_click",
+        "right_click",
+        "move_mouse",
+        "drag",
+        "scroll",
+        "type_text",
+        "hotkey",
+        "window",
+        "open_app",
+        "wait",
+        "read_file",
+        "list_dir",
+        "record_screen",
+        "start_recording_bg",
+        "stop_recording_bg"
+      ]
+    },
+    {
+      "name": "coder",
+      "version": "1.0.0",
+      "description": "Lit, écrit et exécute du code dans le workspace (commandes en allowlist, sans shell).",
+      "executor": "runtime",
+      "max_security_level": "L2",
+      "tools": [
+        "run_command",
+        "read_file",
+        "list_dir",
+        "write_file",
+        "make_dir",
+        "move_file",
+        "wait"
+      ]
+    },
+    {
+      "name": "researcher",
+      "version": "1.0.0",
+      "description": "Lit le workspace pour collecter des faits ; aucun effet.",
+      "executor": "runtime",
+      "max_security_level": "L1",
+      "tools": [
+        "read_file",
+        "list_dir",
+        "wait",
+        "screenshot"
+      ]
+    },
+    {
+      "name": "video_editor",
+      "version": "1.0.0",
+      "description": "Enregistre l'écran et monte les vidéos de démonstration.",
+      "executor": "runtime",
+      "max_security_level": "L2",
+      "tools": [
+        "record_screen",
+        "start_recording_bg",
+        "stop_recording_bg",
+        "edit_video",
+        "resolve_montage",
+        "read_file",
+        "list_dir",
+        "write_file",
+        "make_dir",
+        "move_file",
+        "wait"
+      ]
+    },
+    {
+      "name": "phone_operator",
+      "version": "1.0.0",
+      "description": "Pilote un téléphone Android connecté (adb).",
+      "executor": "runtime",
+      "max_security_level": "L2",
+      "tools": [
+        "phone_list_devices",
+        "phone_screenshot",
+        "phone_tap",
+        "phone_swipe",
+        "phone_type",
+        "phone_key",
+        "phone_open_app",
+        "wait"
+      ]
+    },
+    {
+      "name": "qa_reviewer",
+      "version": "1.0.0",
+      "description": "Relit le travail d'une autre tâche à partir de ses preuves et de son évaluation (exécuté par P1).",
+      "executor": "p1",
+      "max_security_level": "L0",
+      "tools": []
+    },
+    {
+      "name": "content_writer",
+      "version": "1.0.0",
+      "description": "Rédige du contenu (modules de formation, synthèses) via le routeur de modèles (exécuté par P1).",
+      "executor": "p1",
+      "max_security_level": "L0",
+      "tools": []
+    }
+  ]
+}

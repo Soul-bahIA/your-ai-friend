@@ -45,7 +45,7 @@ describe.skipIf(!RUN)("évaluation par critères, QA et chaos (LOT 10)", () => {
     const { buildApp } = await import("../../src/app");
     app = await buildApp({ mediaDir: path.join(os.tmpdir(), "soulbah-pg-eval-media") });
     await pool.query("INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", [U, "eval@soulbah.local"]);
-    await pool.query("INSERT INTO agent_keys (user_id, key_hash, label, allowed_dirs) VALUES ($1, $2, 'PC eval', '[]'::jsonb)", [U, hashKey(rawKey)]);
+    await pool.query("INSERT INTO agent_keys (user_id, key_hash, label, allowed_dirs) VALUES ($1, $2, 'PC eval', $3::jsonb)", [U, hashKey(rawKey), JSON.stringify(["C:\\w"])]);
     const reg = await app.inject({ method: "POST", url: "/api/v2/runtime/register", headers: agent, payload: { hostname: "pc", version: "2.0.0", protocol: 1, max_slots: 8 } });
     runtimeId = reg.json().runtime_id;
   });
@@ -64,6 +64,10 @@ describe.skipIf(!RUN)("évaluation par critères, QA et chaos (LOT 10)", () => {
 
   /** Session approuvée, tâches promues, baux pris : renvoie les tâches dans l'ordre des nœuds. */
   async function running(nodes: Node[], simulated = false) {
+    // Chaque scénario part d'une file vide : les missions précédentes encore actives sont annulées
+    // (sinon leurs tâches READY seraient servies en premier par le bail).
+    const active = await pool.query("SELECT id FROM soulbah.sessions WHERE user_id = $1 AND status IN ('RUNNING', 'AWAITING_APPROVAL', 'DRAFT', 'PAUSED')", [U]);
+    for (const r of active.rows) await app.inject({ method: "POST", url: `/api/v2/sessions/${r.id}/cancel`, headers: jwt, payload: {} });
     const s = await app.inject({ method: "POST", url: "/api/v2/sessions", headers: jwt, payload: { goal: "évaluation", simulated, plan: { nodes } } });
     expect(s.statusCode, s.body).toBe(201);
     await app.inject({ method: "POST", url: `/api/v2/sessions/${s.json().session.id}/approve`, headers: jwt });
@@ -94,8 +98,8 @@ describe.skipIf(!RUN)("évaluation par critères, QA et chaos (LOT 10)", () => {
 
   it("critère non satisfait : étapes non idempotentes → FAILED (humain) ; idempotentes → RETRYING", async () => {
     const [a, b] = await running([
-      { key: "a", title: "déplacer", role: "coder", security_level: "L1", spec: { steps: [{ type: "move_file" }] }, acceptance_criteria: [{ type: "file_exists", path: "C:\\w\\absent" }] },
-      { key: "b", title: "lire", role: "coder", security_level: "L1", spec: { steps: [{ type: "read_file" }] }, acceptance_criteria: [{ type: "file_exists", path: "C:\\w\\absent" }] },
+      { key: "a", title: "déplacer", role: "coder", security_level: "L1", spec: { steps: [{ type: "move_file", src: "C:\\w\\a", dest: "C:\\w\\c" }] }, acceptance_criteria: [{ type: "file_exists", path: "C:\\w\\absent" }] },
+      { key: "b", title: "lire", role: "coder", security_level: "L1", spec: { steps: [{ type: "read_file", path: "C:\\w\\a" }] }, acceptance_criteria: [{ type: "file_exists", path: "C:\\w\\absent" }] },
     ]);
     await action(a.id, { step_index: 0, tool: "move_file", status: "verified" });
     await action(b.id, { step_index: 0, tool: "read_file", status: "verified", evidence: [{ kind: "file_content", confidence: "high", sha256: "c".repeat(64) }] });
@@ -127,12 +131,14 @@ describe.skipIf(!RUN)("évaluation par critères, QA et chaos (LOT 10)", () => {
   });
 
   it("tâche L2 sans preuve ≥ medium → échec ; avec une preuve medium → COMPLETED", async () => {
-    const [weak, strong] = await running([
-      { key: "weak", title: "taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text" }] } },
-      { key: "strong", title: "taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text" }, { type: "window" }] } },
-    ]);
+    // Deux nœuds qui pilotent le bureau : ressource exclusive desktop.input — jamais en même temps.
+    const node = (key: string) => ({ key, title: "taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "screenshot" }, { type: "type_text", text: "x" }] }, acceptance_criteria: [{ type: "ui_element_state", window_title: "Bloc-notes" }] });
+    const both = await running([node("weak"), node("strong")]);
+    expect(both.filter(Boolean)).toHaveLength(1);
+    const [weak] = await running([node("weak")]);
     await action(weak.id, { step_index: 0, tool: "type_text", status: "verified", evidence: [{ kind: "self_report", confidence: "none" }] });
     expect((await result(weak.id)).json().status).toBe("FAILED");
+    const [strong] = await running([node("strong")]);
     await action(strong.id, { step_index: 0, tool: "type_text", status: "verified", evidence: [{ kind: "self_report", confidence: "none" }] });
     await action(strong.id, { step_index: 1, tool: "window", status: "verified", evidence: [{ kind: "window_title", confidence: "medium", value: "Bloc-notes" }] });
     expect((await result(strong.id)).json().status).toBe("COMPLETED");

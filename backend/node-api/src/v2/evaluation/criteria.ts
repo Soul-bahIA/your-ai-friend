@@ -139,7 +139,8 @@ function best(hits: Hit[]): Hit | null {
 const TEST_COMMAND = /\b(pytest|vitest|jest|mocha|npm\s+(run\s+)?test|yarn\s+test|pnpm\s+test|go\s+test|cargo\s+test|dotnet\s+test)\b/i;
 
 function commandOf(a: ActionEvidence): string {
-  const cmd = a.params.command;
+  // run_command : `program` + `args` (catalogue) ; `command` accepté pour les plans écrits à la main.
+  const cmd = a.params.program ?? a.params.command;
   const args = Array.isArray(a.params.args) ? a.params.args.map(String).join(" ") : "";
   return `${typeof cmd === "string" ? cmd : ""} ${args}`.trim();
 }

@@ -18,6 +18,7 @@ import {
 import { isPlainObject, stripImageB64 } from "../lib/sanitize.js";
 import { findMaskedPlaceholder, maskTypedText, omitTypedText, restoreMaskedParams } from "../lib/redact.js";
 import { redactSecrets } from "../v2/security/redactSecrets.js";
+import { goalToSession } from "../v2/planner/bridge.js";
 import { getScreenshot } from "../services/screenshots.js";
 import { config } from "../config.js";
 
@@ -170,6 +171,20 @@ export async function agentGoalRoutes(app: FastifyInstance): Promise<void> {
       const parsed = validateGoalBody(request.body);
       if (!parsed.ok) return reply.status(400).send({ error: parsed.error });
       const agentKeyId = parseAgentKeyId((request.body as Record<string, unknown>).agent_key_id) ?? undefined;
+      // LOT 11 : pont vers une mission V2 (gabarit desktop_goal, approbation du plan requise).
+      if (config.v2GoalBridge) {
+        const v2 = await goalToSession(userId, parsed.value, { agentKeyId });
+        if (!v2.ok) return reply.status(v2.status).send({ error: v2.error, errors: v2.errors, reason: v2.reason, agents: v2.agents });
+        return {
+          success: true,
+          v2: true,
+          session_id: v2.session.id,
+          status: v2.session.status,
+          understanding: v2.understanding,
+          steps: v2.steps,
+          tasks: v2.tasks.map((t) => ({ id: t.id, node_key: t.node_key, role: t.role, security_level: t.security_level })),
+        };
+      }
       const outcome = await planAndQueueGoal(userId, parsed.value, { agentKeyId });
       if (!outcome.ok) {
         return reply.status(outcome.status).send({

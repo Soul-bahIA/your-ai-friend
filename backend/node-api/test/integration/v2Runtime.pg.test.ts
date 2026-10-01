@@ -43,7 +43,7 @@ describe.skipIf(!RUN)("runtime V2 : poignée de main, actions, réconciliation",
     const { buildApp } = await import("../../src/app");
     app = await buildApp({ mediaDir: path.join(os.tmpdir(), "soulbah-pg-rt-media") });
     await pool.query("INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", [U, "rt@soulbah.local"]);
-    await pool.query("INSERT INTO agent_keys (user_id, key_hash, label, allowed_dirs) VALUES ($1, $2, 'PC rt', '[]'::jsonb)", [U, hashKey(rawKey)]);
+    await pool.query("INSERT INTO agent_keys (user_id, key_hash, label, allowed_dirs) VALUES ($1, $2, 'PC rt', $3::jsonb)", [U, hashKey(rawKey), JSON.stringify(["C:\\w"])]);
   });
 
   afterAll(async () => {
@@ -81,7 +81,21 @@ describe.skipIf(!RUN)("runtime V2 : poignée de main, actions, réconciliation",
       method: "POST",
       url: "/api/v2/sessions",
       headers: jwt,
-      payload: { goal: "reprise", plan: { nodes: [{ key: "a", title: "A", role: "coder", security_level: "L1", spec: { steps: [{ type: "wait", seconds: 1 }, { type: "type_text", text: "x" }, { type: "wait", seconds: 1 }] } }] } },
+      payload: {
+        goal: "reprise",
+        plan: {
+          nodes: [
+            {
+              key: "a",
+              title: "A",
+              role: "coder",
+              security_level: "L1",
+              spec: { steps: [{ type: "wait", seconds: 1 }, { type: "move_file", src: "C:\\w\\a.txt", dest: "C:\\w\\b.txt" }, { type: "wait", seconds: 1 }] },
+              acceptance_criteria: [{ type: "file_exists", path: "C:\\w\\b.txt" }],
+            },
+          ],
+        },
+      },
     });
     expect(s.statusCode).toBe(201);
     await app.inject({ method: "POST", url: `/api/v2/sessions/${s.json().session.id}/approve`, headers: jwt });
@@ -136,6 +150,7 @@ describe.skipIf(!RUN)("runtime V2 : poignée de main, actions, réconciliation",
     // Tâche terminée → abandon ; annulée → cancel.
     await app.inject({ method: "POST", url: `/api/v2/runtime/tasks/${taskId}/result`, headers: agent, payload: { runtime_id: runtimeId, attempt: 1, result: { ok: true } } });
     const r2 = await app.inject({ method: "POST", url: "/api/v2/runtime/reconcile", headers: agent, payload: { runtime_id: runtimeId, tasks: [{ task_id: taskId, attempt: 1 }] } });
-    expect(r2.json().decisions[0]).toMatchObject({ decision: "abandon", status: "COMPLETED" });
+    // Tâche terminée (LOT 10 : critère file_exists non prouvé, étape non idempotente → FAILED) → abandon.
+    expect(r2.json().decisions[0]).toMatchObject({ decision: "abandon", status: "FAILED" });
   });
 });
