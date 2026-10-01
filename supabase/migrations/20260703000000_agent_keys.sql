@@ -17,10 +17,25 @@ ALTER TABLE public.agent_keys ENABLE ROW LEVEL SECURITY;
 
 -- L'utilisateur gère uniquement ses propres clés (via l'app, JWT).
 -- Le backend, lui, lit par hash avec la clé de service (hors RLS) pour la validation.
-CREATE POLICY "Users manage own agent keys" ON public.agent_keys
-  FOR ALL TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+--
+-- [LOT 1 / T47] Garde de rejeu ajoutée a posteriori. Cette migration est peut-être déjà
+-- appliquée sur Supabase : `supabase db push` ne la rejouera pas (historique par
+-- version), et sur une base neuve le résultat est IDENTIQUE à l'original (la table
+-- vient d'être créée, elle n'a aucune policy → la policy est créée). Seul un rejeu
+-- (CI : migrations ×2, restauration partielle) devient sûr.
+-- Garde volontairement « aucune policy sur la table » plutôt que DROP + CREATE :
+-- 20261002000000_lot1_fixes.sql remplace cette policy FOR ALL par SELECT + DELETE ;
+-- un rejeu de ce fichier ne doit pas rouvrir INSERT/UPDATE au client.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                  WHERE schemaname = 'public' AND tablename = 'agent_keys') THEN
+    CREATE POLICY "Users manage own agent keys" ON public.agent_keys
+      FOR ALL TO authenticated
+      USING (auth.uid() = user_id)
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_agent_keys_hash ON public.agent_keys (key_hash);
 CREATE INDEX IF NOT EXISTS idx_agent_keys_user ON public.agent_keys (user_id);

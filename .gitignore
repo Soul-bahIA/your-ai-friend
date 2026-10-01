@@ -29,3 +29,15 @@ dist-ssr
 
 # Sauvegardes de la base (scripts/backup_db.*) — ne jamais versionner
 backups/
+
+# Python : un venv par composant (scripts/setup_venvs.*), caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Certificats / phrases de passe locales (PG_SSL_CA, chiffrement des sauvegardes)
+*.crt
+*.pem
+backup_passphrase*.txt

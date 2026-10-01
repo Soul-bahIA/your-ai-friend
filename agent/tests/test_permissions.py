@@ -42,16 +42,24 @@ def test_path_inside_basics(ws):
 
 
 def test_screenshot_path_rules(ws, monkeypatch):
+    # LOT 1 / S17 : sans confirmation uniquement pour une tâche planifiée par le
+    # serveur (payload.goal_meta) — le contexte est fourni par l'executor.
     allowed, root = ws
     monkeypatch.setattr(permissions, "_timed_input", _never_asked)
     gate = PermissionGate("confirm", [str(allowed)], dry_run=False)
     skill = ScreenshotSkill()
-    assert gate.authorize(skill, {"type": "screenshot"})[0]
-    assert gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "cap.png")})[0]
-    assert not gate.authorize(skill, {"type": "screenshot", "path": str(root / "cap.png")})[0]
-    assert not gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "evil.py")})[0]
-    assert not gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "x.bat")})[0]
-    assert not gate.authorize(skill, {"type": "screenshot", "path": ["x.png"]})[0]
+    planned = {"goal_meta": True}
+    assert gate.authorize(skill, {"type": "screenshot"}, planned)[0]
+    assert gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "cap.png")}, planned)[0]
+    assert not gate.authorize(skill, {"type": "screenshot", "path": str(root / "cap.png")}, planned)[0]
+    assert not gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "evil.py")}, planned)[0]
+    assert not gate.authorize(skill, {"type": "screenshot", "path": str(allowed / "x.bat")}, planned)[0]
+    assert not gate.authorize(skill, {"type": "screenshot", "path": ["x.png"]}, planned)[0]
+    # Hors objectif planifié, en mode confirm : la capture est confirmée (S17).
+    asked = []
+    monkeypatch.setattr(permissions, "_timed_input", lambda p, t: asked.append(p) or "n")
+    assert not gate.authorize(skill, {"type": "screenshot"})[0]
+    assert len(asked) == 1
 
 
 def test_confirm_timeout_refuses(ws, monkeypatch):
@@ -126,6 +134,9 @@ def test_phone_injection_rejected(ws):
     assert not gate.authorize(ph, {"type": "phone_key", "keycode": "KEYCODE_HOME; reboot"})[0]
     assert not gate.authorize(ph, {"type": "phone_open_app", "package": "com.x;rm -rf /sdcard"})[0]
     assert not gate.authorize(ph, {"type": "phone_tap", "x": 1, "y": 2, "device_id": "abc;reboot"})[0]
+    # LOT 1 / S6 : le téléphone est sous le verrou des actions d'entrée — les cas
+    # valides passent avec la pré-autorisation explicite (sinon : confirmation).
+    gate = PermissionGate("auto", [str(allowed)], dry_run=False, allow_input_control=True)
     assert gate.authorize(ph, {"type": "phone_key", "keycode": "KEYCODE_HOME"})[0]
     assert gate.authorize(ph, {"type": "phone_open_app", "package": "com.android.chrome"})[0]
 

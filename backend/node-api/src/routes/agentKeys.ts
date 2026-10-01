@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { requireUser, forgetAgentKey } from "../auth";
-import { isUuid } from "../lib/sanitize";
-import { createAgentKey, listAgentKeys, revokeAgentKey } from "../services/agentKeys";
+import { requireUser, forgetAgentKey } from "../auth.js";
+import { isUuid } from "../lib/sanitize.js";
+import { createAgentKey, listAgentKeys, revokeAgentKey } from "../services/agentKeys.js";
 
 // Gestion des clés de l'agent local par l'utilisateur (JWT requis).
 

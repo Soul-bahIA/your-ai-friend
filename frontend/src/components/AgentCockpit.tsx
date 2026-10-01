@@ -1,42 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { cancelAgentTask, fetchTaskScreenshot } from "@/lib/agentApi";
+import { cockpitReducer, eventText, initialCockpitState, type AgentEvent } from "@/lib/agentEvents";
 import { toast } from "sonner";
 import {
   Play, Pause, Square, Monitor, CheckCircle2, XCircle, Loader2,
-  Camera, Flag, ChevronRight, Circle, type LucideIcon,
+  Camera, Flag, ChevronRight, Circle, ShieldAlert, ShieldCheck, Ban, Brain, RotateCcw, type LucideIcon,
 } from "lucide-react";
-
-interface AgentEvent {
-  id: string;
-  task_id: string;
-  type: string;
-  message: string | null;
-  data: { index?: number; image_b64?: string; media_type?: string; duration_s?: number; total?: number };
-  created_at: string;
-}
-
-/** Nombre maximal d'évènements conservés en mémoire (timeline). */
-const MAX_EVENTS = 500;
-
-const SAFE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-
-const toDataUrl = (ev: AgentEvent) => {
-  const b64 = ev.data?.image_b64;
-  if (!b64) return null;
-  const type = ev.data.media_type && SAFE_IMAGE_TYPES.has(ev.data.media_type) ? ev.data.media_type : "image/jpeg";
-  return `data:${type};base64,${b64}`;
-};
-
-/** Retire la capture base64 (lourde) de l'évènement stocké : seule la dernière image est gardée à part. */
-const stripImage = (ev: AgentEvent): AgentEvent => {
-  if (!ev.data?.image_b64) return ev;
-  const { image_b64, ...rest } = ev.data;
-  return { ...ev, data: rest };
-};
-
-const capEvents = (list: AgentEvent[]) => (list.length > MAX_EVENTS ? list.slice(-MAX_EVENTS) : list);
 
 const typeMeta: Record<string, { icon: LucideIcon; color: string; label: string }> = {
   task_started: { icon: Flag, color: "text-primary", label: "Démarrage" },
@@ -44,18 +16,22 @@ const typeMeta: Record<string, { icon: LucideIcon; color: string; label: string 
   step_done: { icon: CheckCircle2, color: "text-success", label: "OK" },
   step_failed: { icon: XCircle, color: "text-destructive", label: "Échec" },
   screenshot: { icon: Camera, color: "text-accent", label: "Capture" },
+  approval_required: { icon: ShieldAlert, color: "text-warning", label: "Confirmation" },
+  approval_result: { icon: ShieldCheck, color: "text-muted-foreground", label: "Réponse" },
   task_completed: { icon: CheckCircle2, color: "text-success", label: "Terminé" },
   task_failed: { icon: XCircle, color: "text-destructive", label: "Arrêté" },
+  task_cancelled: { icon: Ban, color: "text-muted-foreground", label: "Annulée" },
+  task_approved: { icon: ShieldCheck, color: "text-success", label: "Approuvée" },
+  task_requeued: { icon: RotateCcw, color: "text-warning", label: "Remise en file" },
+  evaluation: { icon: Brain, color: "text-primary", label: "Évaluation" },
   info: { icon: Circle, color: "text-muted-foreground", label: "Info" },
 };
 
 const AgentCockpit = () => {
   const { user } = useAuth();
   const userId = user?.id;
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [liveImage, setLiveImage] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
+  const [state, dispatch] = useReducer(cockpitReducer, initialCockpitState);
+  const { events, liveImage, taskId, running, pendingApproval, screenshotRequest } = state;
   const [busy, setBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
@@ -68,14 +44,9 @@ const AgentCockpit = () => {
         const d = await apiFetch<{ tasks?: { id: string }[] }>("/api/agent-tasks?status=in_progress");
         const task = d?.tasks?.[0];
         if (!task || ignore) return;
-        setTaskId(task.id);
-        setRunning(true);
         const ed = await apiFetch<{ events?: AgentEvent[] }>(`/api/agent-tasks/${task.id}/events`);
-        const list = ed?.events ?? [];
-        if (ignore || list.length === 0) return;
-        const lastImg = [...list].reverse().find((e) => e.data?.image_b64);
-        if (lastImg) setLiveImage(toDataUrl(lastImg));
-        setEvents(capEvents(list.map(stripImage)));
+        if (ignore) return;
+        dispatch({ type: "hydrate", taskId: task.id, events: ed?.events ?? [] });
       } catch (err) {
         // Pas de tâche en cours ou backend injoignable : cockpit au repos.
         console.warn("[Cockpit] Reprise impossible :", errorMessage(err));
@@ -87,6 +58,7 @@ const AgentCockpit = () => {
   }, [userId]);
 
   // Abonnement temps réel aux évènements de l'agent (INSERT sur agent_events).
+  // Le filtrage (formations ignorées, autre tâche…) est fait par le réducteur.
   useEffect(() => {
     if (!userId) return;
     const channel = supabase
@@ -94,26 +66,26 @@ const AgentCockpit = () => {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "agent_events", filter: `user_id=eq.${userId}` },
-        (payload) => {
-          const raw = payload.new as AgentEvent;
-          const image = toDataUrl(raw);
-          const ev = stripImage(raw);
-          // Nouvelle tâche : on réinitialise la timeline.
-          if (ev.type === "task_started") {
-            setEvents([ev]);
-            setTaskId(ev.task_id);
-            setLiveImage(null);
-            setRunning(true);
-          } else {
-            setEvents((prev) => capEvents([...prev, ev]));
-            if (ev.type === "task_completed" || ev.type === "task_failed") setRunning(false);
-          }
-          if (image) setLiveImage(image);
-        },
+        (payload) => dispatch({ type: "event", event: payload.new as AgentEvent }),
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [userId]);
+
+  // Capture signalée (data.has_image) : récupérée via GET /:id/screenshot (contrat §8).
+  useEffect(() => {
+    if (!screenshotRequest) return;
+    const ctrl = new AbortController();
+    const { taskId: shotTask } = screenshotRequest;
+    fetchTaskScreenshot(shotTask, ctrl.signal)
+      .then((image) => {
+        if (!ctrl.signal.aborted) dispatch({ type: "screenshot", taskId: shotTask, image });
+      })
+      .catch((err) => {
+        if (!ctrl.signal.aborted) console.warn("[Cockpit] Capture indisponible :", errorMessage(err));
+      });
+    return () => ctrl.abort();
+  }, [screenshotRequest]);
 
   // Auto-scroll de la timeline.
   useEffect(() => {
@@ -124,11 +96,17 @@ const AgentCockpit = () => {
     if (!taskId || !userId) return;
     setBusy(true);
     try {
-      await apiFetch(`/api/agent-tasks/${taskId}/control`, {
-        method: "POST",
-        json: { control: value },
-      });
-      if (value === "stop") setRunning(false);
+      if (value === "stop") {
+        // Arrêt = annulation (contrat §2) : l'agent finit l'étape courante puis passe en « cancelled ».
+        await cancelAgentTask(taskId);
+        dispatch({ type: "stopped" });
+        toast.success("Arrêt demandé", { description: "L'agent s'arrête après l'étape en cours." });
+      } else {
+        await apiFetch(`/api/agent-tasks/${taskId}/control`, {
+          method: "POST",
+          json: { control: value },
+        });
+      }
     } catch (err) {
       toast.error("Commande de l'agent impossible", { description: errorMessage(err) });
     } finally {
@@ -164,6 +142,21 @@ const AgentCockpit = () => {
         </div>
       </div>
 
+      {/* Confirmation demandée à la console du PC (contrat §13) */}
+      {pendingApproval && (
+        <div className="flex items-start gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2" role="status" aria-live="polite">
+          <Loader2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 animate-spin text-warning" />
+          <div className="min-w-0 text-xs">
+            <p className="font-medium text-warning">En attente de confirmation sur le PC</p>
+            <p className="text-muted-foreground break-words">
+              {pendingApproval.stepIndex !== null && `Étape ${pendingApproval.stepIndex + 1}`}
+              {pendingApproval.action && ` · ${pendingApproval.action}`}
+              {pendingApproval.summary && ` — ${pendingApproval.summary}`}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2">
         {/* Écran live */}
         <div className="flex min-h-[240px] items-center justify-center border-b border-border bg-black/40 md:border-b-0 md:border-r">
@@ -192,7 +185,7 @@ const AgentCockpit = () => {
                   <li key={ev.id} className="flex items-start gap-2">
                     <Icon className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${meta.color}`} />
                     <div className="min-w-0 flex-1">
-                      <span className="text-[11px] text-foreground/90">{ev.message}</span>
+                      <span className="text-[11px] text-foreground/90">{eventText(ev)}</span>
                       {ev.data?.duration_s !== undefined && (
                         <span className="ml-1 text-[10px] text-muted-foreground">({ev.data.duration_s}s)</span>
                       )}

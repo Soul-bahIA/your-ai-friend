@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { analyze, type AnalyzeResponse } from "./api/client";
 import { ResultCard } from "./components/ResultCard";
 import { HealthBar } from "./components/HealthBar";
+import { AuthPanel } from "./components/AuthPanel";
 
 export default function App() {
   const [text, setText] = useState("");
@@ -37,6 +38,8 @@ export default function App() {
       </header>
 
       <main className="main">
+        <AuthPanel />
+
         <form className="card" onSubmit={onSubmit}>
           <label htmlFor="text" className="label">
             Texte à analyser

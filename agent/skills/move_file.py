@@ -6,6 +6,7 @@ import shutil
 
 from skills.base import PathCheck, Skill, SkillResult
 from skills.filesystem import touches_git_dir
+from skills.safety import deny_reason
 
 
 class MoveFileSkill(Skill):
@@ -32,6 +33,10 @@ class MoveFileSkill(Skill):
             return SkillResult(ok=False, detail="champs 'src' et 'dest' requis")
         if touches_git_dir(src) or touches_git_dir(dest):
             return SkillResult(ok=False, detail="déplacement refusé depuis/vers un dossier .git")
+        for p in (src, dest):
+            reason = deny_reason(p)
+            if reason:
+                return SkillResult(ok=False, detail=f"chemin interdit ({reason}) : {p}")
         if not os.path.exists(src):
             return SkillResult(ok=False, detail=f"source introuvable : {src}")
 

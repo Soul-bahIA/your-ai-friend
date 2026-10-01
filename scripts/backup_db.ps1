@@ -3,10 +3,27 @@
 # Produit, dans backups\ (ignore par git) :
 #   backups\soulbah_YYYYMMDD_HHMM.dump  - format custom (pg_restore)
 #   backups\soulbah_YYYYMMDD_HHMM.sql   - format texte (psql)
+# (+ .gpg / .age si le chiffrement est configure, voir plus bas)
 #
 # Connexion : $env:BACKUP_DATABASE_URL, sinon DATABASE_URL lu dans backend\.env.
 # Le pooler Supabase en mode transaction (6543) est remplace par le mode session (5432).
 # Schemas : $env:BACKUP_SCHEMAS (defaut : "public auth").
+# Dossier : $env:BACKUP_DIR (defaut : backups\ a la racine du depot).
+#
+# Secret : le mot de passe n'apparait JAMAIS sur la ligne de commande de pg_dump.
+# L'URL est decomposee en PGHOST/PGPORT/PGUSER/PGDATABASE et le mot de passe est ecrit
+# dans un fichier pgpass temporaire (PGPASSFILE, dans %TEMP% de l'utilisateur),
+# supprime a la fin du script, meme en cas d'erreur.
+#
+# Chiffrement (facultatif mais RECOMMANDE : le dump contient toutes les donnees) :
+#   $env:BACKUP_AGE_RECIPIENT = 'age1...'          -> age -r <cle publique>       (.age)
+#   $env:BACKUP_GPG_RECIPIENT = '<id ou e-mail>'   -> gpg --encrypt (cle publique) (.gpg)
+#   $env:BACKUP_GPG_PASSPHRASE_FILE = '<fichier>'  -> gpg --symmetric AES256, phrase lue dans le fichier
+# gpg : celui du PATH, sinon celui de Git for Windows (C:\Program Files\Git\usr\bin\gpg.exe).
+# Apres chiffrement reussi, les fichiers en clair sont supprimes ($env:BACKUP_KEEP_PLAINTEXT='1'
+# pour les garder). Sans configuration : avertissement seulement.
+#
+# Verification TLS stricte (facultatif) : $env:PGSSLMODE='verify-full'; $env:PGSSLROOTCERT='<CA Supabase>'.
 #
 # Usage :
 #   powershell -ExecutionPolicy Bypass -File scripts\backup_db.ps1
@@ -15,7 +32,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root    = Split-Path -Parent $PSScriptRoot
 $EnvFile = Join-Path $Root 'backend\.env'
-$OutDir  = Join-Path $Root 'backups'
+$OutDir  = if ($env:BACKUP_DIR) { $env:BACKUP_DIR } else { Join-Path $Root 'backups' }
 $Schemas = if ($env:BACKUP_SCHEMAS) { $env:BACKUP_SCHEMAS } else { 'public auth' }
 
 $DbUrl = $env:BACKUP_DATABASE_URL
@@ -27,8 +44,31 @@ if (-not $DbUrl) {
     if ($line) { $DbUrl = ($line -replace '^\s*DATABASE_URL=', '').Trim().Trim('"').Trim("'") }
 }
 if (-not $DbUrl) { throw "DATABASE_URL vide dans backend\.env." }
+if ($DbUrl -notmatch '^postgres(ql)?://') { throw "DATABASE_URL doit commencer par postgres:// ou postgresql://" }
 
-$DbUrl = $DbUrl -replace 'pooler\.supabase\.com:6543', 'pooler.supabase.com:5432'
+# --- Decomposition de l'URL ------------------------------------------------------------
+$Uri = [System.Uri]$DbUrl
+$UserInfo = $Uri.UserInfo
+$DbUser = ''; $DbPass = ''
+if ($UserInfo) {
+    $i = $UserInfo.IndexOf(':')
+    if ($i -ge 0) {
+        $DbUser = [System.Uri]::UnescapeDataString($UserInfo.Substring(0, $i))
+        $DbPass = [System.Uri]::UnescapeDataString($UserInfo.Substring($i + 1))
+    } else {
+        $DbUser = [System.Uri]::UnescapeDataString($UserInfo)
+    }
+}
+$DbHost = $Uri.Host
+$DbPort = if ($Uri.Port -gt 0) { $Uri.Port } else { 5432 }
+$DbName = [System.Uri]::UnescapeDataString($Uri.AbsolutePath.TrimStart('/'))
+if (-not $DbName) { $DbName = 'postgres' }
+
+# Pooler Supabase : mode transaction (6543) -> mode session (5432).
+if ($DbHost -like '*pooler.supabase.com' -and $DbPort -eq 6543) { $DbPort = 5432 }
+
+# sslmode eventuel de l'URL ; require par defaut (Supabase exige TLS).
+if (-not $env:PGSSLMODE -and $Uri.Query -match '[?&]sslmode=([^&]+)') { $env:PGSSLMODE = $Matches[1] }
 if (-not $env:PGSSLMODE) { $env:PGSSLMODE = 'require' }
 
 $PgDump = (Get-Command pg_dump -ErrorAction SilentlyContinue | Select-Object -First 1).Source
@@ -39,6 +79,38 @@ if (-not $PgDump) {
 }
 if (-not $PgDump) { throw "pg_dump introuvable (installez les outils client PostgreSQL)." }
 
+# --- Chiffrement : verifie AVANT le dump (echec rapide) --------------------------------
+$Encrypt = ''
+$Tool = $null
+if ($env:BACKUP_AGE_RECIPIENT) {
+    $Tool = (Get-Command age -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $Tool) { throw "BACKUP_AGE_RECIPIENT defini mais 'age' introuvable." }
+    $Encrypt = 'age'
+} elseif ($env:BACKUP_GPG_RECIPIENT -or $env:BACKUP_GPG_PASSPHRASE_FILE) {
+    $Tool = (Get-Command gpg -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $Tool -and (Test-Path 'C:\Program Files\Git\usr\bin\gpg.exe')) { $Tool = 'C:\Program Files\Git\usr\bin\gpg.exe' }
+    if (-not $Tool) { throw "Chiffrement gpg demande mais 'gpg' introuvable." }
+    if (-not $env:BACKUP_GPG_RECIPIENT -and -not (Test-Path $env:BACKUP_GPG_PASSPHRASE_FILE)) {
+        throw "BACKUP_GPG_PASSPHRASE_FILE introuvable : $($env:BACKUP_GPG_PASSPHRASE_FILE)"
+    }
+    $Encrypt = 'gpg'
+}
+
+function Protect-BackupFile([string]$Path) {
+    switch ($Encrypt) {
+        'age' { & $Tool -r $env:BACKUP_AGE_RECIPIENT -o "$Path.age" $Path }
+        'gpg' {
+            if ($env:BACKUP_GPG_RECIPIENT) {
+                & $Tool --batch --yes --encrypt --recipient $env:BACKUP_GPG_RECIPIENT --output "$Path.gpg" $Path
+            } else {
+                & $Tool --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 `
+                    --passphrase-file $env:BACKUP_GPG_PASSPHRASE_FILE --output "$Path.gpg" $Path
+            }
+        }
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Chiffrement $Encrypt de $Path echoue (code $LASTEXITCODE)." }
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $Stamp = Get-Date -Format 'yyyyMMdd_HHmm'
 $Base  = Join-Path $OutDir "soulbah_$Stamp"
@@ -46,15 +118,56 @@ $Base  = Join-Path $OutDir "soulbah_$Stamp"
 $SchemaArgs = @()
 foreach ($s in ($Schemas -split '\s+' | Where-Object { $_ })) { $SchemaArgs += "--schema=$s" }
 
-Write-Host "pg_dump : $PgDump - schemas : $Schemas"
+# Variables libpq propres a ce processus (restaurees a la fin).
+$Saved = @{}
+foreach ($n in 'PGHOST', 'PGPORT', 'PGUSER', 'PGDATABASE', 'PGPASSFILE', 'PGPASSWORD', 'PGAPPNAME') {
+    $Saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
+}
+$PassFile = $null
+$Success = $false
+try {
+    $env:PGHOST = $DbHost; $env:PGPORT = "$DbPort"; $env:PGUSER = $DbUser; $env:PGDATABASE = $DbName
+    $env:PGAPPNAME = 'soulbah-backup'
+    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue   # jamais de mot de passe dans l'environnement
+    if ($DbPass) {
+        $esc = { param($v) ($v -replace '\\', '\\') -replace ':', '\:' }
+        $PassFile = Join-Path ([System.IO.Path]::GetTempPath()) ("soulbah_pgpass_" + [guid]::NewGuid().ToString('N') + ".conf")
+        $entry = "{0}:{1}:*:{2}:{3}" -f (& $esc $DbHost), $DbPort, (& $esc $DbUser), (& $esc $DbPass)
+        [System.IO.File]::WriteAllText($PassFile, $entry + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $env:PGPASSFILE = $PassFile
+    }
+    $DbPass = $null; $DbUrl = $null
 
-Write-Host "-> $Base.dump (format custom)"
-& $PgDump "--dbname=$DbUrl" --format=custom --no-owner --no-privileges @SchemaArgs "--file=$Base.dump"
-if ($LASTEXITCODE -ne 0) { throw "pg_dump (custom) a echoue (code $LASTEXITCODE)." }
+    Write-Host "pg_dump : $PgDump - $DbUser@${DbHost}:$DbPort/$DbName (sslmode=$($env:PGSSLMODE)) - schemas : $Schemas"
 
-Write-Host "-> $Base.sql (format texte)"
-& $PgDump "--dbname=$DbUrl" --format=plain --no-owner --no-privileges @SchemaArgs "--file=$Base.sql"
-if ($LASTEXITCODE -ne 0) { throw "pg_dump (texte) a echoue (code $LASTEXITCODE)." }
+    Write-Host "-> $Base.dump (format custom)"
+    & $PgDump --format=custom --no-owner --no-privileges @SchemaArgs "--file=$Base.dump"
+    if ($LASTEXITCODE -ne 0) { throw "pg_dump (custom) a echoue (code $LASTEXITCODE)." }
 
-Get-Item "$Base.dump", "$Base.sql" | Format-Table Name, Length
-Write-Host "Sauvegarde terminee."
+    Write-Host "-> $Base.sql (format texte)"
+    & $PgDump --format=plain --no-owner --no-privileges @SchemaArgs "--file=$Base.sql"
+    if ($LASTEXITCODE -ne 0) { throw "pg_dump (texte) a echoue (code $LASTEXITCODE)." }
+
+    if ($Encrypt) {
+        foreach ($f in "$Base.dump", "$Base.sql") {
+            Write-Host "-> chiffrement $Encrypt : $f"
+            Protect-BackupFile $f
+            if ($env:BACKUP_KEEP_PLAINTEXT -ne '1') { Remove-Item -Force $f }
+        }
+        Get-ChildItem "$Base.*" | Format-Table Name, Length
+    } else {
+        Get-Item "$Base.dump", "$Base.sql" | Format-Table Name, Length
+        Write-Warning "Sauvegarde NON chiffree (toutes les donnees en clair). Definir BACKUP_AGE_RECIPIENT, BACKUP_GPG_RECIPIENT ou BACKUP_GPG_PASSPHRASE_FILE."
+    }
+    $Success = $true
+    Write-Host "Sauvegarde terminee."
+} finally {
+    if ($PassFile -and (Test-Path $PassFile)) { Remove-Item -Force $PassFile }
+    foreach ($n in $Saved.Keys) { [Environment]::SetEnvironmentVariable($n, $Saved[$n], 'Process') }
+    if (-not $Success) {
+        # Echec : ne pas laisser de dump partiel (ou en clair) derriere soi.
+        foreach ($ext in '.dump', '.sql', '.dump.gpg', '.sql.gpg', '.dump.age', '.sql.age') {
+            if (Test-Path "$Base$ext") { Remove-Item -Force "$Base$ext" }
+        }
+    }
+}

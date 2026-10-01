@@ -1,8 +1,13 @@
+# Dépendances d'exécution de python-ia (épinglées). Référence d'installation : un
+# venv DÉDIÉ backend/python-ia/.venv (voir requirements-dev.txt), jamais le Python
+# global partagé avec l'agent (T34). Ces épingles sont celles validées par la suite
+# de tests dans ce venv (Python 3.11 ; CI 3.11/3.12).
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 pydantic==2.13.5
-# output_config (sorties structurées) nécessite un SDK récent ; 1.x non validé ici.
+# output_config (format + effort) et timeout par requête : SDK récent ; 1.x non validé ici
+# (testé : 0.116.0 et 0.125.0).
 anthropic>=0.116.0,<1.0
 
 # Production vidéo des formations (narration TTS + diapos + montage MP4)

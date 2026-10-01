@@ -9,6 +9,7 @@ brique d'exécution (côté node) dispatche ensuite vers la route correspondante
 from __future__ import annotations
 
 from .llm import structured_generate
+from .parsing import parse_bool
 
 # Registre des agents spécialisés (extensible). `capability` = brique d'exécution cible.
 AGENTS: dict[str, dict[str, str]] = {
@@ -69,9 +70,13 @@ async def route_request(request: str, provider: str | None = None) -> dict:
         [{"role": "user", "content": f"DEMANDE :\n{request}"}],
         ROUTE_SCHEMA,
         max_tokens=1200,
-        task="reasoning",
+        task="routing",  # classification courte -> profil « cheap »
         provider=provider,
     )
+    # bool("false") vaut True (T43) : parsing strict des booléens renvoyés par le LLM.
+    result["needs_memory_check"] = parse_bool(result.get("needs_memory_check"), False)
+    if not isinstance(result.get("subtasks"), list):
+        result["subtasks"] = []
     # Enrichit avec les métadonnées de l'agent choisi (label + capacité d'exécution).
     agent_id = result.get("agent", "")
     if not isinstance(agent_id, str):

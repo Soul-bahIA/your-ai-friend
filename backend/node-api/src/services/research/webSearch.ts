@@ -2,7 +2,7 @@
 // Activée par WEB_SEARCH_PROVIDER + clé correspondante. Sans clé : `available=false`
 // et le moteur de recherche se rabat sur la KB + la synthèse du modèle.
 
-import { logger } from "../../lib/logger";
+import { logger } from "../../lib/logger.js";
 
 const WEB_SEARCH_TIMEOUT_MS = 15_000;
 

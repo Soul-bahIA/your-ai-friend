@@ -6,7 +6,7 @@ export class TtlCache<V> {
   constructor(
     private maxEntries: number,
     private defaultTtlMs: number,
-    private now: () => number = Date.now,
+    private now: () => number = () => Date.now(),
   ) {}
 
   get(key: string): V | undefined {

@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { pool } from "../db";
-import { requireUser } from "../auth";
-import { logEvent } from "../services/logs";
-import { clampInt, isUuid } from "../lib/sanitize";
+import { pool } from "../db.js";
+import { requireUser } from "../auth.js";
+import { logEvent } from "../services/logs.js";
+import { clampInt, isUuid } from "../lib/sanitize.js";
 
 // Port de l'edge function `manage-database`. Toutes les requêtes sont scopées par
 // user_id (le pool tourne en direct sur Postgres, donc RLS non appliqué : on filtre

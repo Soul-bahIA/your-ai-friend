@@ -3,9 +3,9 @@
 // analyse de la demande → recherche KB-first (documente + enrichit la base de
 // connaissances) → programme → détail de chaque module. Le tout s'appuie sur les
 // trois fondations : orchestrateur multi-IA, base de connaissances, recherche KB-first.
-import { analyzeFormation, buildProgram, buildModule } from "../../clients/iaClient";
-import type { FormationAnalysis } from "../../clients/iaClient";
-import { researchService } from "../research";
+import { analyzeFormation, buildProgram, buildModule } from "../../clients/iaClient.js";
+import type { FormationAnalysis } from "../../clients/iaClient.js";
+import { researchService } from "../research/index.js";
 
 export interface FormationCurriculum {
   title: string;

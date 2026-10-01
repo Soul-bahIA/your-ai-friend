@@ -1,0 +1,8 @@
+# Empreintes gitleaks acceptées (une par ligne : <commit>:<fichier>:<règle>:<ligne>).
+# Utilisé par le job CI `security` : gitleaks git --gitleaks-ignore-path .github/.gitleaksignore
+#
+# S33 (audit LOT 0) : clé anon Supabase (VITE_SUPABASE_PUBLISHABLE_KEY) commitée dans .env
+# par Lovable. Clé publique PAR CONCEPTION (embarquée dans le front, protégée par la RLS) ;
+# elle ne donne aucun droit au-delà des policies. Ne JAMAIS ajouter ici une clé
+# service_role, un mot de passe de base ou une clé de fournisseur IA : les révoquer.
+55b39dd5414d8537735dcb8eee4003e8e12aa7e1:.env:jwt:2

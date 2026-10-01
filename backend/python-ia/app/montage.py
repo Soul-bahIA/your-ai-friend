@@ -28,7 +28,8 @@ def _title_card(text: str, duration: float, subtitle: str = ""):
     d.rectangle([0, _H // 2 + 60, _W, _H // 2 + 64], fill=_ACCENT)
 
     def font(sz: int):
-        for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts", "DejaVuSans-Bold.ttf")
+        for name in (bundled, "arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
             try:
                 return ImageFont.truetype(name, sz)
             except Exception:  # noqa: BLE001

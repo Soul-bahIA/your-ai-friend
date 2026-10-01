@@ -1,9 +1,10 @@
 // Implémentation Supabase (PostgreSQL) de KnowledgeStore.
 // Toutes les requêtes sont scopées par user_id (le backend se connecte en direct au
 // pooler, hors RLS — le scoping est donc appliqué explicitement, comme ailleurs).
-import { pool, withTransaction, type Queryable } from "../../db";
-import { sanitizeLimit } from "../../lib/sanitize";
-import { embed, toVectorLiteral } from "./embeddings";
+import { pool, withTransaction, type Queryable } from "../../db.js";
+import { sanitizeLimit } from "../../lib/sanitize.js";
+import { embed, toVectorLiteral } from "./embeddings.js";
+import { clampConfidence, knowledgeHash } from "./hash.js";
 import type {
   KnowledgeStore,
   KnowledgeEntry,
@@ -11,7 +12,7 @@ import type {
   KnowledgeVersion,
   KnowledgeDomain,
   SearchQuery,
-} from "./types";
+} from "./types.js";
 
 const ENTRY_COLS = `id, user_id, title, description, content, summary, domain, category,
   keywords, tags, sources, source, confidence, version, links, content_hash,
@@ -55,10 +56,13 @@ async function embedFor(text: string, pre?: PreEmbedding): Promise<number[] | nu
   return pre && pre.text === text ? pre.emb : embed(text);
 }
 
+/** Fusion d'un patch ; l'empreinte est RECALCULÉE sur le titre/contenu fusionnés (jamais périmée). */
 function mergeEntry(current: KnowledgeEntry, patch: Partial<KnowledgeInput>): KnowledgeInput {
+  const title = patch.title ?? current.title;
+  const content = patch.content ?? current.content;
   return {
-    title: patch.title ?? current.title,
-    content: patch.content ?? current.content,
+    title,
+    content,
     description: patch.description ?? current.description,
     summary: patch.summary ?? current.summary,
     domain: patch.domain ?? current.domain,
@@ -67,9 +71,9 @@ function mergeEntry(current: KnowledgeEntry, patch: Partial<KnowledgeInput>): Kn
     tags: patch.tags ?? current.tags,
     sources: patch.sources ?? current.sources,
     source: patch.source ?? current.source,
-    confidence: patch.confidence ?? current.confidence,
+    confidence: clampConfidence(patch.confidence ?? current.confidence),
     links: patch.links ?? current.links,
-    content_hash: patch.content_hash ?? current.content_hash,
+    content_hash: knowledgeHash(title, content),
   };
 }
 
@@ -99,9 +103,9 @@ export class SupabaseKnowledgeStore implements KnowledgeStore {
         input.tags ?? [],
         JSON.stringify(input.sources ?? []),
         input.source ?? null,
-        input.confidence ?? 0.5,
+        clampConfidence(input.confidence),
         JSON.stringify(input.links ?? []),
-        input.content_hash ?? null,
+        input.content_hash ?? knowledgeHash(input.title, input.content),
         emb ? toVectorLiteral(emb) : null,
       ],
     );

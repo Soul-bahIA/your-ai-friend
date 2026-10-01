@@ -78,6 +78,6 @@ describe("mapUpstreamStatus", () => {
     expect(mapUpstreamStatus(500).status).toBe(502);
     expect(mapUpstreamStatus(429).status).toBe(429);
     expect(mapUpstreamStatus(503).status).toBe(503);
-    expect(mapUpstreamStatus(422)).toMatchObject({ status: 422, exposeDetail: true });
+    expect(mapUpstreamStatus(422)).toMatchObject({ status: 422, exposeDetail: false }); // S23 : détail amont jamais exposé
   });
 });

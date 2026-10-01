@@ -14,19 +14,7 @@ import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
 import { apiFetch, errorMessage } from "@/lib/api";
 import type { GenerateApplicationResponse, GeneratedApplication } from "@/types/application";
-
-interface AppArchitecture {
-  frontend?: {
-    framework?: string;
-    components?: { name: string; description: string; code: string }[];
-  };
-  backend?: {
-    endpoints?: { method: string; path: string; description: string }[];
-  };
-  database?: {
-    tables?: { name: string; columns: string[]; description?: string }[];
-  };
-}
+import type { AppArchitecture } from "@/lib/appPreview";
 
 interface Application {
   id: string;
@@ -194,7 +182,7 @@ const Applications = () => {
 
   const getArchitecture = (app: Application): AppArchitecture | null => {
     if (!app.source_code || typeof app.source_code !== "object") return null;
-    return app.source_code as unknown as AppArchitecture;
+    return app.source_code as AppArchitecture;
   };
 
   return (

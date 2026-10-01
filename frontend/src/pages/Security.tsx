@@ -223,9 +223,17 @@ const Security = () => {
               <Shield className="h-5 w-5" /> Isolation des données
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              Vos données sont isolées grâce aux politiques de sécurité (RLS). Aucun autre utilisateur ne peut accéder à vos tables et données.
+              Les données lues directement par votre navigateur (Supabase) sont protégées par des politiques
+              de sécurité au niveau des lignes (RLS) : chaque compte ne voit que ses propres lignes.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              En revanche, le backend se connecte à la base avec un rôle privilégié qui{" "}
+              <span className="font-medium text-foreground">n'est pas soumis à la RLS</span>. Pour les données
+              qu'il traite (tâches de l'agent, connaissances, mémoire, formations, chat…), l'isolation repose
+              uniquement sur les contrôles du code serveur, qui filtre chaque requête par utilisateur. Une
+              erreur dans ce code pourrait donc exposer ou modifier les données d'un autre compte.
             </p>
           </CardContent>
         </Card>

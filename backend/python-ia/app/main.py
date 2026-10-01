@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import UUID
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import request_context
 from .agents import AGENTS, route_request
+from .config import check_startup_config, service_token, soulbah_env
 from .formation import analyze_request, build_module, build_program
 from .generation import generate_application, generate_formation
 from .llm import LLMError
@@ -19,23 +26,23 @@ from .pdf import build_formation_pdf
 from .providers import orchestrator
 from .reasoning import analyze_performance, evaluate_execution, plan_goal
 from .research import synthesize
-from .rust_client import heavy_compute
-from .video import build_formation_video
+from .rust_client import ComputeUnavailable, heavy_compute
+from .video import VideoCancelled, build_formation_video
 
 logger = logging.getLogger("python-ia")
 
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    if not os.getenv("IA_SERVICE_TOKEN", ""):
-        logger.warning(
-            "IA_SERVICE_TOKEN non défini : le service python-ia accepte les requêtes "
-            "SANS authentification (acceptable uniquement en développement local)."
-        )
+    # S14 / contrat §1 : hors dev/test, refus de démarrer sans IA_SERVICE_TOKEN
+    # (RuntimeError -> uvicorn s'arrête avec un message explicite).
+    for warning in check_startup_config():
+        logger.warning(warning)
+    logger.info("python-ia démarré (SOULBAH_ENV=%s)", soulbah_env())
     yield
 
 
-app = FastAPI(title="SOULBAH IA Service", version="0.2.0", lifespan=_lifespan)
+app = FastAPI(title="SOULBAH IA Service", version="0.3.0", lifespan=_lifespan)
 
 # Dossier partagé où les vidéos produites sont écrites (servi par Node sous /media).
 MEDIA_DIR = os.path.realpath(
@@ -44,9 +51,15 @@ MEDIA_DIR = os.path.realpath(
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# Authentification service-à-service (Node -> Python).
-# Si IA_SERVICE_TOKEN est défini, toute route sauf GET /health exige l'en-tête
-# x-ia-token identique (comparaison en temps constant). Sinon : dev local, ouvert.
+# Garde inter-services (middleware ASGI pur, pas BaseHTTPMiddleware) :
+#  - x-ia-token : si IA_SERVICE_TOKEN est défini, toute route sauf GET /health exige
+#    l'en-tête identique (comparaison en temps constant). Sans token : dev/test only
+#    (hors dev/test, le service refuse de démarrer, cf. config.check_startup_config).
+#  - taille du corps : Content-Length annoncé ET octets réellement reçus (S29 : un
+#    corps chunked sans Content-Length est compté au fil de l'eau -> 413).
+#  - x-deadline-ms : budget restant (ms) de l'appelant -> délais LLM alignés.
+#  - x-llm-usage : en-tête de réponse JSON {calls,input_tokens,output_tokens,models}
+#    quand la requête a fait au moins un appel LLM (métrage, informatif).
 # ---------------------------------------------------------------------------
 TOKEN_HEADER = "x-ia-token"
 # Taille maximale d'un corps de requête (les captures base64 de /agent/evaluate
@@ -55,26 +68,130 @@ MAX_BODY_BYTES = int(os.getenv("IA_MAX_BODY_BYTES", str(40 * 1024 * 1024)))
 
 
 def _service_token() -> str:
-    return os.getenv("IA_SERVICE_TOKEN", "")
+    return service_token()
 
 
-@app.middleware("http")
-async def _guard(request: Request, call_next):
-    if not (request.method == "GET" and request.url.path == "/health"):
-        expected = _service_token()
-        if expected:
-            provided = request.headers.get(TOKEN_HEADER, "")
-            if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
-                return JSONResponse(status_code=401, content={"detail": "Jeton de service invalide"})
-    length = request.headers.get("content-length")
-    if length is not None:
+class BodyTooLarge(StarletteHTTPException):
+    def __init__(self) -> None:
+        super().__init__(status_code=413, detail="Requête trop volumineuse")
+
+
+async def _send_json(send, status: int, detail: str) -> None:
+    body = json.dumps({"detail": detail}, ensure_ascii=False).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+class ServiceGuardMiddleware:
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+
+        if not (scope["method"] == "GET" and scope["path"] == "/health"):
+            expected = _service_token()
+            if expected:
+                provided = headers.get(TOKEN_HEADER, "")
+                if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+                    await _send_json(send, 401, "Jeton de service invalide")
+                    return
+
+        limit = MAX_BODY_BYTES
+        length = headers.get("content-length")
+        if length is not None:
+            try:
+                too_big = int(length) > limit
+            except ValueError:
+                await _send_json(send, 400, "Content-Length invalide")
+                return
+            if too_big:
+                await _send_json(send, 413, "Requête trop volumineuse")
+                return
+
         try:
-            too_big = int(length) > MAX_BODY_BYTES
+            deadline_ms = request_context.parse_deadline_ms(headers.get(request_context.DEADLINE_HEADER))
         except ValueError:
-            return JSONResponse(status_code=400, content={"detail": "Content-Length invalide"})
-        if too_big:
-            return JSONResponse(status_code=413, content={"detail": "Requête trop volumineuse"})
-    return await call_next(request)
+            await _send_json(send, 400, "En-tête x-deadline-ms invalide (entier > 0 attendu)")
+            return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b"") or b"")
+                if received > limit:
+                    raise BodyTooLarge()
+            return message
+
+        started = False
+
+        async def send_with_usage(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+                summary = request_context.usage_summary()
+                if summary:
+                    message = dict(message)
+                    message["headers"] = list(message.get("headers", [])) + [
+                        (request_context.USAGE_HEADER.encode("latin-1"), json.dumps(summary).encode("latin-1"))
+                    ]
+            await send(message)
+
+        tokens = request_context.begin_request(deadline_ms)
+        try:
+            await self.app(scope, limited_receive, send_with_usage)
+        except BodyTooLarge:
+            # Filet de sécurité : normalement converti en 413 par FastAPI.
+            if not started:
+                await _send_json(send, 413, "Requête trop volumineuse")
+        finally:
+            request_context.end_request(tokens)
+
+
+app.add_middleware(ServiceGuardMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Erreurs (S23) : jamais de texte d'exception interne ni de corps amont vers le
+# client. Les messages d'LLMError sont construits pour être exposables ; tout le
+# reste est journalisé avec une référence courte renvoyée au client.
+# ---------------------------------------------------------------------------
+def _error_ref() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+@app.exception_handler(LLMError)
+async def _llm_error_handler(_request: Request, exc: LLMError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+
+@app.exception_handler(ComputeUnavailable)
+async def _compute_unavailable_handler(_request: Request, exc: ComputeUnavailable):
+    return JSONResponse(status_code=503, content={"detail": exc.message})
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error_handler(_request: Request, exc: Exception):
+    ref = _error_ref()
+    logger.error("Erreur interne non gérée (réf. %s)", ref, exc_info=exc)
+    return JSONResponse(status_code=500, content={"detail": f"Erreur interne du service IA (réf. {ref})"})
+
+
+def _internal_error(what: str) -> HTTPException:
+    """Journalise l'exception courante et renvoie une 500 générique référencée."""
+    ref = _error_ref()
+    logger.exception("%s (réf. %s)", what, ref)
+    return HTTPException(status_code=500, detail=f"{what} (réf. {ref})")
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +228,13 @@ class InferResponse(BaseModel):
     compute: dict
 
 
+# `provider` (optionnel, tous les modèles ci-dessous) : impose un fournisseur d'IA.
+# Accepté UNIQUEMENT s'il figure dans LLM_ALLOWED_OVERRIDES (vide par défaut) ;
+# sinon 400 (S32).
 class FormationRequest(BaseModel):
     topic: ShortStr
     details: TextStr | None = None
-    provider: ProviderId | None = None  # imposer un fournisseur d'IA (optionnel)
+    provider: ProviderId | None = None
 
 
 class ApplicationRequest(BaseModel):
@@ -132,7 +252,8 @@ async def health():
 
 @app.get("/providers")
 async def providers():
-    """État de l'orchestration multi-fournisseurs : modèles configurés + routage."""
+    """État de l'orchestration multi-fournisseurs : modèles, capacités, profils,
+    overrides autorisés, disjoncteurs."""
     return orchestrator.status()
 
 
@@ -152,10 +273,7 @@ async def orchestrator_route(req: RouteRequest):
     """Cerveau central : classe la demande et désigne l'agent spécialisé."""
     if not req.request.strip():
         raise HTTPException(status_code=400, detail="request vide")
-    try:
-        decision = await route_request(req.request, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    decision = await route_request(req.request, req.provider)
     return {"decision": decision}
 
 
@@ -177,6 +295,7 @@ async def infer(req: InferRequest):
     )
     label = "positif" if positives >= negatives else "négatif"
     score = round((positives + 1) / (positives + negatives + 2), 4)
+    # rust-compute injoignable -> ComputeUnavailable -> 503 (jamais 500).
     compute = await heavy_compute(features)
     return InferResponse(label=label, score=score, compute=compute)
 
@@ -184,15 +303,15 @@ async def infer(req: InferRequest):
 # ---------------------------------------------------------------------------
 # Génération IA (migré depuis les edge functions) — sans état, pas d'accès DB.
 # Node vérifie l'auth, persiste le résultat et journalise.
+# Les LLMError sont converties par _llm_error_handler (statut + message sûr).
 # ---------------------------------------------------------------------------
 @app.post("/generate/formation")
 async def gen_formation(req: FormationRequest):
     try:
         formation = await generate_formation(req.topic, req.details, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
-    except ValueError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    except ValueError:
+        logger.warning("Formation générée invalide", exc_info=True)
+        raise HTTPException(status_code=502, detail="Réponse IA invalide (formation)")
     return {"formation": formation}
 
 
@@ -202,10 +321,9 @@ async def gen_application(req: ApplicationRequest):
         application = await generate_application(
             req.appName, req.appDesc, req.conversationHistory, req.existingArchitecture, req.provider
         )
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
-    except ValueError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    except ValueError:
+        logger.warning("Application générée invalide", exc_info=True)
+        raise HTTPException(status_code=502, detail="Réponse IA invalide (application)")
     return {"application": application}
 
 
@@ -230,19 +348,15 @@ async def agent_plan(req: PlanRequest):
     goal = req.goal.strip()
     if not goal:
         raise HTTPException(status_code=400, detail="goal vide")
-    try:
-        plan = await plan_goal(goal, req.context)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    plan = await plan_goal(goal, req.context)
     return {"plan": plan}
 
 
 @app.post("/agent/evaluate")
 async def agent_evaluate(req: EvaluateRequest):
-    try:
-        evaluation = await evaluate_execution(req.goal, req.steps, req.result, req.screenshots)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    """Verdicts : success | retry | abort | not_evaluable (run simulé, plan vide,
+    tâche annulée ou 0 étape exécutée : aucun appel LLM, `evaluable: false`)."""
+    evaluation = await evaluate_execution(req.goal, req.steps, req.result, req.screenshots)
     return {"evaluation": evaluation}
 
 
@@ -253,20 +367,42 @@ class FormationVideoRequest(BaseModel):
     max_slides: int | None = Field(default=None, ge=1, le=500)
 
 
+def _cancel_checker(request: Request):
+    """Fonction d'annulation pour un endpoint `def` (exécuté dans un thread AnyIO) :
+    vrai si l'échéance x-deadline-ms est dépassée ou si le client s'est déconnecté
+    (node a abandonné : inutile de continuer à payer des TTS)."""
+
+    def should_cancel() -> bool:
+        if request_context.deadline_exceeded():
+            return True
+        try:
+            return bool(anyio.from_thread.run(request.is_disconnected))
+        except Exception:  # noqa: BLE001 — hors thread AnyIO / boucle fermée
+            return False
+
+    return should_cancel
+
+
 # `def` (et non `async def`) : production entièrement synchrone (httpx bloquant +
 # moviepy/ffmpeg) -> FastAPI l'exécute dans le threadpool sans bloquer la boucle.
 @app.post("/generate/formation-video")
-def gen_formation_video(req: FormationVideoRequest):
+def gen_formation_video(req: FormationVideoRequest, request: Request):
     if not req.lessons:
         raise HTTPException(status_code=400, detail="Aucune leçon à mettre en vidéo")
     filename, out_path = _media_path("formation", req.formationId, "mp4")
     try:
-        info = build_formation_video(req.title, req.lessons, out_path, req.max_slides)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Échec production vidéo")
-        raise HTTPException(status_code=500, detail=f"Échec production vidéo : {e}")
+        info = build_formation_video(
+            req.title, req.lessons, out_path, req.max_slides, should_cancel=_cancel_checker(request)
+        )
+    except LLMError:
+        raise
+    except VideoCancelled:
+        timed_out = request_context.deadline_exceeded()
+        logger.info("Production vidéo annulée (%s) : %s", "échéance" if timed_out else "client parti",
+                    req.formationId)
+        raise HTTPException(status_code=504 if timed_out else 499, detail="Production vidéo annulée")
+    except Exception:  # noqa: BLE001
+        raise _internal_error("Échec production vidéo")
     return {"filename": filename, "slides": info["slides"], "duration_s": info["duration_s"]}
 
 
@@ -293,28 +429,19 @@ class ModuleRequest(BaseModel):
 async def formation_analyze(req: AnalyzeFormationRequest):
     if not req.topic.strip():
         raise HTTPException(status_code=400, detail="topic vide")
-    try:
-        analysis = await analyze_request(req.topic, req.details, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    analysis = await analyze_request(req.topic, req.details, req.provider)
     return {"analysis": analysis}
 
 
 @app.post("/formation/program")
 async def formation_program(req: ProgramRequest):
-    try:
-        program = await build_program(req.analysis, req.research_notes, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    program = await build_program(req.analysis, req.research_notes, req.provider)
     return {"program": program}
 
 
 @app.post("/formation/module")
 async def formation_module(req: ModuleRequest):
-    try:
-        detail = await build_module(req.program_title, req.module, req.research_notes, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    detail = await build_module(req.program_title, req.module, req.research_notes, req.provider)
     return {"module": detail}
 
 
@@ -329,9 +456,8 @@ def formation_pdf(req: FormationPdfRequest):
     filename, out_path = _media_path("formation", req.formationId, "pdf")
     try:
         info = build_formation_pdf(req.curriculum, out_path)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Échec génération PDF")
-        raise HTTPException(status_code=500, detail=f"Échec génération PDF : {e}")
+    except Exception:  # noqa: BLE001
+        raise _internal_error("Échec génération PDF")
     return {"filename": filename, "pages": info["pages"]}
 
 
@@ -347,10 +473,7 @@ class SynthesizeRequest(BaseModel):
 async def do_synthesize(req: SynthesizeRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="query vide")
-    try:
-        synthesis = await synthesize(req.query, req.sources, req.known, req.domain, req.provider)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    synthesis = await synthesize(req.query, req.sources, req.known, req.domain, req.provider)
     return {"synthesis": synthesis}
 
 
@@ -360,8 +483,5 @@ class SelfImproveRequest(BaseModel):
 
 @app.post("/agent/self-improve")
 async def agent_self_improve(req: SelfImproveRequest):
-    try:
-        report = await analyze_performance(req.summary)
-    except LLMError as e:
-        raise HTTPException(status_code=e.status, detail=e.message)
+    report = await analyze_performance(req.summary)
     return {"report": report}

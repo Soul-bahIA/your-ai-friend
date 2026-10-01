@@ -14,8 +14,17 @@ CREATE TABLE IF NOT EXISTS public.agent_events (
 
 ALTER TABLE public.agent_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users view own agent events" ON public.agent_events
-  FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- [LOT 1 / T47] Garde de rejeu ajoutée a posteriori, sans changer le schéma obtenu :
+-- sur une base neuve la table n'a aucune policy → création identique à l'original ;
+-- déjà appliquée → `supabase db push` ne rejoue pas ce fichier ; rejeu (CI ×2) → no-op.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                  WHERE schemaname = 'public' AND tablename = 'agent_events') THEN
+    CREATE POLICY "Users view own agent events" ON public.agent_events
+      FOR SELECT TO authenticated USING (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_agent_events_task ON public.agent_events (task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_events_user ON public.agent_events (user_id, created_at DESC);

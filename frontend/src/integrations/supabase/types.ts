@@ -1,3 +1,5 @@
+// Types du schéma public, alignés sur supabase/migrations (dernière revue : LOT 1).
+// agent_tasks.target_agent_key_id / claimed_by_key_id : contrat LOT 1 §7.
 export type Json =
   | string
   | number
@@ -14,48 +16,204 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_events: {
+        Row: {
+          created_at: string
+          data: Json
+          id: string
+          message: string | null
+          task_id: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          id?: string
+          message?: string | null
+          task_id: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          id?: string
+          message?: string | null
+          task_id?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      agent_keys: {
+        Row: {
+          allowed_dirs: Json
+          created_at: string
+          id: string
+          key_hash: string
+          label: string | null
+          last_used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          allowed_dirs?: Json
+          created_at?: string
+          id?: string
+          key_hash: string
+          label?: string | null
+          last_used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          allowed_dirs?: Json
+          created_at?: string
+          id?: string
+          key_hash?: string
+          label?: string | null
+          last_used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      agent_memory: {
+        Row: {
+          content: string
+          created_at: string
+          goal: string
+          id: string
+          level: string
+          metadata: Json
+          project_id: string | null
+          status: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          goal: string
+          id?: string
+          level?: string
+          metadata?: Json
+          project_id?: string | null
+          status?: string
+          type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          goal?: string
+          id?: string
+          level?: string
+          metadata?: Json
+          project_id?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       agent_tasks: {
         Row: {
+          claimed_by_key_id: string | null
           completed_at: string | null
+          control: string
           created_at: string
           error_message: string | null
           id: string
           payload: Json
           priority: number
+          requeue_count: number
           result: Json | null
           started_at: string | null
           status: string
+          target_agent_key_id: string | null
           task_type: string
           updated_at: string
           user_id: string
         }
         Insert: {
+          claimed_by_key_id?: string | null
           completed_at?: string | null
+          control?: string
           created_at?: string
           error_message?: string | null
           id?: string
           payload?: Json
           priority?: number
+          requeue_count?: number
           result?: Json | null
           started_at?: string | null
           status?: string
+          target_agent_key_id?: string | null
           task_type: string
           updated_at?: string
           user_id: string
         }
         Update: {
+          claimed_by_key_id?: string | null
           completed_at?: string | null
+          control?: string
           created_at?: string
           error_message?: string | null
           id?: string
           payload?: Json
           priority?: number
+          requeue_count?: number
           result?: Json | null
           started_at?: string | null
           status?: string
+          target_agent_key_id?: string | null
           task_type?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_tasks_claimed_by_key_id_fkey"
+            columns: ["claimed_by_key_id"]
+            isOneToOne: false
+            referencedRelation: "agent_keys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_tasks_target_agent_key_id_fkey"
+            columns: ["target_agent_key_id"]
+            isOneToOne: false
+            referencedRelation: "agent_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      analysis_requests: {
+        Row: {
+          created_at: string
+          id: string
+          input_text: string
+          result: Json | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_text: string
+          result?: Json | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_text?: string
+          result?: Json | null
+          status?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -161,76 +319,177 @@ export type Database = {
         Row: {
           content: Json | null
           created_at: string
+          curriculum: Json | null
           description: string | null
           duration: string | null
           id: string
           lessons_count: number | null
+          pdf_url: string | null
           status: string
           title: string
           updated_at: string
           user_id: string
+          video_url: string | null
         }
         Insert: {
           content?: Json | null
           created_at?: string
+          curriculum?: Json | null
           description?: string | null
           duration?: string | null
           id?: string
           lessons_count?: number | null
+          pdf_url?: string | null
           status?: string
           title: string
           updated_at?: string
           user_id: string
+          video_url?: string | null
         }
         Update: {
           content?: Json | null
           created_at?: string
+          curriculum?: Json | null
           description?: string | null
           duration?: string | null
           id?: string
           lessons_count?: number | null
+          pdf_url?: string | null
           status?: string
           title?: string
           updated_at?: string
           user_id?: string
+          video_url?: string | null
         }
         Relationships: []
       }
       knowledge_base: {
         Row: {
           category: string
+          confidence: number
           content: string
+          content_hash: string | null
           created_at: string
+          description: string | null
+          domain: string
+          embedding: string | null
           id: string
+          keywords: string[]
+          last_verified_at: string | null
+          links: Json
           source: string | null
+          sources: Json
+          summary: string | null
           tags: string[] | null
           title: string
           updated_at: string
           user_id: string
+          version: number
         }
         Insert: {
           category?: string
+          confidence?: number
           content: string
+          content_hash?: string | null
           created_at?: string
+          description?: string | null
+          domain?: string
+          embedding?: string | null
           id?: string
+          keywords?: string[]
+          last_verified_at?: string | null
+          links?: Json
           source?: string | null
+          sources?: Json
+          summary?: string | null
           tags?: string[] | null
           title: string
           updated_at?: string
           user_id: string
+          version?: number
         }
         Update: {
           category?: string
+          confidence?: number
           content?: string
+          content_hash?: string | null
           created_at?: string
+          description?: string | null
+          domain?: string
+          embedding?: string | null
           id?: string
+          keywords?: string[]
+          last_verified_at?: string | null
+          links?: Json
           source?: string | null
+          sources?: Json
+          summary?: string | null
           tags?: string[] | null
           title?: string
           updated_at?: string
           user_id?: string
+          version?: number
         }
         Relationships: []
+      }
+      knowledge_domains: {
+        Row: {
+          created_at: string
+          is_system: boolean
+          label: string
+          slug: string
+        }
+        Insert: {
+          created_at?: string
+          is_system?: boolean
+          label: string
+          slug: string
+        }
+        Update: {
+          created_at?: string
+          is_system?: boolean
+          label?: string
+          slug?: string
+        }
+        Relationships: []
+      }
+      knowledge_versions: {
+        Row: {
+          change_note: string | null
+          created_at: string
+          entry_id: string
+          id: string
+          snapshot: Json
+          user_id: string
+          version: number
+        }
+        Insert: {
+          change_note?: string | null
+          created_at?: string
+          entry_id: string
+          id?: string
+          snapshot: Json
+          user_id: string
+          version: number
+        }
+        Update: {
+          change_note?: string | null
+          created_at?: string
+          entry_id?: string
+          id?: string
+          snapshot?: Json
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_versions_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_base"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       modules_status: {
         Row: {

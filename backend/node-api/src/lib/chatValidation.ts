@@ -1,6 +1,6 @@
 // Validation des messages du chat (POST /api/chat).
-import { isPlainObject } from "./sanitize";
-import type { Result } from "./agentSteps";
+import { isPlainObject } from "./sanitize.js";
+import type { Result } from "./agentSteps.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -64,5 +64,6 @@ export function validateChatAction(action: unknown): Result<{ name: string; argu
       return { ok: false, error: `argument « ${f} » requis` };
     }
   }
+  // Seuls name + arguments sont conservés (un éventuel `confirmed` est lu par la route).
   return { ok: true, value: { name: action.name, arguments: args } };
 }

@@ -1,33 +1,61 @@
-"""Orchestrateur : choisit le fournisseur d'IA le plus adapté à chaque tâche.
+"""Orchestrateur : choisit le fournisseur/modèle d'IA le plus adapté à chaque tâche.
 
-Priorité de sélection :
-  1. override explicite (l'utilisateur impose un fournisseur) s'il est disponible ;
+Sélection du fournisseur principal :
+  1. override explicite — UNIQUEMENT s'il figure dans LLM_ALLOWED_OVERRIDES
+     (liste séparée par des virgules, vide par défaut) ; sinon 400 ;
   2. mapping tâche → fournisseur (défauts ci-dessous, surchargés par LLM_ROUTING) ;
   3. fournisseur par défaut disponible (LLM_DEFAULT_PROVIDER, sinon 1er configuré).
 
-En cas d'échec réseau/5xx du fournisseur choisi, repli automatique sur le défaut.
+Modèle par rôle (profil) : planner / evaluator / vision / cheap, via
+LLM_MODEL_<RÔLE>="[fournisseur:]modèle" et LLM_EFFORT_<RÔLE>. Le profil ne s'applique
+que si le fournisseur retenu est celui du profil (défaut : anthropic).
+
+Repli multi-sauts : sur panne du fournisseur (429, 5xx, délai, connexion, clé ou
+crédits), on tente le suivant (LLM_FALLBACK_ORDER, au plus LLM_MAX_HOPS sauts). Un
+disjoncteur par fournisseur (LLM_CB_THRESHOLD échecs consécutifs → ouvert pendant
+LLM_CB_COOLDOWN_S) évite de marteler un fournisseur en panne. Pas de repli sur un
+override explicite (le choix de l'appelant est respecté).
+
+Vision : une requête portant des images n'est JAMAIS envoyée à un modèle dont la
+vision n'est pas déclarée (capabilities.py).
+
+Délais : chaque saut reçoit timeout = min(délai de la tâche, temps restant avant
+l'échéance x-deadline-ms) ; sans en-tête, un budget implicite par tâche (aligné sur
+les délais de node) borne l'ensemble des sauts.
+
+Chaque appel est journalisé avec son usage (jetons entrée/sortie, raison d'arrêt) ;
+une réponse tronquée (max_tokens) devient une erreur 502 « réponse tronquée ».
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
-from typing import Any
+import time
+from dataclasses import dataclass
+from typing import Any, Callable
 
-from .base import LLMError, LLMProvider
+from .. import request_context
+from .base import CompletionResult, LLMError, LLMProvider
 from .registry import build_providers
 
+logger = logging.getLogger("python-ia.llm")
+
 # Type de tâche -> fournisseur préféré. Ajustable sans code via LLM_ROUTING (JSON).
-# Tant qu'un seul fournisseur est configuré, tout retombe dessus (voir _select).
+# Tant qu'un seul fournisseur est configuré, tout retombe dessus (voir plan_hops).
 _DEFAULT_ROUTING: dict[str, str] = {
     "code": "deepseek",        # génération de code
     "reasoning": "anthropic",  # raisonnement complexe
+    "routing": "anthropic",    # classification de la demande (cerveau central)
     "writing": "openai",       # rédaction
     "doc_analysis": "anthropic",
     "translation": "openai",
     "formation": "anthropic",
     "application": "anthropic",
     "vision": "anthropic",
-    "automation": "anthropic",
+    "automation": "anthropic",  # planification de l'agent
+    "evaluation": "anthropic",  # évaluation d'une exécution (sans image)
     "optimization": "anthropic",
     "chat": "openai",
     "general": "anthropic",
@@ -35,17 +63,115 @@ _DEFAULT_ROUTING: dict[str, str] = {
 
 _PREFERRED_DEFAULTS = ["anthropic", "openai", "gemini", "mistral", "deepseek", "xai", "qwen", "local"]
 
+# Profils par rôle : (variable modèle, modèle par défaut, variable effort, effort par défaut).
+PROFILES: dict[str, tuple[str, str, str, str]] = {
+    "planner": ("LLM_MODEL_PLANNER", "claude-opus-5-5", "LLM_EFFORT_PLANNER", "high"),
+    "evaluator": ("LLM_MODEL_EVALUATOR", "claude-opus-5-5", "LLM_EFFORT_EVALUATOR", "high"),
+    "vision": ("LLM_MODEL_VISION", "claude-opus-5-5", "LLM_EFFORT_VISION", "high"),
+    "cheap": ("LLM_MODEL_CHEAP", "claude-haiku-4-5-20251001", "LLM_EFFORT_CHEAP", "low"),
+}
+TASK_PROFILES: dict[str, str] = {
+    "automation": "planner",
+    "evaluation": "evaluator",
+    "vision": "vision",
+    "routing": "cheap",
+}
+
+# Tâches longues (génération de contenu) : node attend jusqu'à 900 s.
+LONG_TASKS = {"formation", "application", "code", "writing"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _csv_env(name: str) -> list[str]:
+    return [p.strip() for p in os.getenv(name, "").split(",") if p.strip()]
+
+
+MIN_HOP_S = 1.0          # en dessous, on ne lance pas de nouvel appel
+DEADLINE_MARGIN_S = 0.5  # temps laissé pour répondre à l'appelant
+
+
+class CircuitBreaker:
+    """Disjoncteur simple par fournisseur : fermé → ouvert après `threshold` échecs
+    consécutifs → semi-ouvert après `cooldown_s` (un essai) → fermé au premier succès."""
+
+    def __init__(self, threshold: int = 3, cooldown_s: float = 30.0,
+                 clock: Callable[[], float] = time.monotonic):
+        self.threshold = max(1, threshold)
+        self.cooldown_s = cooldown_s
+        self._clock = clock
+        self._failures: dict[str, int] = {}
+        self._opened_at: dict[str, float] = {}
+
+    def state(self, pid: str) -> str:
+        opened = self._opened_at.get(pid)
+        if opened is None:
+            return "closed"
+        return "half_open" if self._clock() - opened >= self.cooldown_s else "open"
+
+    def allow(self, pid: str) -> bool:
+        return self.state(pid) != "open"
+
+    def success(self, pid: str) -> None:
+        self._failures.pop(pid, None)
+        self._opened_at.pop(pid, None)
+
+    def failure(self, pid: str) -> None:
+        n = self._failures.get(pid, 0) + 1
+        self._failures[pid] = n
+        if n >= self.threshold:
+            if pid not in self._opened_at or self.state(pid) == "half_open":
+                logger.warning("Disjoncteur OUVERT pour le fournisseur %s (%d échecs)", pid, n)
+            self._opened_at[pid] = self._clock()
+
+    def reset(self) -> None:
+        self._failures.clear()
+        self._opened_at.clear()
+
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        pids = set(self._failures) | set(self._opened_at)
+        return {p: {"state": self.state(p), "failures": self._failures.get(p, 0)} for p in sorted(pids)}
+
+
+@dataclass
+class Hop:
+    provider: LLMProvider
+    model: str
+    effort: str | None
+
 
 class Orchestrator:
-    def __init__(self) -> None:
-        self._providers: dict[str, LLMProvider] | None = None
+    def __init__(self, providers: dict[str, LLMProvider] | None = None) -> None:
+        self._providers: dict[str, LLMProvider] | None = providers
         self._routing: dict[str, str] = dict(_DEFAULT_ROUTING)
         try:
             override = json.loads(os.getenv("LLM_ROUTING", "") or "{}")
             if isinstance(override, dict):
                 self._routing.update({str(k): str(v) for k, v in override.items()})
         except json.JSONDecodeError:
-            pass
+            logger.warning("LLM_ROUTING n'est pas un JSON valide : ignoré")
+        self.breaker = CircuitBreaker(
+            threshold=_env_int("LLM_CB_THRESHOLD", 3),
+            cooldown_s=_env_float("LLM_CB_COOLDOWN_S", 30.0),
+        )
+
+    # ------------------------------------------------------------------ config
+    def set_providers(self, providers: dict[str, LLMProvider] | None) -> None:
+        """Remplace les fournisseurs (tests / rechargement) et réinitialise le disjoncteur."""
+        self._providers = providers
+        self.breaker.reset()
 
     def _providers_map(self) -> dict[str, LLMProvider]:
         if self._providers is None:
@@ -62,24 +188,163 @@ class Orchestrator:
                 return pid
         return next(iter(provs), None)
 
-    def _select(self, task: str, override: str | None) -> LLMProvider:
+    @staticmethod
+    def allowed_overrides() -> list[str]:
+        """Même variable et même sémantique que node (LLM_ALLOWED_OVERRIDES, vide = aucun)."""
+        return [p.lower() for p in _csv_env("LLM_ALLOWED_OVERRIDES")]
+
+    def _fallback_order(self) -> list[str]:
+        order = _csv_env("LLM_FALLBACK_ORDER") or list(_PREFERRED_DEFAULTS)
+        rest = [p for p in self._providers_map() if p not in order]
+        return order + rest
+
+    @staticmethod
+    def profile_for(task: str) -> tuple[str, str, str | None] | None:
+        """(fournisseur, modèle, effort) du profil associé à la tâche, ou None."""
+        name = TASK_PROFILES.get(task)
+        if not name:
+            return None
+        model_env, model_default, effort_env, effort_default = PROFILES[name]
+        raw = (os.getenv(model_env, "") or model_default).strip()
+        pid, model = raw.split(":", 1) if ":" in raw else ("anthropic", raw)
+        effort = (os.getenv(effort_env, "") or effort_default).strip().lower() or None
+        return pid.strip(), model.strip(), effort
+
+    @staticmethod
+    def _task_timeout_s(task: str) -> float:
+        if task in LONG_TASKS:
+            return _env_float("LLM_LONG_TIMEOUT_S", 600.0)
+        return _env_float("LLM_TIMEOUT_S", 100.0)
+
+    @staticmethod
+    def _task_budget_s(task: str) -> float:
+        """Budget total implicite (tous sauts) sans x-deadline-ms : sous les délais
+        de node (120 s / 900 s) pour ne jamais travailler après son abandon."""
+        if task in LONG_TASKS:
+            return _env_float("LLM_LONG_BUDGET_S", 840.0)
+        return _env_float("LLM_BUDGET_S", 110.0)
+
+    # ---------------------------------------------------------------- routing
+    def plan_hops(self, task: str, override: str | None, needs_vision: bool) -> list[Hop]:
         provs = self._providers_map()
         if not provs:
             raise LLMError(
                 500,
                 "Aucun fournisseur d'IA configuré. Renseignez au moins une clé "
                 "(ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, …).",
+                kind="no_provider",
             )
-        # 1. override explicite
-        if override and override in provs:
-            return provs[override]
-        # 2. routage par tâche
-        pid = self._routing.get(task)
-        if pid and pid in provs:
-            return provs[pid]
-        # 3. défaut disponible
-        default_id = self._default_provider_id()
-        return provs[default_id]  # type: ignore[index]
+        override = (override or "").strip().lower() or None
+        if override:
+            if override not in self.allowed_overrides():
+                raise LLMError(400, "Fournisseur d'IA imposé non autorisé.", kind="override_forbidden")
+            if override not in provs:
+                raise LLMError(400, "Fournisseur d'IA imposé non configuré.", kind="override_unavailable")
+            order = [override]
+        else:
+            primary = self._routing.get(task)
+            if not primary or primary not in provs:
+                primary = self._default_provider_id()
+            order = [primary] + [p for p in self._fallback_order() if p in provs and p != primary]
+
+        profile = self.profile_for(task)
+        default_effort = (os.getenv("LLM_EFFORT_DEFAULT", "") or "").strip().lower() or None
+        hops: list[Hop] = []
+        for pid in order:
+            prov = provs[pid]
+            model, effort = prov.model, default_effort
+            if profile and profile[0] == pid:
+                model, effort = profile[1], profile[2]
+            if needs_vision and not prov.capabilities(model).vision:
+                if override:
+                    raise LLMError(400, "Le fournisseur imposé ne prend pas en charge les images.", kind="no_vision")
+                logger.info("Saut %s:%s ignoré : vision non déclarée", pid, model)
+                continue
+            hops.append(Hop(prov, model, effort))
+        if not hops:
+            raise LLMError(503, "Aucun modèle d'IA compatible vision n'est configuré.", kind="no_vision")
+        return hops[: max(1, _env_int("LLM_MAX_HOPS", 3))]
+
+    # ------------------------------------------------------------- execution
+    async def generate(
+        self,
+        task: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        json_schema: dict | None = None,
+        images: list[str] | None = None,
+        provider: str | None = None,
+    ) -> CompletionResult:
+        hops = self.plan_hops(task, provider, bool(images))
+        started = time.monotonic()
+        local_deadline = started + self._task_budget_s(task)
+        task_timeout = self._task_timeout_s(task)
+        tried: list[str] = []
+        first_error: LLMError | None = None
+
+        for hop in hops:
+            pid = hop.provider.id
+            if not self.breaker.allow(pid):
+                logger.warning("Fournisseur %s ignoré : disjoncteur ouvert", pid)
+                continue
+            remaining = request_context.remaining_s()
+            if remaining is None:
+                remaining = local_deadline - time.monotonic()
+            if remaining < MIN_HOP_S:
+                if first_error is not None:
+                    logger.warning("Échéance atteinte après échec de %s", tried)
+                raise LLMError(504, "Délai de la requête dépassé avant la réponse de l'IA.", kind="deadline")
+            hop_timeout = max(0.1, min(task_timeout, remaining - DEADLINE_MARGIN_S))
+
+            t0 = time.monotonic()
+            try:
+                result = await asyncio.wait_for(
+                    hop.provider.generate(
+                        system, messages, max_tokens, json_schema, images,
+                        model=hop.model, timeout_s=hop_timeout, effort=hop.effort,
+                    ),
+                    timeout=hop_timeout + DEADLINE_MARGIN_S,
+                )
+            except asyncio.TimeoutError:
+                err = LLMError(504, f"Le fournisseur {pid} n'a pas répondu à temps.", fallback=True, kind="timeout")
+            except LLMError as e:
+                if not e.fallback:
+                    self._log_failure(task, hop, e, t0)
+                    raise
+                err = e
+            except Exception:  # noqa: BLE001 — bug/erreur inattendue d'un fournisseur
+                logger.exception("Erreur inattendue du fournisseur %s", pid)
+                err = LLMError(502, f"Erreur du fournisseur {pid}", fallback=True, kind="internal")
+            else:
+                self.breaker.success(pid)
+                result.fallback_from = list(tried)
+                if not result.provider:
+                    result.provider = pid
+                if not result.model:
+                    result.model = hop.model
+                if not result.latency_ms:
+                    result.latency_ms = int((time.monotonic() - t0) * 1000)
+                self._log_success(task, result)
+                if result.truncated:
+                    raise LLMError(
+                        502,
+                        "Réponse IA tronquée (limite de jetons atteinte). Réessayez avec une demande plus courte.",
+                        kind="truncated",
+                    )
+                return result
+
+            # Panne propre au fournisseur : disjoncteur + saut suivant.
+            self.breaker.failure(pid)
+            self._log_failure(task, hop, err, t0)
+            tried.append(pid)
+            if first_error is None:
+                first_error = err
+
+        if first_error is not None:
+            raise first_error
+        raise LLMError(503, "Fournisseurs d'IA temporairement indisponibles. Réessayez plus tard.",
+                       kind="circuit_open")
 
     async def complete(
         self,
@@ -91,26 +356,40 @@ class Orchestrator:
         images: list[str] | None = None,
         provider: str | None = None,
     ) -> str:
-        chosen = self._select(task, provider)
-        try:
-            return await chosen.complete(system, messages, max_tokens, json_schema, images)
-        except LLMError as e:
-            # Repli automatique sur le défaut pour les pannes transitoires (réseau/5xx).
-            default_id = self._default_provider_id()
-            if e.status in (429, 502, 503) and default_id and default_id != chosen.id:
-                fallback = self._providers_map()[default_id]
-                # La vision peut ne pas être supportée par le repli : on n'insiste pas.
-                if not images or fallback.supports_vision:
-                    return await fallback.complete(system, messages, max_tokens, json_schema, images)
-            raise
+        """Compatibilité : renvoie le texte seul (l'usage est journalisé et compté)."""
+        result = await self.generate(task, system, messages, max_tokens, json_schema, images, provider)
+        return result.text
+
+    # ----------------------------------------------------------------- logs
+    @staticmethod
+    def _log_success(task: str, result: CompletionResult) -> None:
+        entry = {"task": task, **result.usage()}
+        request_context.record_usage(entry)
+        logger.info("llm_call %s", json.dumps({"ok": True, **entry}, ensure_ascii=False))
+
+    @staticmethod
+    def _log_failure(task: str, hop: Hop, err: LLMError, t0: float) -> None:
+        logger.warning("llm_call %s", json.dumps({
+            "ok": False, "task": task, "provider": hop.provider.id, "model": hop.model,
+            "status": err.status, "kind": err.kind,
+            "latency_ms": int((time.monotonic() - t0) * 1000),
+        }, ensure_ascii=False))
 
     def status(self) -> dict[str, Any]:
         provs = self._providers_map()
+        profiles = {}
+        for task, name in TASK_PROFILES.items():
+            prof = self.profile_for(task)
+            if prof:
+                profiles[name] = {"provider": prof[0], "model": prof[1], "effort": prof[2], "task": task}
         return {
             "providers": [p.describe() for p in provs.values()],
             "configured": list(provs.keys()),
             "default": self._default_provider_id(),
             "routing": self._routing,
+            "profiles": profiles,
+            "allowed_overrides": self.allowed_overrides(),
+            "circuit_breakers": self.breaker.snapshot(),
         }
 
 

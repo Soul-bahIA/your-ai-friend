@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -8,35 +7,53 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, Sparkles, type LucideIcon } from "lucide-react";
-import { apiFetch, errorMessage } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
+import {
+  Monitor, Loader2, CheckCircle2, XCircle, Clock, Trash2, RefreshCw, Sparkles, Ban, ShieldQuestion,
+  ChevronDown, ChevronUp, Check, X, Film, type LucideIcon,
+} from "lucide-react";
+import { apiFetch, errorMessage } from "@/lib/api";
+import {
+  agentChoiceFromError,
+  approveAgentTask,
+  cancelAgentTask,
+  listAgents,
+  submitGoal,
+  type AgentChoice,
+} from "@/lib/agentApi";
+import {
+  applyApproveResponse,
+  applyCancelResponse,
+  applyTaskChange,
+  canCancelTask,
+  canDeleteTask,
+  describeStep,
+  evaluationView,
+  isAwaitingApproval,
+  normalizeTaskRow,
+  plannedSteps,
+  recordingPaths,
+  statusLabel,
+  type AgentTask,
+  type Tone,
+} from "@/lib/agentTasks";
 
-interface AgentTaskResult {
-  file?: string;
-  evaluation?: { verdict?: string; reason?: string };
-}
+const statusStyle: Record<string, { color: string; icon: LucideIcon }> = {
+  pending: { color: "bg-warning/10 text-warning", icon: Clock },
+  in_progress: { color: "bg-primary/10 text-primary", icon: Loader2 },
+  completed: { color: "bg-success/10 text-success", icon: CheckCircle2 },
+  failed: { color: "bg-destructive/10 text-destructive", icon: XCircle },
+  cancelled: { color: "bg-muted text-muted-foreground", icon: Ban },
+};
 
-interface AgentTaskPayload {
-  goal_meta?: { goal?: string; attempt?: number };
-}
-
-interface AgentTask {
-  id: string;
-  task_type: string;
-  status: string;
-  payload: AgentTaskPayload | null;
-  result: AgentTaskResult | null;
-  error_message: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
-const statusConfig: Record<string, { label: string; color: string; icon: LucideIcon }> = {
-  pending: { label: "En attente", color: "bg-warning/10 text-warning", icon: Clock },
-  in_progress: { label: "En cours", color: "bg-primary/10 text-primary", icon: Loader2 },
-  completed: { label: "Terminé", color: "bg-success/10 text-success", icon: CheckCircle2 },
-  failed: { label: "Échoué", color: "bg-destructive/10 text-destructive", icon: XCircle },
+const toneClass: Record<Tone, string> = {
+  success: "text-success",
+  warning: "text-warning",
+  destructive: "text-destructive",
+  primary: "text-primary",
+  muted: "text-muted-foreground",
 };
 
 const taskTypeLabels: Record<string, string> = {
@@ -51,25 +68,10 @@ const taskTypeLabels: Record<string, string> = {
   goal: "🧠 Objectif (plan IA)",
 };
 
-const MAX_TASKS = 200;
+/** Valeur du sélecteur « PC cible » quand le serveur choisit (une seule clé active). */
+const AUTO_AGENT = "auto";
 
-/** Applique un événement temps réel à la liste (sans refetch complet). */
-function applyTaskChange(
-  prev: AgentTask[],
-  payload: RealtimePostgresChangesPayload<Record<string, unknown>>,
-): AgentTask[] {
-  if (payload.eventType === "DELETE") {
-    const id = (payload.old as { id?: string }).id;
-    return id ? prev.filter((t) => t.id !== id) : prev;
-  }
-  const row = payload.new as unknown as AgentTask;
-  if (!row?.id) return prev;
-  const idx = prev.findIndex((t) => t.id === row.id);
-  if (idx === -1) return [row, ...prev].slice(0, MAX_TASKS);
-  const next = prev.slice();
-  next[idx] = { ...prev[idx], ...row };
-  return next;
-}
+type PendingSend = "goal" | "video";
 
 interface AgentTasksPanelProps {
   formationId?: string;
@@ -88,13 +90,22 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
   useCommandPrefill(setGoal);
   const [planning, setPlanning] = useState(false);
   const [goalFeedback, setGoalFeedback] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentChoice[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>(AUTO_AGENT);
+  // Choix du PC demandé par le serveur (400 + agents) pour l'envoi en attente.
+  const [agentChoice, setAgentChoice] = useState<{ agents: AgentChoice[]; pending: PendingSend } | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+
+  const agentNames = useMemo(() => new Map(agents.map((a) => [a.id, a.name])), [agents]);
+  const explicitAgent = selectedAgent !== AUTO_AGENT ? selectedAgent : null;
 
   const fetchTasks = useCallback(async () => {
     if (!userId) return;
     setLoadError(null);
     try {
-      const data = await apiFetch<{ tasks?: AgentTask[] }>("/api/agent-tasks");
-      setTasks(data?.tasks ?? []);
+      const data = await apiFetch<{ tasks?: unknown[] }>("/api/agent-tasks");
+      setTasks((data?.tasks ?? []).map(normalizeTaskRow).filter((t): t is AgentTask => t !== null));
     } catch (e) {
       console.error("Error fetching tasks:", e);
       setLoadError(errorMessage(e));
@@ -102,27 +113,40 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
     setLoading(false);
   }, [userId]);
 
-  const sendGoal = async () => {
+  // PC disponibles (clés d'agent) : sélecteur affiché dès qu'il y en a plusieurs.
+  useEffect(() => {
+    if (!userId) return;
+    let ignore = false;
+    listAgents()
+      .then((list) => {
+        if (!ignore) setAgents(list);
+      })
+      .catch((e) => console.warn("[Agent] Liste des PC indisponible :", errorMessage(e)));
+    return () => {
+      ignore = true;
+    };
+  }, [userId]);
+
+  const askAgentChoice = (list: AgentChoice[], pending: PendingSend) => {
+    setAgentChoice({ agents: list, pending });
+    setAgents((prev) => (prev.length > 0 ? prev : list));
+  };
+
+  const sendGoal = async (agentKeyId: string | null = explicitAgent) => {
     if (!userId || !goal.trim() || planning) return;
     setPlanning(true);
     setGoalFeedback(null);
-    try {
-      const data = await apiFetch<{
-        success?: boolean;
-        steps?: unknown[];
-        understanding?: string;
-        reason?: string;
-        error?: string;
-      }>("/api/agent/goal", { method: "POST", json: { goal: goal.trim() } });
-      if (data?.success) {
-        setGoalFeedback(`✅ Plan créé (${data.steps?.length ?? 0} étapes) : ${data.understanding ?? ""}`);
-        setGoal("");
-        fetchTasks();
-      } else {
-        setGoalFeedback(`❌ ${data?.reason || data?.error || "Échec de la planification"}`);
-      }
-    } catch (e) {
-      setGoalFeedback(`❌ ${errorMessage(e, "Backend injoignable")}`);
+    const outcome = await submitGoal(goal.trim(), agentKeyId);
+    if (outcome.kind === "ok") {
+      setGoalFeedback(`✅ Plan créé (${outcome.data.steps?.length ?? 0} étapes) : ${outcome.data.understanding ?? ""}`);
+      setGoal("");
+      setAgentChoice(null);
+      fetchTasks();
+    } else if (outcome.kind === "choose_agent") {
+      askAgentChoice(outcome.agents, "goal");
+      setGoalFeedback(`🖥️ ${outcome.message}`);
+    } else {
+      setGoalFeedback(`❌ ${outcome.message}`);
     }
     setPlanning(false);
   };
@@ -145,16 +169,17 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
     };
   }, [userId, fetchTasks]);
 
-  const sendTrainingVideoTask = async () => {
+  const sendTrainingVideoTask = async (agentKeyId: string | null = explicitAgent) => {
     if (!userId || !formationTitle) return;
     setSending(true);
 
     try {
-      const data = await apiFetch<{ success?: boolean; task?: AgentTask; error?: string }>("/api/agent-tasks", {
+      const data = await apiFetch<{ success?: boolean; task?: unknown; error?: string }>("/api/agent-tasks", {
         method: "POST",
         json: {
           task_type: "full_training_video",
           priority: 1,
+          ...(agentKeyId ? { agent_key_id: agentKeyId } : {}),
           payload: {
             title: formationTitle,
             formation_id: formationId,
@@ -166,28 +191,86 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
           },
         },
       });
-      const task = data?.task;
+      const task = normalizeTaskRow(data?.task);
       if (data?.success && task) {
+        setAgentChoice(null);
         setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [task, ...prev]));
       } else {
         toast.error("Envoi de la tâche impossible", { description: data?.error });
       }
     } catch (e) {
-      console.error("Error sending task:", e);
-      toast.error("Envoi de la tâche impossible", { description: errorMessage(e) });
+      const choice = agentChoiceFromError(e);
+      if (choice) {
+        askAgentChoice(choice, "video");
+        toast.info("Plusieurs PC disponibles", { description: "Choisissez le PC qui produira la vidéo." });
+      } else {
+        console.error("Error sending task:", e);
+        toast.error("Envoi de la tâche impossible", { description: errorMessage(e) });
+      }
     }
     setSending(false);
   };
 
-  const deleteTask = async (taskId: string) => {
-    const { error } = await supabase.from("agent_tasks").delete().eq("id", taskId);
+  const retryWithAgent = (agentId: string) => {
+    const pending = agentChoice?.pending;
+    setSelectedAgent(agentId);
+    setAgentChoice(null);
+    if (pending === "video") sendTrainingVideoTask(agentId);
+    else sendGoal(agentId);
+  };
+
+  const replaceTask = (taskId: string, update: (t: AgentTask) => AgentTask) =>
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? update(t) : t)));
+
+  /** Annulation via l'API (S9) : pending → annulée, en cours → arrêt demandé. Sert aussi au rejet. */
+  const cancelTask = async (task: AgentTask, rejecting = false) => {
+    setBusyTaskId(task.id);
+    try {
+      const resp = await cancelAgentTask(task.id);
+      replaceTask(task.id, (t) => applyCancelResponse(t, resp));
+      toast.success(
+        rejecting ? "Correction rejetée" : task.status === "in_progress" ? "Arrêt demandé à l'agent" : "Tâche annulée",
+      );
+    } catch (e) {
+      toast.error(rejecting ? "Rejet impossible" : "Annulation impossible", { description: errorMessage(e) });
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
+  /** Approbation d'une correction proposée par l'évaluateur (S10). */
+  const approveTask = async (task: AgentTask) => {
+    setBusyTaskId(task.id);
+    try {
+      const resp = await approveAgentTask(task.id);
+      replaceTask(task.id, (t) => applyApproveResponse(t, resp));
+      toast.success("Correction approuvée", { description: "L'agent pourra l'exécuter à son prochain passage." });
+    } catch (e) {
+      toast.error("Approbation impossible", { description: errorMessage(e) });
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
+  // Suppression : uniquement pour une tâche terminée (une tâche active s'annule).
+  const deleteTask = async (task: AgentTask) => {
+    if (!canDeleteTask(task)) return;
+    const { error } = await supabase.from("agent_tasks").delete().eq("id", task.id);
     if (error) {
       console.error("Error deleting task:", error);
       toast.error("Suppression impossible", { description: error.message });
       return;
     }
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
   };
+
+  const toggleExpanded = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-4">
@@ -201,7 +284,7 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           {formationTitle && (
-            <Button size="sm" onClick={sendTrainingVideoTask} disabled={sending} className="text-xs">
+            <Button size="sm" onClick={() => sendTrainingVideoTask()} disabled={sending} className="text-xs">
               {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Monitor className="h-3 w-3 mr-1" />}
               Produire la vidéo
             </Button>
@@ -227,10 +310,43 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
             {planning ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Planification en cours" /> : <><Sparkles className="h-3.5 w-3.5 mr-1" /> Planifier</>}
           </Button>
         </div>
+        {agents.length > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">PC cible :</span>
+            <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+              <SelectTrigger className="h-7 w-56 text-xs" aria-label="PC cible de l'agent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_AGENT}>Choisir au moment de l'envoi</SelectItem>
+                {agents.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         {goalFeedback && (
           <p className="text-[10px] text-muted-foreground">{goalFeedback}</p>
         )}
       </form>
+
+      {/* Le serveur demande de choisir le PC (plusieurs agents actifs, contrat §7) */}
+      {agentChoice && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3 space-y-2" role="group" aria-label="Choix du PC cible">
+          <p className="text-xs font-medium">Plusieurs PC sont connectés : lequel doit exécuter cette tâche ?</p>
+          <div className="flex flex-wrap gap-2">
+            {agentChoice.agents.map((a) => (
+              <Button key={a.id} size="sm" variant="outline" className="h-7 text-xs" disabled={planning || sending} onClick={() => retryWithAgent(a.id)}>
+                <Monitor className="h-3 w-3 mr-1" /> {a.name}
+              </Button>
+            ))}
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setAgentChoice(null)}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-xs text-muted-foreground">Chargement...</p>
@@ -247,29 +363,95 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
           </p>
         </div>
       ) : (
-        <ScrollArea className="max-h-[300px]">
+        <ScrollArea className="max-h-[420px]">
           <div className="space-y-2">
             {tasks.map((task) => {
-              const config = statusConfig[task.status] || statusConfig.pending;
-              const Icon = config.icon;
-              const evaluation = task.result?.evaluation;
+              const style = statusStyle[task.status] ?? statusStyle.pending;
+              const Icon = style.icon;
+              const awaiting = isAwaitingApproval(task);
+              const evaluation = evaluationView(task, tasks);
               const goalMeta = task.payload?.goal_meta;
+              const steps = plannedSteps(task);
+              const showSteps = awaiting || expanded.has(task.id);
+              const recordings = recordingPaths(task);
+              const pcId = task.claimed_by_key_id ?? task.target_agent_key_id;
+              const pcName = pcId ? agentNames.get(pcId) ?? `PC ${pcId.slice(0, 8)}` : null;
+              const busy = busyTaskId === task.id;
               return (
-                <div key={task.id} className="flex items-center gap-3 rounded-md bg-secondary/50 px-3 py-2">
-                  <Icon className={`h-4 w-4 flex-shrink-0 ${task.status === "in_progress" ? "animate-spin" : ""} ${config.color.split(" ")[1]}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">
-                      {taskTypeLabels[task.task_type] || task.task_type}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {new Date(task.created_at).toLocaleString("fr-FR")}
-                    </p>
+                <div
+                  key={task.id}
+                  className={`rounded-md px-3 py-2 ${awaiting ? "border border-warning/40 bg-warning/5" : "bg-secondary/50"}`}
+                >
+                  <div className="flex items-center gap-3">
+                    {awaiting ? (
+                      <ShieldQuestion className="h-4 w-4 flex-shrink-0 text-warning" />
+                    ) : (
+                      <Icon className={`h-4 w-4 flex-shrink-0 ${task.status === "in_progress" ? "animate-spin" : ""} ${style.color.split(" ")[1]}`} />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">
+                        {taskTypeLabels[task.task_type] || task.task_type}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(task.created_at).toLocaleString("fr-FR")}
+                        {pcName && ` · 💻 ${pcName}`}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={`text-[9px] ${awaiting ? "bg-warning/10 text-warning" : style.color}`}>
+                      {statusLabel(task)}
+                    </Badge>
+                    {canCancelTask(task) && !awaiting && (
+                      <ConfirmAction
+                        title={task.status === "in_progress" ? "Arrêter cette tâche ?" : "Annuler cette tâche ?"}
+                        description={
+                          task.status === "in_progress"
+                            ? "L'agent termine l'étape en cours puis s'arrête. La tâche passera à « Annulée »."
+                            : "La tâche ne sera pas exécutée par l'agent."
+                        }
+                        confirmLabel={task.status === "in_progress" ? "Arrêter" : "Annuler la tâche"}
+                        onConfirm={() => cancelTask(task)}
+                        trigger={
+                          <button
+                            className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                            aria-label="Annuler la tâche"
+                            title="Annuler la tâche"
+                            disabled={busy}
+                          >
+                            <Ban className="h-3 w-3" />
+                          </button>
+                        }
+                      />
+                    )}
+                    {canDeleteTask(task) && (
+                      <ConfirmAction
+                        title="Supprimer cette tâche ?"
+                        description="La tâche et son résultat seront retirés de l'historique."
+                        onConfirm={() => deleteTask(task)}
+                        trigger={
+                          <button
+                            className="text-muted-foreground hover:text-destructive"
+                            aria-label="Supprimer la tâche"
+                            title="Supprimer la tâche"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        }
+                      />
+                    )}
+                  </div>
+
+                  <div className="pl-7">
                     {task.error_message && (
                       <p className="text-[10px] text-destructive mt-0.5">{task.error_message}</p>
                     )}
                     {task.result?.file && (
-                      <p className="text-[10px] text-success mt-0.5">📁 {task.result.file}</p>
+                      <p className="text-[10px] text-success mt-0.5 break-all">📁 {task.result.file}</p>
                     )}
+                    {recordings.map((path) => (
+                      <p key={path} className="text-[10px] text-success mt-0.5 break-all flex items-center gap-1">
+                        <Film className="h-3 w-3 flex-shrink-0" /> Enregistrement : {path}
+                      </p>
+                    ))}
                     {goalMeta?.goal && (
                       <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">
                         🎯 {goalMeta.goal}
@@ -277,21 +459,53 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
                       </p>
                     )}
                     {evaluation && (
-                      <p className={`text-[10px] mt-0.5 ${evaluation.verdict === "success" ? "text-success" : evaluation.verdict === "retry" ? "text-warning" : "text-destructive"}`}>
-                        🧠 {evaluation.verdict === "success" ? "Objectif atteint" : evaluation.verdict === "retry" ? "Correction lancée" : "Abandonné"} — {evaluation.reason}
+                      <p className={`text-[10px] mt-0.5 ${toneClass[evaluation.tone]}`}>🧠 {evaluation.text}</p>
+                    )}
+
+                    {awaiting && (
+                      <p className="text-[10px] text-warning mt-1">
+                        Correction proposée par l'IA : vérifiez le plan ci-dessous. Elle ne sera exécutée qu'après votre approbation.
                       </p>
                     )}
+
+                    {steps.length > 0 && !awaiting && (
+                      <button
+                        onClick={() => toggleExpanded(task.id)}
+                        className="mt-1 flex items-center gap-1 text-[10px] text-primary hover:underline"
+                        aria-expanded={showSteps}
+                      >
+                        {showSteps ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                        {showSteps ? "Masquer le plan" : `Voir le plan (${steps.length} étape${steps.length > 1 ? "s" : ""})`}
+                      </button>
+                    )}
+                    {showSteps && steps.length > 0 && (
+                      <ol className="mt-1 space-y-0.5 list-decimal pl-4">
+                        {steps.map((step, i) => (
+                          <li key={i} className="text-[10px] text-foreground/80 break-words">{describeStep(step)}</li>
+                        ))}
+                      </ol>
+                    )}
+
+                    {awaiting && (
+                      <div className="mt-2 flex gap-2">
+                        <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => approveTask(task)}>
+                          {busy ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
+                          Approuver
+                        </Button>
+                        <ConfirmAction
+                          title="Rejeter cette correction ?"
+                          description="La tâche de correction sera annulée et ne sera jamais exécutée."
+                          confirmLabel="Rejeter"
+                          onConfirm={() => cancelTask(task, true)}
+                          trigger={
+                            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy}>
+                              <X className="h-3 w-3 mr-1" /> Rejeter
+                            </Button>
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
-                  <Badge variant="outline" className={`text-[9px] ${config.color}`}>
-                    {config.label}
-                  </Badge>
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label="Supprimer la tâche"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
                 </div>
               );
             })}

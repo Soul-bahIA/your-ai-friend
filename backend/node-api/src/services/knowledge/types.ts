@@ -7,6 +7,8 @@
 export interface Source {
   url?: string;
   title?: string;
+  /** false = URL citée par un modèle mais jamais récupérée (non vérifiée). */
+  verified?: boolean;
 }
 
 export interface KnowledgeLink {

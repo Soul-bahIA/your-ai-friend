@@ -1,0 +1,16 @@
+{
+  // Build de production : compile src/ vers dist/ en ESM exécutable par Node
+  // (`node dist/server.js`). NodeNext impose les extensions .js sur les imports
+  // relatifs : tout oubli casse le build (et non l'exécution).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": false
+  },
+  "include": ["src"]
+}

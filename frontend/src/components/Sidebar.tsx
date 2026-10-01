@@ -14,6 +14,8 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSystemStatus } from "@/hooks/useSystemStatus";
+import { SERVICE_STATE_LABELS, statusView, type ServiceState } from "@/lib/systemStatus";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -31,6 +33,14 @@ const navItems = [
 const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const status = useSystemStatus();
+  const view = statusView(status.overall);
+  const services: [string, ServiceState][] = [
+    ["API", status.backend],
+    ["Base", status.postgres],
+    ["IA", status.pythonIa],
+    ["Supabase", status.supabase],
+  ];
 
   return (
     <aside className="h-full w-64 border-r border-border bg-sidebar flex flex-col md:fixed md:left-0 md:top-0 md:z-40 md:h-screen">
@@ -77,17 +87,15 @@ const Sidebar = ({ onNavigate }: { onNavigate?: () => void }) => {
             </button>
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-          <span className="text-xs text-muted-foreground">Système opérationnel</span>
+        {/* État réel des services (sondes /health, /health/deep et Supabase) */}
+        <div className="flex items-center gap-2" role="status" aria-live="polite">
+          <div className={`h-2 w-2 rounded-full ${view.dotClass} ${view.pulse ? "animate-pulse" : ""}`} />
+          <span className="text-xs text-muted-foreground">{view.label}</span>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-secondary overflow-hidden">
-            <div className="h-full w-3/4 rounded-full bg-primary" />
-          </div>
-          <span className="text-[10px] font-mono text-muted-foreground">75%</span>
-        </div>
-        <p className="text-[10px] text-muted-foreground mt-1">CPU: 34% · RAM: 62%</p>
+        <p className="mt-1 text-[10px] text-muted-foreground font-mono">
+          {services.map(([name, state]) => `${name} ${SERVICE_STATE_LABELS[state]}`).join(" · ")}
+        </p>
+        <p className="text-[10px] text-muted-foreground/70 mt-0.5">CPU / RAM : non disponible</p>
       </div>
     </aside>
   );

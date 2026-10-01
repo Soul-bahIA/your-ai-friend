@@ -3,12 +3,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, Sparkles, Menu } from "lucide-react";
+import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, Sparkles, Menu, Wrench, Check, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiFetch, apiFetchRaw, ApiError, errorMessage, isAbortError } from "@/lib/api";
 import { applyChatDelta, createSseParser, type PendingToolCall } from "@/lib/sse";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
+import {
+  buildConfirmedActionBody,
+  describeAction,
+  proposalNotice,
+  proposeToolCalls,
+  transitionAction,
+  type ActionEvent,
+  type ProposedAction,
+} from "@/lib/chatTools";
 import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
 import { toast } from "sonner";
@@ -35,7 +45,11 @@ const AiChat = () => {
   const [messagesError, setMessagesError] = useState<string | null>(null);
   const [messagesReload, setMessagesReload] = useState(0);
   const [input, setInput] = useState("");
+  // Demande transmise par la barre de commande (capacités chat / generate).
+  useCommandPrefill(setInput);
   const [isLoading, setIsLoading] = useState(false);
+  // Actions proposées par l'IA : jamais exécutées sans confirmation explicite (S12).
+  const [proposedActions, setProposedActions] = useState<ProposedAction[]>([]);
   const [showConversations, setShowConversations] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Conversation dans laquelle une réponse est en cours de streaming : on ne recharge
@@ -148,6 +162,7 @@ const AiChat = () => {
       return;
     }
     setConversations((prev) => prev.filter((c) => c.id !== id));
+    setProposedActions((prev) => prev.filter((a) => a.conversationId !== id));
     if (activeConversationId === id) {
       if (streamingConvRef.current === id) abortStream();
       setActiveConversationId(null);
@@ -156,32 +171,49 @@ const AiChat = () => {
     toast.success("Conversation supprimée");
   };
 
-  const executeAction = async (actionName: string, actionArgs: unknown, signal: AbortSignal): Promise<string> => {
+  /** Exécute une action CONFIRMÉE et renvoie le texte de résultat. */
+  const runConfirmedAction = async (action: ProposedAction): Promise<{ ok: boolean; text: string }> => {
     try {
       const result = await apiFetch<ActionResult>("/api/chat", {
         method: "POST",
-        json: { messages: [], action: { name: actionName, arguments: actionArgs } },
-        signal,
+        json: buildConfirmedActionBody(action),
       });
       if (result?.success) {
         switch (result.type) {
           case "formation":
             toast.success(`Formation "${result.title}" créée !`);
-            return `✅ Formation **"${result.title}"** créée avec succès${result.lessonsCount ? ` (${result.lessonsCount} leçons)` : ""}. Vous pouvez la consulter dans l'onglet Formations.`;
+            return { ok: true, text: `✅ Formation **"${result.title}"** créée avec succès${result.lessonsCount ? ` (${result.lessonsCount} leçons)` : ""}. Vous pouvez la consulter dans l'onglet Formations.` };
           case "application":
             toast.success(`Application "${result.title}" créée !`);
-            return `✅ Application **"${result.title}"** créée avec succès. Consultez-la dans l'onglet Applications.`;
+            return { ok: true, text: `✅ Application **"${result.title}"** créée avec succès. Consultez-la dans l'onglet Applications.` };
           case "knowledge":
             toast.success(`Connaissance "${result.title}" sauvegardée !`);
-            return `✅ Connaissance **"${result.title}"** sauvegardée dans votre base de connaissances.`;
+            return { ok: true, text: `✅ Connaissance **"${result.title}"** sauvegardée dans votre base de connaissances.` };
           default:
-            return `✅ Action exécutée avec succès.`;
+            return { ok: true, text: "✅ Action exécutée avec succès." };
         }
       }
-      return `❌ Erreur : ${result?.error || "Action échouée"}`;
+      return { ok: false, text: `❌ Erreur : ${result?.error || "Action échouée"}` };
     } catch (err) {
-      if (isAbortError(err)) throw err;
-      return `❌ ${errorMessage(err, "Erreur de connexion lors de l'exécution de l'action.")}`;
+      return { ok: false, text: `❌ ${errorMessage(err, "Erreur de connexion lors de l'exécution de l'action.")}` };
+    }
+  };
+
+  const updateAction = (key: string, event: ActionEvent) =>
+    setProposedActions((prev) => prev.map((a) => (a.key === key ? transitionAction(a, event) : a)));
+
+  /** Exécute une action APRÈS confirmation explicite de l'utilisateur. */
+  const confirmAction = async (action: ProposedAction) => {
+    const executing = transitionAction(action, { type: "confirm" });
+    if (executing.status !== "executing") return;
+    updateAction(action.key, { type: "confirm" });
+    const { ok, text } = await runConfirmedAction(executing);
+    updateAction(action.key, ok ? { type: "succeeded", text } : { type: "failed", text });
+    if (action.conversationId) {
+      if (action.conversationId === activeConversationId) {
+        setMessages((prev) => [...prev, { role: "assistant", content: text }]);
+      }
+      await saveMessage(action.conversationId, "assistant", text);
     }
   };
 
@@ -269,17 +301,11 @@ const AiChat = () => {
       }
       if (finished) reader.cancel().catch(() => {});
 
-      for (const tc of pendingToolCalls) {
-        if (tc && tc.name) {
-          let args: unknown = {};
-          try {
-            args = JSON.parse(tc.arguments || "{}");
-          } catch (err) {
-            console.warn(`[Chat] Arguments invalides pour l'outil ${tc.name} :`, err);
-          }
-          upsert(`\n\n⚡ *Exécution : ${tc.name}...*\n\n`);
-          upsert(await executeAction(tc.name, args, signal));
-        }
+      // Appels d'outils : proposés à l'utilisateur, JAMAIS exécutés automatiquement.
+      const proposals = signal.aborted ? [] : proposeToolCalls(pendingToolCalls, convId);
+      if (proposals.length > 0) {
+        upsert(proposalNotice(proposals));
+        setProposedActions((prev) => [...prev, ...proposals]);
       }
     } catch (err) {
       if (!isAbortError(err)) {
@@ -320,6 +346,10 @@ const AiChat = () => {
     setActiveConversationId(id);
     if (isMobile) setShowConversations(false);
   };
+
+  const visibleActions = proposedActions.filter(
+    (a) => a.conversationId !== null && a.conversationId === activeConversationId,
+  );
 
   const conversationList = (
     <div className="flex flex-col h-full">
@@ -451,6 +481,59 @@ const AiChat = () => {
               )}
             </div>
           ))}
+          {visibleActions.map((action) => {
+            const desc = describeAction(action.name, action.args);
+            return (
+              <div
+                key={action.key}
+                className="ml-8 md:ml-10 max-w-[85%] md:max-w-[75%] rounded-lg border border-warning/40 bg-warning/5 p-3 space-y-2"
+                role="group"
+                aria-label={`Action proposée : ${desc.title}`}
+              >
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-3.5 w-3.5 text-warning" />
+                  <span className="text-xs font-semibold">Action proposée : {desc.title}</span>
+                </div>
+                {desc.fields.length > 0 && (
+                  <dl className="space-y-1">
+                    {desc.fields.map((f) => (
+                      <div key={f.label} className="text-[11px]">
+                        <dt className="inline font-medium text-foreground">{f.label} : </dt>
+                        <dd className="inline text-muted-foreground whitespace-pre-wrap break-words">{f.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {action.invalid ? (
+                  <p className="text-[11px] text-destructive">Action non exécutable : {action.invalid}.</p>
+                ) : action.status === "proposed" ? (
+                  <div className="flex gap-2">
+                    <Button size="sm" className="h-7 text-xs" onClick={() => confirmAction(action)}>
+                      <Check className="h-3 w-3 mr-1" /> Confirmer
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => updateAction(action.key, { type: "cancel" })}
+                    >
+                      <X className="h-3 w-3 mr-1" /> Annuler
+                    </Button>
+                  </div>
+                ) : action.status === "executing" ? (
+                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Exécution en cours…
+                  </p>
+                ) : action.status === "cancelled" ? (
+                  <p className="text-[11px] text-muted-foreground">Action annulée — rien n'a été exécuté.</p>
+                ) : (
+                  <p className={`text-[11px] ${action.status === "done" ? "text-success" : "text-destructive"}`}>
+                    {action.status === "done" ? "Action exécutée." : "L'action a échoué."}
+                  </p>
+                )}
+              </div>
+            );
+          })}
           {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
             <div className="flex gap-2 md:gap-3">
               <div className="flex-shrink-0 h-6 w-6 md:h-7 md:w-7 rounded-full bg-primary/10 flex items-center justify-center mt-1">

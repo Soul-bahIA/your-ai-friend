@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BookOpen, Plus, Search, Trash2, Edit, Tag, Calendar } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, errorMessage } from "@/lib/api";
+import { buildKnowledgeBody } from "@/lib/knowledge";
 import { useAuth } from "@/hooks/useAuth";
 import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import { toast } from "sonner";
@@ -64,28 +66,34 @@ const KnowledgeBase = () => {
     loadItems();
   }, [loadItems]);
 
+  // Écritures uniquement via /api/knowledge (contrat §11) : le serveur calcule
+  // hash, version et embedding. La lecture directe (RLS propriétaire) reste permise.
   const handleSave = async () => {
     if (!userId || !form.title.trim() || !form.content.trim()) {
       toast.error("Titre et contenu requis");
       return;
     }
-    const tags = form.tags.split(",").map(t => t.trim()).filter(Boolean);
-    const payload = {
-      user_id: userId,
-      title: form.title,
-      content: form.content,
-      category: form.category,
-      source: form.source || null,
-      tags,
-    };
+    const body = buildKnowledgeBody(form);
 
     if (editing) {
-      const { error } = await supabase.from("knowledge_base").update(payload).eq("id", editing.id);
-      if (error) { toast.error("Erreur lors de la mise à jour", { description: error.message }); return; }
+      try {
+        await apiFetch(`/api/knowledge/${encodeURIComponent(editing.id)}`, {
+          method: "PATCH",
+          json: { ...body, changeNote: "Modification depuis la page Connaissances" },
+        });
+      } catch (e) {
+        toast.error("Erreur lors de la mise à jour", { description: errorMessage(e) });
+        return;
+      }
       toast.success("Connaissance mise à jour");
     } else {
-      const { error } = await supabase.from("knowledge_base").insert(payload);
-      if (error) { toast.error("Erreur lors de la création", { description: error.message }); return; }
+      try {
+        // dedupe:false : une saisie manuelle crée toujours une nouvelle entrée.
+        await apiFetch("/api/knowledge", { method: "POST", json: { ...body, dedupe: false } });
+      } catch (e) {
+        toast.error("Erreur lors de la création", { description: errorMessage(e) });
+        return;
+      }
       toast.success("Connaissance ajoutée");
     }
     setIsOpen(false);
@@ -95,8 +103,12 @@ const KnowledgeBase = () => {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("knowledge_base").delete().eq("id", id);
-    if (error) { toast.error("Erreur lors de la suppression", { description: error.message }); return; }
+    try {
+      await apiFetch(`/api/knowledge/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch (e) {
+      toast.error("Erreur lors de la suppression", { description: errorMessage(e) });
+      return;
+    }
     toast.success("Connaissance supprimée");
     setItems((prev) => prev.filter((i) => i.id !== id));
     if (viewing?.id === id) setViewing(null);
@@ -135,7 +147,7 @@ const KnowledgeBase = () => {
               Base de <span className="text-gradient-primary">Connaissances</span>
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {items.length} entrée{items.length !== 1 ? "s" : ""} stockées localement
+              {items.length} entrée{items.length !== 1 ? "s" : ""} dans votre base
             </p>
           </div>
           <Dialog open={isOpen} onOpenChange={setIsOpen}>

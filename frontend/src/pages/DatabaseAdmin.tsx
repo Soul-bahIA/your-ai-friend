@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { useCommandPrefill } from "@/hooks/useCommandPrefill";
 import ConfirmAction from "@/components/ConfirmAction";
 import { errorMessage } from "@/lib/api";
 import {
@@ -116,6 +117,12 @@ export default function DatabaseAdmin() {
   const [newColumns, setNewColumns] = useState<Column[]>([
     { name: "id", type: "text", required: true },
   ]);
+  // Demande transmise par la barre de commande : ouvre la création de table, décrite par la demande.
+  useCommandPrefill((prompt) => {
+    setActiveSchema(null);
+    setNewTableDesc(prompt);
+    setShowCreate(true);
+  });
 
   // Edit column dialog
   const [editingSchema, setEditingSchema] = useState<UserSchema | null>(null);

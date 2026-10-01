@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { pool } from "../db";
-import { requireUser } from "../auth";
-import { requestInference } from "../clients/iaClient";
-import { isUuid } from "../lib/sanitize";
+import { pool } from "../db.js";
+import { requireUser } from "../auth.js";
+import { requestInference } from "../clients/iaClient.js";
+import { isUuid } from "../lib/sanitize.js";
 
 // Démo Node → Python → Rust. Authentifiée : chaque requête est rattachée à son
 // utilisateur (analysis_requests.user_id) et seule sa propre ligne est relisible.

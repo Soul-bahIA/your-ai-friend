@@ -2,15 +2,20 @@
 
 Auto-suffisant (mss + OpenCV) — ne dépend pas d'un logiciel tiers particulier,
 conformément à la spec (« s'adapter à différents logiciels compatibles »).
+Cadence constante calée sur le temps réel (durée vidéo ≈ durée demandée), codec
+H.264 si disponible (sinon mp4v + avertissement) : voir skills/recording.py.
 
-Exemple : {"type": "record_screen", "path": "C:/videos/demo.mp4", "duration": 8, "fps": 10}
+Exemple : {"type": "record_screen", "path": "C:/videos/demo.mp4", "duration": 8, "fps": 10, "monitor": 1}
 """
 from __future__ import annotations
 
-import time
-
-from skills.base import PathCheck, Skill, SkillResult, cancel_event
-from skills.record_bg import validate_video_path
+from skills.base import PathCheck, Skill, SkillResult, current_token
+from skills.recording import (
+    output_dir_error,
+    record_to_file,
+    validate_monitor,
+    validate_video_path,
+)
 
 _MIN_DURATION = 1
 _MAX_DURATION = 120  # borne de sécurité
@@ -27,18 +32,18 @@ class RecordScreenSkill(Skill):
         return f"enregistrer l'écran {step.get('duration', 5)}s → {step.get('path', '?')}"
 
     def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
-        return validate_video_path(step.get("path"))
+        return validate_video_path(step.get("path")) or validate_monitor(step.get("monitor"))
 
     def run(self, step: dict) -> SkillResult:
         path = step.get("path")
-        err = validate_video_path(path)
+        err = validate_video_path(path) or validate_monitor(step.get("monitor")) or output_dir_error(path)
         if err:
             return SkillResult(ok=False, detail=err)
 
         try:
-            import cv2
-            import mss
-            import numpy as np
+            import cv2  # noqa: F401
+            import mss  # noqa: F401
+            import numpy  # noqa: F401
         except ImportError as e:
             return SkillResult(ok=False, detail=f"dépendance manquante : {e.name}")
 
@@ -47,49 +52,21 @@ class RecordScreenSkill(Skill):
             fps = max(1, min(int(step.get("fps", _DEFAULT_FPS)), 30))
         except (TypeError, ValueError):
             return SkillResult(ok=False, detail="champs 'duration'/'fps' invalides")
-        interval = 1.0 / fps
+        monitor = 1 if step.get("monitor") is None else int(step["monitor"])
 
-        writer = None
-        frames = 0
-        cancelled = False
+        token = current_token()
         try:
-            with mss.mss() as sct:
-                monitor = sct.monitors[1]
-                first = np.array(sct.grab(monitor))
-                h, w = first.shape[0], first.shape[1]
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                writer = cv2.VideoWriter(path, fourcc, fps, (w, h))
-                if not writer.isOpened():
-                    return SkillResult(ok=False, detail=f"impossible de créer le fichier vidéo : {path}")
-
-                start = time.monotonic()
-                while time.monotonic() - start < duration:
-                    # Arrêt demandé (stop utilisateur, délai dépassé…) : on finalise le fichier.
-                    if cancel_event.is_set():
-                        cancelled = True
-                        break
-                    t0 = time.monotonic()
-                    frame = np.array(sct.grab(monitor))
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-                    writer.write(frame)
-                    frames += 1
-                    elapsed = time.monotonic() - t0
-                    if elapsed < interval:
-                        time.sleep(interval - elapsed)
+            # Arrêt demandé (stop utilisateur, délai dépassé, Ctrl+C) : on finalise le fichier.
+            stats = record_to_file(path, fps, token.is_cancelled, duration, monitor=monitor, wait=token.wait)
         except Exception as e:  # noqa: BLE001
             return SkillResult(ok=False, detail=f"échec enregistrement : {e}")
-        finally:
-            if writer is not None:
-                try:
-                    writer.release()
-                except Exception:  # noqa: BLE001
-                    pass
 
-        if cancelled:
-            return SkillResult(ok=False, detail=f"enregistrement interrompu ({frames} images) → {path}",
-                               data={"path": path, "frames": frames})
-        return SkillResult(
-            ok=True,
-            detail=f"{frames} images enregistrées ({duration}s @ {fps}fps) → {path}",
-            data={"path": path, "duration_s": duration, "frames": frames},
-        )
+        data = {"path": path, **stats}
+        if token.is_cancelled():
+            return SkillResult(ok=False, detail=f"enregistrement interrompu ({stats['frames']} images) → {path}",
+                               data=data)
+        detail = (f"{stats['frames']} images ({stats['duration_s']} s réelles @ {fps} fps, "
+                  f"capture {stats['capture_fps']} fps, codec {stats.get('codec')}) → {path}")
+        if stats.get("warning"):
+            detail += f" — avertissement : {stats['warning']}"
+        return SkillResult(ok=True, detail=detail, data=data)

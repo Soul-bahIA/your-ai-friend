@@ -206,7 +206,12 @@ class TestEvaluateScrub:
 
     def test_invalid_verdict_becomes_abort(self, client, fake_llm):
         fake_llm.reply = '{"verdict": ["x"]}'
-        r = client.post("/agent/evaluate", json={"goal": "g", "steps": [], "result": {}})
+        # LOT 1 (T10) : un plan vide n'est plus évalué par le LLM -> on fournit une
+        # vraie exécution (1 étape planifiée, 1 étape exécutée).
+        r = client.post("/agent/evaluate", json={
+            "goal": "g", "steps": [{"type": "wait", "seconds": 1}],
+            "result": {"steps": [{"index": 0, "type": "wait", "ok": True, "detail": "attendu 1 s"}]},
+        })
         assert r.status_code == 200
         assert r.json()["evaluation"]["verdict"] == "abort"
 

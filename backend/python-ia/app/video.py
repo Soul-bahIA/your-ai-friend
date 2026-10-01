@@ -2,19 +2,35 @@
 
 Produit un VRAI fichier .mp4 (diapositives rendues en images, avec piste audio de
 narration synthétisée) — remplace l'ancien diaporama navigateur + voix Chrome.
+
+T27 (partiel) :
+- la narration TTS des diapos est synthétisée EN PARALLÈLE dans un pool borné
+  (VIDEO_TTS_CONCURRENCY, défaut 3, max 8) ;
+- annulation coopérative : `should_cancel()` (client déconnecté ou échéance
+  x-deadline-ms dépassée, cf. main.py) est consulté par le thread appelant avant
+  chaque phase et toutes les secondes pendant les TTS ; les TTS non démarrées sont
+  abandonnées (aucun nouvel appel payant). Limites documentées : une requête TTS déjà
+  partie va à son terme (≤ 120 s) et l'encodage MP4 (moviepy/ffmpeg) n'est pas
+  interruptible une fois lancé. Une vraie file de jobs annulables relève du LOT 14.
 """
 from __future__ import annotations
 
+import concurrent.futures as cf
+import logging
 import os
 import shutil
 import tempfile
 import textwrap
+import threading
 import uuid
+from typing import Callable
 
 import httpx
 
 from .llm import LLMError
 from .providers.base import upstream_error
+
+logger = logging.getLogger("python-ia")
 
 OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL", "https://api.openai.com/v1/audio/speech")
 TTS_MODEL = os.getenv("TTS_MODEL", "tts-1")
@@ -26,12 +42,26 @@ _ACCENT = (99, 102, 241)
 _TEXT = (235, 236, 240)
 _MUTED = (150, 155, 170)
 _MAX_TTS_CHARS = 3500  # limite par requête TTS
+_ASSETS_FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+_CANCEL_POLL_S = 1.0
+
+
+class VideoCancelled(Exception):
+    """Production abandonnée (client déconnecté ou échéance dépassée)."""
+
+
+def _tts_concurrency() -> int:
+    try:
+        return max(1, min(8, int(os.getenv("VIDEO_TTS_CONCURRENCY", "3"))))
+    except ValueError:
+        return 3
 
 
 def _font(size: int):
     from PIL import ImageFont
 
-    for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"):
+    for name in (os.path.join(_ASSETS_FONTS, "DejaVuSans-Bold.ttf"), "arialbd.ttf", "arial.ttf",
+                 "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except Exception:  # noqa: BLE001
@@ -52,11 +82,12 @@ def _synthesize(text: str, out_path: str) -> None:
             timeout=120,
         )
     except httpx.HTTPError as e:
-        raise LLMError(502, f"Service TTS injoignable : {e}")
+        logger.warning("Service TTS injoignable : %s", e)
+        raise LLMError(502, "Service TTS injoignable", fallback=True, kind="connection")
     if r.status_code != 200:
         # Ne jamais propager tel quel le code amont (un 401 OpenAI ferait croire au
-        # client que SA session est invalide) ni le corps d'un 401/403.
-        raise upstream_error("TTS OpenAI", r.status_code, r.text[:200])
+        # client que SA session est invalide) ni un corps amont (journalisé seulement).
+        raise upstream_error("TTS OpenAI", r.status_code, r.text[:500])
     with open(out_path, "wb") as f:
         f.write(r.content)
 
@@ -140,10 +171,52 @@ def _slides_from_formation(title: str, lessons: list[dict]) -> list[dict]:
     return slides
 
 
-def build_formation_video(title: str, lessons: list[dict], out_path: str, max_slides: int | None = None) -> dict:
-    """Assemble la vidéo MP4. Retourne {path, slides, duration_s}."""
+def _synthesize_all(slides: list[dict], tmpdir: str, should_cancel: Callable[[], bool]) -> list[str]:
+    """Synthétise la narration de chaque diapo dans un pool borné ; renvoie les
+    chemins MP3 dans l'ordre des diapos. Annulation : voir docstring du module."""
+    paths = [os.path.join(tmpdir, f"n{idx}.mp3") for idx in range(len(slides))]
+    stop = threading.Event()
+
+    def job(idx: int) -> None:
+        if stop.is_set():
+            raise VideoCancelled()
+        _synthesize(slides[idx]["narration"], paths[idx])
+
+    pool = cf.ThreadPoolExecutor(max_workers=_tts_concurrency(), thread_name_prefix="soulbah-tts")
+    futures = [pool.submit(job, i) for i in range(len(slides))]
+    try:
+        pending = set(futures)
+        while pending:
+            if should_cancel():
+                raise VideoCancelled()
+            done, pending = cf.wait(pending, timeout=_CANCEL_POLL_S, return_when=cf.FIRST_EXCEPTION)
+            for f in done:
+                exc = f.exception()
+                if exc is not None:
+                    raise exc
+        return paths
+    finally:
+        stop.set()
+        # Les TTS non démarrées sont annulées ; celles déjà en vol (≤ délai TTS) sont
+        # attendues pour qu'aucun thread n'écrive encore dans tmpdir après le retour.
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+def build_formation_video(
+    title: str,
+    lessons: list[dict],
+    out_path: str,
+    max_slides: int | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> dict:
+    """Assemble la vidéo MP4. Retourne {path, slides, duration_s}.
+
+    `should_cancel` (optionnel) est appelé UNIQUEMENT depuis le thread appelant ;
+    s'il renvoie True, la production s'arrête (VideoCancelled) sans fichier final.
+    """
     from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
 
+    cancelled = should_cancel or (lambda: False)
     slides = _slides_from_formation(title, lessons)
     if max_slides:
         slides = slides[:max_slides]
@@ -157,10 +230,11 @@ def build_formation_video(title: str, lessons: list[dict], out_path: str, max_sl
     out_dir = os.path.dirname(os.path.abspath(out_path))
     partial = os.path.join(out_dir, f".{os.path.basename(out_path)}.{uuid.uuid4().hex}.part.mp4")
     try:
-        for idx, s in enumerate(slides):
+        if cancelled():
+            raise VideoCancelled()
+        mp3s = _synthesize_all(slides, tmpdir, cancelled)
+        for s, mp3 in zip(slides, mp3s):
             frame = _render_slide(s["kind"], s["heading"], s["title"], s["bullets"])
-            mp3 = os.path.join(tmpdir, f"n{idx}.mp3")
-            _synthesize(s["narration"], mp3)
             audio = AudioFileClip(mp3)
             audios.append(audio)
             # Un court battement après la narration
@@ -168,6 +242,8 @@ def build_formation_video(title: str, lessons: list[dict], out_path: str, max_sl
             clip = ImageClip(frame).set_duration(dur).set_audio(audio)
             clips.append(clip)
 
+        if cancelled():
+            raise VideoCancelled()
         final = concatenate_videoclips(clips, method="compose")
         final.write_videofile(
             partial, fps=24, codec="libx264", audio_codec="aac", logger=None,

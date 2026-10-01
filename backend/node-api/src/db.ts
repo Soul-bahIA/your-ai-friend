@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import pg from "pg";
-import { config } from "./config";
-import { logger } from "./lib/logger";
+import { config } from "./config.js";
+import { logger } from "./lib/logger.js";
 
 const { Pool } = pg;
 

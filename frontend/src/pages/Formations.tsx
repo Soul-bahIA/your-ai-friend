@@ -11,6 +11,7 @@ import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
 import { apiFetch, errorMessage, safeMediaUrl } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useCommandPrefill } from "@/hooks/useCommandPrefill";
@@ -23,28 +24,22 @@ interface Lesson {
   exercises: string[];
 }
 
-interface Formation {
-  id: string;
-  title: string;
-  description: string | null;
-  lessons_count: number | null;
-  duration: string | null;
-  status: string;
-  created_at: string;
-  content: unknown;
-  video_url?: string | null;
-}
+type Formation = Tables<"formations">;
+
+/** Leçons « à plat » d'une formation (colonne JSON `content`). */
+const lessonsOf = (course: Pick<Formation, "content">): Lesson[] =>
+  Array.isArray(course.content) ? (course.content as unknown as Lesson[]) : [];
 
 /** Applique un événement temps réel directement à la liste (sans refetch complet). */
 function applyFormationChange(
   prev: Formation[],
-  payload: RealtimePostgresChangesPayload<Record<string, unknown>>,
+  payload: RealtimePostgresChangesPayload<Formation>,
 ): Formation[] {
   if (payload.eventType === "DELETE") {
-    const id = (payload.old as { id?: string }).id;
+    const id = payload.old.id;
     return id ? prev.filter((f) => f.id !== id) : prev;
   }
-  const row = payload.new as unknown as Formation;
+  const row = payload.new;
   if (!row?.id) return prev;
   const idx = prev.findIndex((f) => f.id === row.id);
   if (idx === -1) return [row, ...prev];
@@ -86,7 +81,7 @@ const Formations = () => {
       }>(`/api/formations/${course.id}/video`, { method: "POST", json: {} });
       if (!data?.success) throw new Error(data?.error || "Échec de la production vidéo");
       setFormations((prev) =>
-        prev.map((f) => (f.id === course.id ? { ...f, video_url: data.video_url } : f)),
+        prev.map((f) => (f.id === course.id ? { ...f, video_url: data.video_url ?? null } : f)),
       );
       toast({
         title: "🎬 Vidéo MP4 produite !",
@@ -110,7 +105,7 @@ const Formations = () => {
       console.error("Error loading formations:", error);
       setLoadError(error.message);
     } else {
-      setFormations((data ?? []) as unknown as Formation[]);
+      setFormations(data ?? []);
     }
     setLoading(false);
   }, [userId]);
@@ -123,7 +118,7 @@ const Formations = () => {
     // (statut, contenu) ; on applique directement la ligne reçue à la liste.
     const channel = supabase
       .channel(`formations-realtime-${userId}`)
-      .on(
+      .on<Formation>(
         "postgres_changes",
         { event: "*", schema: "public", table: "formations", filter: `user_id=eq.${userId}` },
         (payload) => setFormations((prev) => applyFormationChange(prev, payload)),
@@ -158,7 +153,7 @@ const Formations = () => {
     }
 
     setFormations((prev) =>
-      prev.some((f) => f.id === data.id) ? prev : [data as unknown as Formation, ...prev],
+      prev.some((f) => f.id === data.id) ? prev : [data, ...prev],
     );
     const formationId = data.id;
 
@@ -212,7 +207,7 @@ const Formations = () => {
   };
 
   const handleExportPdf = (course: Formation) => {
-    const lessons = Array.isArray(course.content) ? (course.content as Lesson[]) : [];
+    const lessons = lessonsOf(course);
     const lines: string[] = [];
     lines.push(course.title);
     lines.push("=".repeat(course.title.length));
@@ -330,7 +325,7 @@ const Formations = () => {
         ) : (
           <div className="space-y-3">
             {formations.map((course, i) => {
-              const lessons = Array.isArray(course.content) ? (course.content as Lesson[]) : [];
+              const lessons = lessonsOf(course);
               const videoHref = safeMediaUrl(course.video_url);
               return (
               <div
@@ -503,7 +498,7 @@ const Formations = () => {
             open={!!videoFormation}
             onOpenChange={(open) => { if (!open) setVideoFormation(null); }}
             title={videoFormation.title}
-            lessons={Array.isArray(videoFormation.content) ? (videoFormation.content as Lesson[]) : []}
+            lessons={lessonsOf(videoFormation)}
           />
         )}
       </div>

@@ -1,8 +1,9 @@
-import { pool } from "../db";
-import { logEvent } from "../services/logs";
-import { generateFormation, generateApplication, ServiceError } from "../clients/iaClient";
-import { activeGenerations } from "./activeJobs";
-import { logger } from "../lib/logger";
+import { pool } from "../db.js";
+import { logEvent } from "../services/logs.js";
+import { generateFormation, generateApplication, ServiceError } from "../clients/iaClient.js";
+import { activeGenerations } from "./activeJobs.js";
+import { logger } from "../lib/logger.js";
+import { knowledgeService } from "./knowledge/index.js";
 
 // Exécution des tool-calls du chat (create_formation / create_application / save_knowledge).
 // Porté de l'`executeAction` de l'edge function `chat`. Les arguments sont validés en amont
@@ -102,13 +103,22 @@ export async function executeChatAction(userId: string, action: ChatAction): Pro
       const tags = Array.isArray(args.tags)
         ? args.tags.filter((t: unknown): t is string => typeof t === "string").map((t: string) => t.slice(0, 50)).slice(0, 20)
         : [];
-      await pool.query(
-        `INSERT INTO knowledge_base (user_id, title, content, category, tags)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [userId, title, content, str(args.category, 50) || "general", tags],
+      // Écrivain unique : KnowledgeService (hash, version, embedding, déduplication).
+      const { entry, deduped } = await knowledgeService.remember(userId, {
+        title,
+        content,
+        category: str(args.category, 50) || "general",
+        tags,
+        source: "chat",
+        confidence: 0.5,
+      });
+      await logEvent(
+        userId,
+        "Connaissances",
+        `Connaissance « ${title} » ${deduped ? "reconfirmée" : "sauvegardée"} via Chat IA`,
+        "success",
       );
-      await logEvent(userId, "Connaissances", `Connaissance « ${title} » sauvegardée via Chat IA`, "success");
-      return { success: true, type: "knowledge", title };
+      return { success: true, type: "knowledge", title, id: entry.id, deduped };
     }
 
     default:

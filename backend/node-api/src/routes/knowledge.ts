@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { requireUser } from "../auth";
-import { knowledgeService } from "../services/knowledge";
-import type { KnowledgeInput } from "../services/knowledge";
-import { logEvent } from "../services/logs";
-import { pool } from "../db";
-import { isUuid, optionalFiniteNumber, sanitizeLimit } from "../lib/sanitize";
+import { requireUser } from "../auth.js";
+import { knowledgeService } from "../services/knowledge/index.js";
+import type { KnowledgeInput } from "../services/knowledge/index.js";
+import { logEvent } from "../services/logs.js";
+import { pool } from "../db.js";
+import { isUuid, optionalFiniteNumber, sanitizeLimit } from "../lib/sanitize.js";
+import { validateKnowledgeInput } from "../lib/knowledgeValidation.js";
 
 /** Admin applicatif (fonction public.has_role de Supabase). Absente/erreur → non admin. */
 async function isAdmin(userId: string): Promise<boolean> {
@@ -41,26 +42,23 @@ export async function knowledgeRoutes(app: FastifyInstance): Promise<void> {
   // --- Création (avec déduplication automatique) ---
   app.post("/api/knowledge", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
-    const body = (request.body ?? {}) as Partial<KnowledgeInput> & { dedupe?: boolean };
-    if (typeof body.title !== "string" || !body.title.trim() || typeof body.content !== "string" || !body.content.trim()) {
-      return reply.status(400).send({ error: "title et content requis" });
-    }
-    if (body.title.length > 500 || body.content.length > 100_000) {
-      return reply.status(400).send({ error: "title (500 car.) ou content (100000 car.) trop long" });
-    }
+    const body = (request.body ?? {}) as { dedupe?: unknown };
+    const checked = validateKnowledgeInput(request.body, false);
+    if (!checked.ok) return reply.status(400).send({ error: checked.error });
+    const v = checked.value;
     const input: KnowledgeInput = {
-      title: body.title,
-      content: body.content,
-      description: body.description ?? null,
-      summary: body.summary ?? null,
-      domain: body.domain ?? "general",
-      category: body.category ?? "general",
-      keywords: body.keywords ?? [],
-      tags: body.tags ?? [],
-      sources: body.sources ?? [],
-      source: body.source ?? null,
-      confidence: body.confidence,
-      links: body.links ?? [],
+      title: v.title!,
+      content: v.content!,
+      description: v.description ?? null,
+      summary: v.summary ?? null,
+      domain: v.domain ?? "general",
+      category: v.category ?? "general",
+      keywords: v.keywords ?? [],
+      tags: v.tags ?? [],
+      sources: v.sources ?? [],
+      source: v.source ?? null,
+      confidence: v.confidence,
+      links: v.links ?? [],
     };
     // Par défaut on déduplique (comportement voulu pour l'IA) ; dedupe:false force la création.
     if (body.dedupe === false) {
@@ -92,8 +90,14 @@ export async function knowledgeRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-    const body = (request.body ?? {}) as Partial<KnowledgeInput> & { changeNote?: string };
-    const entry = await knowledgeService.update(userId, id, body, body.changeNote);
+    const body = (request.body ?? {}) as { changeNote?: unknown };
+    if (body.changeNote !== undefined && (typeof body.changeNote !== "string" || body.changeNote.length > 500)) {
+      return reply.status(400).send({ error: "changeNote doit être un texte (500 car. max)" });
+    }
+    const checked = validateKnowledgeInput(request.body, true);
+    if (!checked.ok) return reply.status(400).send({ error: checked.error });
+    // Hash, version et embedding sont recalculés par le service (contrat LOT 1 §11).
+    const entry = await knowledgeService.update(userId, id, checked.value, body.changeNote as string | undefined);
     if (!entry) return reply.status(404).send({ error: "Connaissance introuvable" });
     return { success: true, entry };
   });
@@ -122,8 +126,10 @@ export async function knowledgeRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-    const { version } = (request.body ?? {}) as { version?: number };
-    if (typeof version !== "number") return reply.status(400).send({ error: "version (nombre) requise" });
+    const { version } = (request.body ?? {}) as { version?: unknown };
+    if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+      return reply.status(400).send({ error: "version (entier ≥ 1) requise" });
+    }
     const entry = await knowledgeService.restoreVersion(userId, id, version);
     if (!entry) return reply.status(404).send({ error: "Version introuvable" });
     return { success: true, entry };

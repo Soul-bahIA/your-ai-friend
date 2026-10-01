@@ -45,3 +45,29 @@ export function deepCheck(deep: DeepHealth | null, name: string): ServiceState {
   if (v === undefined) return "unknown";
   return v === "ok" ? "ok" : "down";
 }
+
+export interface StatusView {
+  label: string;
+  /** Classe Tailwind de la pastille. */
+  dotClass: string;
+  pulse: boolean;
+}
+
+const STATUS_DOT: Record<OverallStatus, string> = {
+  operational: "bg-success",
+  degraded: "bg-warning",
+  offline: "bg-destructive",
+  checking: "bg-muted-foreground",
+};
+
+/** Pastille + libellé de la barre latérale, dérivés de l'état réel (T31). */
+export function statusView(overall: OverallStatus): StatusView {
+  const label = overall === "checking" ? "Vérification des services…" : `Système ${overallLabels[overall].toLowerCase()}`;
+  return { label, dotClass: STATUS_DOT[overall], pulse: overall === "operational" || overall === "checking" };
+}
+
+export const SERVICE_STATE_LABELS: Record<ServiceState, string> = {
+  ok: "OK",
+  down: "hors ligne",
+  unknown: "inconnu",
+};

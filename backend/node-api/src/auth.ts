@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { FastifyRequest, FastifyReply } from "fastify";
-import { config } from "./config";
-import { resolveAgentKey, hashKey } from "./services/agentKeys";
-import { TtlCache } from "./lib/ttlCache";
-import { logger } from "./lib/logger";
+import { config } from "./config.js";
+import { resolveAgentKey, hashKey } from "./services/agentKeys.js";
+import { TtlCache } from "./lib/ttlCache.js";
+import { logger } from "./lib/logger.js";
 
 export interface AuthUser {
   id: string;
@@ -19,7 +19,9 @@ declare module "fastify" {
 }
 
 const SUPABASE_AUTH_TIMEOUT_MS = 10_000;
-const TOKEN_CACHE_TTL_MS = 60_000;
+// Un JWT révoqué (déconnexion) reste accepté au plus ce délai sur une AUTRE instance ;
+// sur celle qui reçoit POST /api/auth/logout, il est oublié immédiatement (S26).
+export const TOKEN_CACHE_TTL_MS = 15_000;
 
 // Cache des JWT déjà vérifiés (clé = SHA-256 du jeton, jamais le jeton en clair).
 const tokenCache = new TtlCache<AuthUser>(5_000, TOKEN_CACHE_TTL_MS);
@@ -37,6 +39,11 @@ export function bearerToken(request: FastifyRequest): string {
 /** Utilisateur déjà vérifié pour ce jeton (sans appel réseau) — utilisé par le rate-limit. */
 export function cachedUserForToken(token: string): AuthUser | undefined {
   return token ? tokenCache.get(tokenHash(token)) : undefined;
+}
+
+/** Oublie un jeton du cache (déconnexion) : le prochain usage repasse par Supabase. */
+export function forgetToken(token: string): void {
+  if (token) tokenCache.delete(tokenHash(token));
 }
 
 /** exp (secondes epoch) lu dans la charge utile du JWT, sans vérification (sert à borner le cache). */

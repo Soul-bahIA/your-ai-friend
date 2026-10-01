@@ -35,10 +35,13 @@ export const apiUrl = (path: string) => `${API_URL}${path.startsWith("/") ? path
 /** Erreur HTTP normalisée renvoyée par apiFetch / apiFetchRaw. */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** Corps JSON décodé de la réponse d'erreur (ex. liste `agents` d'un 400), si disponible. */
+  readonly body?: unknown;
+  constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -82,7 +85,7 @@ export async function toApiError(resp: Response): Promise<ApiError> {
   } catch {
     body = undefined;
   }
-  return new ApiError(errorMessageForStatus(resp.status, body), resp.status);
+  return new ApiError(errorMessageForStatus(resp.status, body), resp.status, body);
 }
 
 /** Jeton d'accès Supabase courant ; lève ApiError(401) s'il n'y a pas de session. */

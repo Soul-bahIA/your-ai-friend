@@ -6,6 +6,12 @@ JPEG) et jointe au résultat sous data.image_b64 — c'est ce qui permet à Clau
 
 Sécurité : un `path` explicite doit se trouver dans la liste blanche de dossiers
 et finir par .png ; sans `path`, la capture va dans un fichier temporaire.
+
+S17 : l'écran complet part au backend (et au LLM évaluateur). La capture est donc
+une action sensible : en mode `confirm`, elle est confirmée, SAUF pour une tâche
+planifiée par le serveur à partir d'un objectif de l'utilisateur (payload.goal_meta),
+où les captures font partie de la boucle Observer prévue. En mode `auto`, elle
+n'est pas confirmée.
 """
 from __future__ import annotations
 
@@ -37,7 +43,7 @@ class ScreenshotSkill(Skill):
     name = "screenshot"
     step_types = ("screenshot", "capture")
     category = "screen"
-    sensitive = False  # lecture seule
+    sensitive = True  # S17 : l'image de l'écran quitte le poste (voir docstring)
 
     def describe(self, step: dict) -> str:
         return f"capture d'écran → {step.get('path', '(fichier temporaire)')}"

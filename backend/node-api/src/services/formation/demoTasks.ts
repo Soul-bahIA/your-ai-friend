@@ -1,3 +1,7 @@
+// NON UTILISÉ depuis le LOT 1 : POST /api/formations/:id/demos répond 501 (ces tâches
+// n'avaient pas d'étapes). Conservé comme extraction des plans de démo pour le LOT 11
+// (démos via gabarit + planner). Ne pas mettre en file son résultat tel quel.
+//
 // Génère, à partir des plans de démonstration d'un curriculum, des tâches exécutables
 // par l'agent local sécurisé. Chaque démo devient un objectif (goal) que l'agent
 // planifie et exécute — avec ses garde-fous (confirmation des actions d'entrée, etc.).

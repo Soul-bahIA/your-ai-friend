@@ -10,6 +10,11 @@ de cette v1.
 même modèle de sécurité que run_command (aucun shell, sous-commandes ADB fixes) ;
 seul le comportement "adb absent" a pu être vérifié. À valider avec un appareil
 avant usage en production.
+
+S6 : les actions sur le téléphone sont sous le verrou des actions d'entrée (comme
+souris/clavier) : confirmées même en mode auto, sauf pré-autorisation explicite
+(--allow-input-control). Coordonnées validées comme nombres (S25) ; le texte tapé
+est masqué dans les journaux/évènements (S8) et affiché en entier à la confirmation.
 """
 from __future__ import annotations
 
@@ -19,7 +24,8 @@ import shlex
 import subprocess
 import sys
 
-from skills.base import PathCheck, Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult, is_number, mask_text
+from skills.type_text import text_details
 
 _TIMEOUT = 20
 
@@ -101,13 +107,43 @@ class PhoneSkill(Skill):
     sensitive = True
 
     def describe(self, step: dict) -> str:
-        return f"{step.get('type')} sur le téléphone"
+        t = step.get("type")
+        if t == "phone_tap" and is_number(step.get("x")) and is_number(step.get("y")):
+            return f"toucher l'écran du téléphone en ({step['x']}, {step['y']})"
+        if t == "phone_swipe":
+            return "glisser sur l'écran du téléphone"
+        if t == "phone_type":
+            return f"taper sur le téléphone : {mask_text(step.get('text', ''))}"
+        if t == "phone_key":
+            return f"touche du téléphone : {step.get('keycode', '?')}"
+        if t == "phone_open_app":
+            return f"ouvrir l'appli du téléphone : {step.get('package', '?')}"
+        if t == "phone_screenshot":
+            return f"capture du téléphone → {step.get('path', '?')}"
+        return f"{t} sur le téléphone"
+
+    def confirm_details(self, step: dict) -> str | None:
+        text = step.get("text")
+        if step.get("type") == "phone_type" and isinstance(text, str):
+            return text_details(text)
+        return None
 
     def validate(self, step: dict, path_allowed: PathCheck) -> str | None:
         err = _check_device(step.get("device_id"))
         if err:
             return err
         t = step.get("type")
+        if t == "phone_tap":
+            if not (is_number(step.get("x")) and is_number(step.get("y"))):
+                return "champs 'x' et 'y' requis (nombres)"
+        if t == "phone_swipe":
+            if not all(is_number(step.get(k)) for k in ("x1", "y1", "x2", "y2")):
+                return "champs 'x1','y1','x2','y2' requis (nombres)"
+            d = step.get("duration_ms", 300)
+            if isinstance(d, bool) or not isinstance(d, int) or not 0 < d <= 10000:
+                return "champ 'duration_ms' invalide (entier de 1 à 10000)"
+        if t == "phone_type" and not isinstance(step.get("text"), str):
+            return "champ 'text' manquant (texte attendu)"
         if t == "phone_key" and not _KEYCODE_RE.match(str(step.get("keycode") or "")):
             return "champ 'keycode' invalide (ex. KEYCODE_BACK, KEYCODE_HOME, KEYCODE_ENTER)"
         if t == "phone_open_app" and not _PACKAGE_RE.match(str(step.get("package") or "")):

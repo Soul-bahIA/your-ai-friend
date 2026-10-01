@@ -4,7 +4,8 @@ Contrat « tentative » (anti double exécution) : chaque tâche reçue par poll
 `requeue_count`, mémorisé comme `attempt` pour toute l'exécution et renvoyé dans
 le corps de CHAQUE POST /update et /event. Le backend répond 409 si la tentative
 est périmée ou si la tâche n'est plus in_progress : l'agent doit alors cesser
-d'agir pour cette tâche.
+d'agir pour cette tâche. 410 (contrat §3) : la tâche a été supprimée — l'agent
+l'abandonne immédiatement et oublie toute mise à jour en attente pour elle.
 """
 from __future__ import annotations
 
@@ -20,8 +21,18 @@ log = logging.getLogger("soulbah.client")
 # Issues normalisées d'un POST (update / event / claim)
 OK = "ok"
 CONFLICT = "conflict"  # 409 : tâche déjà prise / tentative périmée / plus in_progress
-RETRY = "retry"  # réseau, timeout, 5xx, 429, 401/403 : réessayable
-REJECTED = "rejected"  # autre 4xx (400, 404…) : inutile de réessayer
+RETRY = "retry"  # réseau, timeout, 5xx, 408/425/429 : réessayable
+REJECTED = "rejected"  # autre 4xx (400, 404…) : inutile de réessayer tel quel
+AUTH = "auth"  # 401/403 : clé agent révoquée ou invalide (T41)
+GONE = "gone"  # 410 : tâche supprimée côté serveur (contrat §3)
+
+# Valeurs renvoyées par get_control en plus de none | pause | stop
+CONTROL_GONE = "gone"
+CONTROL_ERROR = "error"
+_CONTROLS = frozenset({"none", "pause", "stop"})
+
+AUTH_HINT = ("clé agent révoquée ou invalide — vérifiez SOULBAH_AGENT_KEY "
+             "(page Sécurité de l'app : « Clés de l'agent local »)")
 
 
 def task_attempt(task: dict[str, Any]) -> int:
@@ -37,7 +48,11 @@ def _classify(status_code: int) -> str:
         return OK
     if status_code == 409:
         return CONFLICT
-    if status_code >= 500 or status_code in (401, 403, 408, 425, 429):
+    if status_code == 410:
+        return GONE
+    if status_code in (401, 403):
+        return AUTH
+    if status_code >= 500 or status_code in (408, 425, 429):
         return RETRY
     return REJECTED
 
@@ -47,6 +62,11 @@ class TaskClient:
         self.cfg = cfg
         # Backend Node (fonctionnalité migrée depuis l'edge function agent-tasks)
         self.base = f"{cfg.api_url}/api/agent-tasks"
+        # Diagnostic du dernier échec de poll : None | AUTH | RETRY ("backend injoignable") | REJECTED
+        self.last_error: str | None = None
+        self.last_status: int | None = None
+        # Description lisible du dernier échec d'update (utilisée dans le final minimal)
+        self.last_detail: str | None = None
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -67,6 +87,8 @@ class TaskClient:
             payload = None
         if outcome == OK:
             return OK, "ok", payload
+        if outcome == AUTH:
+            return AUTH, f"HTTP {resp.status_code} — {AUTH_HINT}", payload
         msg = payload.get("error") if isinstance(payload, dict) else None
         return outcome, f"HTTP {resp.status_code}" + (f" — {msg}" if msg else ""), payload
 
@@ -77,22 +99,43 @@ class TaskClient:
         chemins autorisés (sinon le gate refuse et la tâche échoue)."""
         outcome, detail, _ = self._post("announce", {"allowed_dirs": allowed_dirs}, timeout=15)
         if outcome != OK:
-            log.warning("Annonce de la whitelist échouée : %s", detail)
+            self.last_error = outcome
+            if outcome == AUTH:
+                log.error("Annonce de la whitelist refusée : %s", detail)
+            else:
+                log.warning("Annonce de la whitelist échouée : %s", detail)
             return False
         return True
 
     def poll(self) -> list[dict[str, Any]] | None:
         """Récupère jusqu'à 5 tâches en attente (user_id déduit de la clé côté backend).
 
-        Retourne None si le backend est injoignable ou en erreur (=> backoff)."""
+        Retourne None en cas d'échec ; `last_error` distingue une clé refusée (AUTH,
+        401/403) d'un backend injoignable ou en erreur (RETRY/REJECTED)."""
+        self.last_error = None
+        self.last_status = None
         try:
             resp = requests.get(f"{self.base}/poll", headers=self._headers(), timeout=15)
-            resp.raise_for_status()
-            tasks = resp.json().get("tasks", [])
-            return [t for t in tasks if isinstance(t, dict)] if isinstance(tasks, list) else []
-        except (requests.RequestException, ValueError, AttributeError) as e:
-            log.warning("Poll échoué : %s", e)
+        except requests.RequestException as e:
+            self.last_error = RETRY
+            log.warning("Poll échoué : backend injoignable (%s)", e.__class__.__name__)
             return None
+        self.last_status = resp.status_code
+        outcome = _classify(resp.status_code)
+        if outcome != OK:
+            self.last_error = outcome
+            if outcome == AUTH:
+                log.error("Poll refusé (HTTP %d) : %s", resp.status_code, AUTH_HINT)
+            else:
+                log.warning("Poll échoué : HTTP %d", resp.status_code)
+            return None
+        try:
+            tasks = resp.json().get("tasks", [])
+        except (ValueError, AttributeError) as e:
+            self.last_error = REJECTED
+            log.warning("Poll : réponse illisible (%s)", e)
+            return None
+        return [t for t in tasks if isinstance(t, dict)] if isinstance(tasks, list) else []
 
     def claim(self, task_id: str, attempt: int) -> tuple[str, str, int | None]:
         """Claim atomique (passage pending → in_progress).
@@ -119,28 +162,38 @@ class TaskClient:
     ) -> str:
         """Émet un évènement d'exécution (timeline + captures live, heartbeat).
 
-        Best-effort : seule l'issue CONFLICT (409) doit être traitée par l'appelant."""
+        Best-effort : seules les issues CONFLICT (409) et GONE (410) doivent être
+        traitées par l'appelant."""
         outcome, detail, _ = self._post(
             "event",
             {"task_id": task_id, "type": type, "message": message, "data": data or {}, "attempt": attempt},
             timeout=10,
         )
-        if outcome not in (OK, CONFLICT):
+        if outcome not in (OK, CONFLICT, GONE):
             log.debug("Évènement %s non transmis : %s", type, detail)
         return outcome
 
     def get_control(self, task_id: str) -> str:
-        """Ordre de contrôle courant posé par l'utilisateur : none | pause | stop."""
+        """Ordre de contrôle courant : none | pause | stop, ou "gone" (410 : tâche
+        supprimée) ou "error" (lecture impossible — l'appelant ne doit PAS en
+        déduire une reprise, cf. T39)."""
         try:
             resp = requests.get(
                 f"{self.base}/{task_id}/control",
                 headers=self._headers(),
                 timeout=10,
             )
-            resp.raise_for_status()
-            return resp.json().get("control", "none")
-        except (requests.RequestException, ValueError, AttributeError):
-            return "none"
+        except requests.RequestException:
+            return CONTROL_ERROR
+        if resp.status_code == 410:
+            return CONTROL_GONE
+        if not 200 <= resp.status_code < 300:
+            return CONTROL_ERROR
+        try:
+            value = resp.json().get("control", "none")
+        except (ValueError, AttributeError):
+            return CONTROL_ERROR
+        return value if value in _CONTROLS else "none"
 
     def update(
         self,
@@ -150,13 +203,15 @@ class TaskClient:
         error_message: str | None = None,
         attempt: int = 0,
     ) -> str:
-        """Met à jour le statut final d'une tâche (completed / failed). Retourne l'issue."""
+        """Met à jour le statut final d'une tâche (completed / failed / cancelled).
+        Retourne l'issue ; `last_detail` décrit l'échec éventuel."""
         body: dict[str, Any] = {"task_id": task_id, "status": status, "attempt": attempt}
         if result is not None:
             body["result"] = result
         if error_message is not None:
             body["error_message"] = error_message
         outcome, detail, _ = self._post("update", body, timeout=15)
+        self.last_detail = None if outcome == OK else detail
         if outcome != OK:
             log.error("Update %s échoué pour %s : %s", status, str(task_id)[:8], detail)
         return outcome

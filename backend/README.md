@@ -1,11 +1,13 @@
 # SOULBAH IA — Backend polyglotte
 
-Architecture microservices auto-hébergée pour l'application mobile Flutter.
+Architecture microservices auto-hébergée : API web (`frontend/`), agent local Windows (`agent/`),
+console de test (`backend/console/`). node-api est le **plan de contrôle** (auth, file des tâches agent,
+évaluation, mémoire, base de connaissances) ; python-ia est le **seul routeur de modèles**.
 
 ## 🏗️ Architecture
 
 ```
-        Flutter (Android / iOS)
+  Clients : web React · agent local · Flutter
                  │  HTTP / JSON (REST)
                  ▼
         ┌─────────────────────┐
@@ -31,7 +33,7 @@ Architecture microservices auto-hébergée pour l'application mobile Flutter.
 
 | Service | Techno | Port | Responsabilité |
 |---|---|---|---|
-| **node-api** | Node.js 22 + Fastify 5 + TypeScript | 3000 | Point d'entrée unique pour Flutter. Validation, orchestration, accès Postgres, appel du service IA. |
+| **node-api** | Node.js 22 + Fastify 5 + TypeScript (compilé en `dist/`) | 3000 | Point d'entrée unique des clients. Validation, file des tâches agent, orchestration, accès Postgres (Supabase), appel du service IA. |
 | **python-ia** | Python 3.12 + FastAPI | 8000 | Inférence / traitement IA. Délègue les calculs lourds à Rust. |
 | **rust-compute** | Rust + Axum + Tokio | 8080 | Calculs numériques intensifs (CPU-bound), isolés pour la performance. |
 | **postgres** | PostgreSQL 16 | 5432 | Stockage relationnel persistant. |
@@ -52,32 +54,40 @@ Au premier lancement, Docker construit les 4 images (le build Rust prend quelque
 
 ## 🔌 Endpoints (exposés par node-api)
 
-Auth : **JWT** = `Authorization: Bearer <access_token Supabase>` ; **clé agent** = `x-agent-key: sbk_…`
-(hash SHA-256 en base, `user_id` déduit de la clé). Toutes les données sont scopées par utilisateur.
+Auth : **JWT** = `Authorization: Bearer <access_token Supabase>` (vérifié via `/auth/v1/user`, mis en
+cache 15 s, invalidé par `POST /api/auth/logout`) ; **clé agent** = `x-agent-key: sbk_…` (hash SHA-256
+en base, `user_id` déduit de la clé). Toutes les données sont scopées par utilisateur.
 
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | — | Liveness (sans dépendance) |
-| `GET` | `/health/deep` | — | État Postgres + python-ia (`degraded` si l'un est `down`) |
+| `GET` | `/health/deep` | JWT (public si `SOULBAH_ENV=dev`) | État Postgres + python-ia (`degraded` si l'un est `down`) |
+| `POST` | `/api/auth/logout` | Bearer | Oublie le JWT du cache de vérification (à appeler avant `signOut`) |
 | `POST` | `/api/analyze` · `GET /api/analyze/:id` | JWT | Démo Node → Python → Rust (lignes rattachées à l'utilisateur) |
-| `POST` | `/api/chat` | JWT | Chat streaming SSE (+ exécution d'actions `{action}`) |
-| `POST` | `/api/generate/formation` · `/api/generate/application` | JWT | Génération (formation : asynchrone, progression temps réel) |
-| `POST` | `/api/formations/:id/video` · `/pdf` · `/demos` | JWT | Vidéo MP4, support PDF, démos pour l'agent |
+| `POST` | `/api/chat` | JWT | Chat streaming SSE ; action `{action, confirmed:true}` (sans `confirmed` : action proposée, rien d'exécuté) |
+| `POST` | `/api/generate/formation` · `/api/generate/application` | JWT | Génération (formation : asynchrone, progression `agent_events` avec `data.source='formation'`) |
+| `POST` | `/api/formations/:id/video` · `/pdf` | JWT | Vidéo MP4, support PDF |
+| `POST` | `/api/formations/:id/demos` | JWT | **501** tant que les démos par gabarit n'existent pas (LOT 11) |
 | `POST` | `/api/database` (`{action}`) | JWT | Tables utilisateur (schémas, lignes, migrations) |
-| `GET/POST/PATCH/DELETE` | `/api/knowledge`, `/api/knowledge/:id`, `/:id/versions`, `/:id/restore` | JWT | Base de connaissances versionnée |
+| `GET/POST/PATCH/DELETE` | `/api/knowledge`, `/api/knowledge/:id`, `/:id/versions`, `/:id/restore` | JWT | Base de connaissances versionnée (seul écrivain : hash, version, embedding) |
 | `GET/POST` | `/api/knowledge-domains` | JWT (POST : admin) | Référentiel de domaines |
-| `POST` | `/api/research` · `GET /api/research/status` | JWT | Recherche KB-first (KB → web → synthèse) |
-| `POST` | `/api/orchestrator/route` | JWT | Chief Agent (routage / dispatch) |
-| `POST` | `/api/agent/goal` | JWT | Objectif → plan validé → tâche agent |
-| `GET/POST/PATCH/DELETE` | `/api/agent/memory[/:id]` · `POST /api/agent/self-improve` | JWT | Mémoire d'exécution |
-| `GET/POST/DELETE` | `/api/agent-keys[/:id]` | JWT | Clés de l'agent local |
-| `GET/POST` | `/api/agent-tasks` | JWT | Lister (captures retirées) / créer (étapes validées) |
-| `POST` | `/api/agent-tasks/:id/control` · `GET /api/agent-tasks/:id/events` | JWT | Pause/stop, timeline |
-| `POST` | `/api/agent-tasks/announce` · `GET /poll` · `POST /update` · `POST /event` · `GET /:id/control` | clé agent | Worker local (contrat `attempt` : voir `MIGRATION.md`) |
-| `GET` | `/media/*` | — | Fichiers produits (MP4/PDF) |
+| `POST` | `/api/research` · `GET /api/research/status` | JWT | Recherche KB-first (KB → web → synthèse) ; sans web : *finding* non vérifié |
+| `POST` | `/api/orchestrator/route` | JWT | Chief Agent (routage / dispatch) ; échec de planification → 4xx/502 `success:false` |
+| `POST` | `/api/agent/goal` (`{goal, agent_key_id?}`) | JWT | Objectif → plan validé → tâche agent ciblée |
+| `GET/POST/PATCH/DELETE` | `/api/agent/memory[/:id]` · `POST /api/agent/self-improve` | JWT | Mémoire d'exécution (proposée par défaut, validée par l'utilisateur) |
+| `GET/POST/DELETE` | `/api/agent-keys[/:id]` | JWT | Clés de l'agent local (= PC ciblables) |
+| `GET/POST` | `/api/agent-tasks` | JWT | Lister (sans captures) / créer (étapes validées, `agent_key_id?`) |
+| `DELETE` | `/api/agent-tasks/:id` | JWT | Supprimer une tâche **terminée** (204 ; 409 si active) |
+| `POST` | `/api/agent-tasks/:id/cancel` · `/approve` · `/control` | JWT | Annuler / approuver une correction / pause-reprise-stop |
+| `GET` | `/api/agent-tasks/:id/events` · `/screenshot` | JWT | Timeline (sans image) ; dernière capture (mémoire, 10 min) |
+| `POST` | `/api/agent-tasks/announce` · `GET /poll` · `POST /update` · `POST /event` · `GET /:id/control` | clé agent | Worker local (contrat : voir `MIGRATION.md`) |
+| `GET` | `/media/*` | — | Fichiers produits (MP4/PDF, noms UUID) — `Cache-Control: private`, pas de listing |
 
-Limites : 300 req/min global (par utilisateur, sinon IP), 20/min sur les routes coûteuses,
-corps 2 Mo (15 Mo pour `update`/`event` de l'agent). Erreurs 5xx : message générique.
+Limites : 300 req/min global (par utilisateur, sinon IP — IP réelle derrière un proxy si `TRUST_PROXY`),
+20/min sur les routes coûteuses, corps 2 Mo (15 Mo pour `update`/`event` de l'agent, captures retirées
+avant toute écriture en base). Erreurs 5xx : message générique ; aucun texte d'erreur amont (python-ia,
+fournisseur LLM) n'est relayé au client. `provider` imposé par un client : refusé (400) hors
+`LLM_ALLOWED_OVERRIDES`.
 
 ### Exemple — le flux de bout en bout
 
@@ -163,26 +173,49 @@ backend/
 Chaque service se lance indépendamment :
 
 ```bash
-# Node
+# Node (dev : tsx, rechargement à chaud)
 cd node-api && npm install && npm run dev
+# Node (prod : JS compilé, comme l'image Docker)
+cd node-api && npm run build && npm run start:prod   # node dist/server.js
 
 # Python
 cd python-ia && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000
 
-# Rust
+# Rust (démo optionnelle)
 cd rust-compute && cargo run
 ```
 
-Pensez à renseigner les variables d'environnement (`DATABASE_URL`, `IA_SERVICE_URL`, `RUST_SERVICE_URL`, `IA_SERVICE_TOKEN`, `CORS_ORIGINS`…) pour pointer vers `localhost` au lieu des noms de services Docker — liste commentée dans `.env.example`. Hors Docker, node-api écoute sur `127.0.0.1` (définir `HOST=0.0.0.0` pour l'exposer).
+Pensez à renseigner les variables d'environnement (`DATABASE_URL`, `IA_SERVICE_URL`, `IA_SERVICE_TOKEN`,
+`CORS_ORIGINS`…) pour pointer vers `localhost` au lieu des noms de services Docker — liste commentée dans
+`.env.example`. Hors Docker, node-api écoute sur `127.0.0.1` (définir `HOST=0.0.0.0` pour l'exposer).
 
-node-api démarre même si Postgres est injoignable (mode dégradé : `/health` = 200, `/health/deep` signale `postgres: down`, nouvel essai toutes les 30 s). Au retour de la DB puis toutes les heures : générations bloquées → `Erreur`, purge des `agent_events` (> 3 jours). Arrêt propre sur SIGINT/SIGTERM.
+**`SOULBAH_ENV`** (`dev` par défaut | `test` | `staging` | `production`) : hors `dev`/`test`, node-api
+refuse de démarrer sans `IA_SERVICE_TOKEN`, et sans `PG_SSL_CA` quand `DATABASE_SSL=true` (le contrôle
+s'exécute avant toute connexion). `/health/deep` n'est public qu'en `dev`.
+
+node-api démarre même si Postgres est injoignable (mode dégradé : `/health` = 200, nouvel essai toutes
+les 30 s). Dès que la DB répond :
+- contrôle du schéma (colonnes `agent_tasks.target_agent_key_id` / `claimed_by_key_id` de la migration
+  `supabase/migrations/20261002000000_lot1_fixes.sql` — erreur journalisée si absentes) ;
+- **reaper global** toutes les `REAPER_INTERVAL_SECONDS` (60 s) sous verrou consultatif : tâche
+  `in_progress` muette depuis `AGENT_TASK_STALE_SECONDS` → `cancelled` si un stop était demandé, sinon
+  remise en file (3 fois max) puis `failed` ;
+- maintenance horaire : générations bloquées → `Erreur`, purge des `agent_events` (> 3 jours, images
+  héritées retirées), évaluations interrompues, médias non référencés plus vieux que
+  `MEDIA_RETENTION_DAYS` (30 j).
+
+Arrêt propre sur SIGINT/SIGTERM : plus de nouvelles requêtes, tâches de fond (évaluations, générations)
+attendues jusqu'à 10 s, puis fermeture du pool.
 
 ### Tests (node-api)
 
 ```bash
 cd node-api
-npm test            # vitest : validation des étapes, garde attempt, chat, CORS, limites…
+npm test            # vitest : 138 tests (unitaires + routes via fastify.inject sur une couche SQL simulée)
 npm run typecheck   # tsc --noEmit
+npm run build       # tsc -p tsconfig.build.json → dist/
 ```
 
+`test/agentStepsTable.test.ts` relit `agent/skills/*.py` (lecture seule) et échoue si un skill lit un
+paramètre absent de la table `lib/agentSteps.ts` (dérive planner → agent).
 `test_rag.ts` est une vérification manuelle live (DB + OpenAI) : `RAG_TEST_USER_ID=<uuid> npx tsx test_rag.ts`.

@@ -1,82 +1,54 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { pool } from "../db";
-import { config } from "../config";
-import { requireUser, requireAgentKey } from "../auth";
-import { maybeEvaluateGoalTask } from "./agentGoal";
-import { setAgentAllowedDirs } from "../services/agentKeys";
-import { validateTaskCreateBody } from "../lib/agentSteps";
+import { pool } from "../db.js";
+import { config } from "../config.js";
+import { requireUser, requireAgentKey } from "../auth.js";
+import { maybeEvaluateGoalTask } from "./agentGoal.js";
+import { resolveTargetKey, setAgentAllowedDirs } from "../services/agentKeys.js";
+import { findPathOutsideAllowed, requiresConfirmation, validateTaskCreateBody } from "../lib/agentSteps.js";
 import {
   buildAgentTaskUpdate,
+  buildApprove,
+  buildCancel,
+  buildPollQuery,
   buildTaskTouch,
   isAgentTaskStatus,
   parseAttempt,
-} from "../lib/agentTaskSql";
-import { isUuid, stripImageB64, isPlainObject } from "../lib/sanitize";
+  TERMINAL_STATUSES,
+} from "../lib/agentTaskSql.js";
+import { isUuid, stripImageB64, isPlainObject } from "../lib/sanitize.js";
+import { runInBackground } from "../services/backgroundJobs.js";
+import {
+  extractEventImage,
+  extractResultScreenshots,
+  forgetScreenshot,
+  getScreenshot,
+  rememberScreenshot,
+} from "../services/screenshots.js";
 
-// Reprise des tâches orphelines : un agent tué en pleine exécution laisse sa
-// tâche en 'in_progress' pour toujours (le poll ne lit que les 'pending').
-// À chaque poll, les tâches sans signe de vie (updated_at périmé — l'agent
-// rafraîchit via heartbeat/évènements) sont remises en file, au plus
-// MAX_REQUEUES fois ; au-delà, elles passent en 'failed' (boucle de crash).
-// Chaque requeue incrémente requeue_count : c'est le numéro de tentative (attempt)
-// que l'agent renvoie ensuite pour prouver qu'il détient toujours la tâche.
-const MAX_REQUEUES = 3;
-
-// Les routes de l'agent reçoivent des captures d'écran base64 : corps plus gros admis.
+// Les routes de l'agent reçoivent encore des captures d'écran base64 (retirées avant
+// toute écriture en base) : corps plus gros admis.
 const AGENT_BODY_LIMIT = 15 * 1024 * 1024;
 const agentRateLimit = { max: config.rateLimitAgent, timeWindow: "1 minute" };
+/** Données d'évènement (une fois la capture retirée) et rapport final : bornés. */
+const MAX_EVENT_DATA_BYTES = 64 * 1024;
+const MAX_RESULT_BYTES = 1024 * 1024;
 
-// Colonnes renvoyées à l'agent / à l'UI (jamais SELECT *).
-const POLL_COLS = `id, user_id, task_type, status, priority, payload, requeue_count, control, created_at, updated_at`;
+// Colonnes renvoyées à l'UI (jamais SELECT *).
 const LIST_COLS = `id, task_type, status, priority, payload, result, error_message, requeue_count, control,
-  started_at, completed_at, created_at, updated_at`;
+  target_agent_key_id, claimed_by_key_id, started_at, completed_at, created_at, updated_at`;
 
-async function requeueStaleTasks(userId: string): Promise<void> {
-  const stale = config.agentTaskStaleSeconds;
-
-  const requeued = await pool.query(
-    `UPDATE agent_tasks
-        SET status = 'pending', started_at = NULL,
-            requeue_count = requeue_count + 1, updated_at = now()
-      WHERE user_id = $1 AND status = 'in_progress'
-        AND updated_at < now() - make_interval(secs => $2)
-        AND requeue_count < $3
-      RETURNING id, requeue_count`,
-    [userId, stale, MAX_REQUEUES],
-  );
-
-  const abandoned = await pool.query(
-    `UPDATE agent_tasks
-        SET status = 'failed', completed_at = now(), updated_at = now(),
-            error_message = 'Interrompue puis reprise ' || requeue_count || ' fois sans aboutir — abandonnée'
-      WHERE user_id = $1 AND status = 'in_progress'
-        AND updated_at < now() - make_interval(secs => $2)
-      RETURNING id`,
-    [userId, stale],
-  );
-
-  // Trace dans la timeline (best-effort, ne bloque jamais le poll).
-  const events = [
-    ...requeued.rows.map((r) => ({ id: r.id, type: "task_requeued", msg: `Agent interrompu — tâche remise en file (reprise ${r.requeue_count}/${MAX_REQUEUES})` })),
-    ...abandoned.rows.map((r) => ({ id: r.id, type: "task_failed", msg: "Interrompue trop de fois — abandonnée" })),
-  ];
-  for (const e of events) {
-    pool
-      .query(
-        "INSERT INTO agent_events (task_id, user_id, type, message, data) VALUES ($1, $2, $3, $4, '{}'::jsonb)",
-        [e.id, userId, e.type, e.msg],
-      )
-      .catch(() => {});
-  }
+/** Réponse pour une tâche supprimée / inexistante (contrat LOT 1 §3) : l'agent l'abandonne. */
+function gone(reply: FastifyReply) {
+  return reply.status(410).send({ error: "gone", control: "stop" });
 }
 
-/** Après un UPDATE gardé à 0 ligne : 404 si la tâche n'existe pas pour cet utilisateur, sinon 409. */
+/** Après un UPDATE gardé à 0 ligne : 410 si la tâche n'existe plus pour cet utilisateur, sinon 409. */
 async function guardFailure(reply: FastifyReply, taskId: string, userId: string, attempt?: number) {
   const { rows } = await pool.query(
     "SELECT status, requeue_count FROM agent_tasks WHERE id = $1 AND user_id = $2",
     [taskId, userId],
   );
-  if (rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+  if (rows.length === 0) return gone(reply);
   const { status, requeue_count } = rows[0] as { status: string; requeue_count: number };
   if (attempt !== undefined && attempt !== requeue_count) {
     return reply.status(409).send({
@@ -88,9 +60,18 @@ async function guardFailure(reply: FastifyReply, taskId: string, userId: string,
   return reply.status(409).send({ error: `Tâche dans l'état « ${status} » : transition refusée`, status, requeue_count });
 }
 
+function insertEventBestEffort(taskId: string, userId: string, type: string, message: string, data: object = {}) {
+  pool
+    .query(
+      "INSERT INTO agent_events (task_id, user_id, type, message, data) VALUES ($1, $2, $3, $4, $5::jsonb)",
+      [taskId, userId, type, message, JSON.stringify({ source: "agent", ...data })],
+    )
+    .catch(() => {});
+}
+
 // Port de l'edge function `agent-tasks`.
 //  - announce / poll / update / event / control (GET) : worker local, x-agent-key
-//  - create (POST) / list (GET) / control (POST) / events : app web, JWT
+//  - create / list / control (POST) / cancel / approve / events / screenshot : app web, JWT
 
 export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   // --- Worker local : annonce de sa configuration (au démarrage) ---
@@ -111,18 +92,14 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // --- Worker local : poll des tâches en attente (inclut requeue_count = attempt) ---
+  // Seulement les tâches ciblant CETTE clé (ou aucune), hors corrections en attente
+  // d'approbation. La remise en file des tâches orphelines est faite par le reaper global.
   app.get(
     "/api/agent-tasks/poll",
     { preHandler: requireAgentKey, config: { rateLimit: agentRateLimit } },
     async (request) => {
-      const userId = request.agentUserId!;
-      await requeueStaleTasks(userId);
-      const { rows } = await pool.query(
-        `SELECT ${POLL_COLS} FROM agent_tasks
-         WHERE user_id = $1 AND status = 'pending'
-         ORDER BY priority ASC, created_at ASC LIMIT 5`,
-        [userId],
-      );
+      const q = buildPollQuery(request.agentUserId!, request.agentKeyId!);
+      const { rows } = await pool.query(q.sql, q.values);
       return { tasks: rows };
     },
   );
@@ -150,39 +127,50 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: "error_message doit être un texte" });
       }
 
-      // Claim (in_progress) : exige status='pending'. Toute autre transition exige
-      // status='in_progress' (+ requeue_count = attempt si fourni). Un agent dont la
-      // tâche a été requeue puis reprise ne peut donc plus l'écraser.
+      // Les captures du rapport final ne sont JAMAIS stockées : les dernières sont passées
+      // en mémoire à l'évaluation, le résultat écrit en base en est débarrassé.
+      const finalShots = body.status === "completed" || body.status === "failed" ? extractResultScreenshots(body.result) : [];
+      const result = body.result === undefined ? undefined : stripImageB64(body.result);
+      if (result !== undefined && Buffer.byteLength(JSON.stringify(result) ?? "", "utf8") > MAX_RESULT_BYTES) {
+        return reply.status(400).send({ error: "result trop volumineux (1 Mo max hors captures)" });
+      }
+
+      // Claim (in_progress) : exige status='pending' (+ ciblage + pas d'approbation en attente).
+      // Toute autre transition exige status='in_progress' (+ requeue_count = attempt si fourni,
+      // + réclamée par cette clé). 'cancelled' est un final accepté (stop demandé).
       const q = buildAgentTaskUpdate({
         taskId: body.task_id,
         userId,
         status: body.status,
-        result: body.result,
+        result,
         errorMessage:
           typeof body.error_message === "string" ? body.error_message.slice(0, 4000) : (body.error_message as null | undefined),
         attempt,
+        keyId: request.agentKeyId,
       });
       const { rows, rowCount } = await pool.query(q.sql, q.values);
       if (rowCount !== 1) {
         if (q.kind === "claim") {
+          const exists = await pool.query("SELECT 1 FROM agent_tasks WHERE id = $1 AND user_id = $2", [body.task_id, userId]);
+          if (exists.rowCount === 0) return gone(reply);
           return reply.status(409).send({ error: "Tâche déjà prise par un autre agent (ou plus en attente)" });
         }
         return guardFailure(reply, body.task_id, userId, attempt);
       }
 
-      // Boucle Observer → Corriger : uniquement si CETTE requête a effectivement
-      // terminé la tâche (rowCount=1) — pas de double évaluation.
+      // Boucle Observer → Corriger : uniquement si CETTE requête a effectivement terminé la
+      // tâche (rowCount=1) et jamais pour 'cancelled'. Tâche de fond suivie (erreurs journalisées).
       if (body.status === "completed" || body.status === "failed") {
         const taskId = body.task_id;
-        maybeEvaluateGoalTask(taskId, userId).catch((e) =>
-          request.log.error({ err: e }, "évaluation d'objectif échouée"),
+        void runInBackground("évaluation d'objectif", () =>
+          maybeEvaluateGoalTask(taskId, userId, { screenshots: finalShots }),
         );
       }
       return { success: true, status: rows[0].status, requeue_count: rows[0].requeue_count };
     },
   );
 
-  // --- Worker local : évènement d'exécution (timeline + captures live) / heartbeat ---
+  // --- Worker local : évènement d'exécution (timeline) / heartbeat ---
   app.post(
     "/api/agent-tasks/event",
     { preHandler: requireAgentKey, bodyLimit: AGENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
@@ -205,14 +193,22 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: "data doit être un objet" });
       }
 
-      // La tâche doit appartenir à l'utilisateur de la clé, être en cours et (si
-      // fourni) à la même tentative. Ce même UPDATE sert de signe de vie.
-      const touch = buildTaskTouch(body.task_id, userId, attempt);
+      // La tâche doit appartenir à l'utilisateur de la clé, être en cours et (si fourni)
+      // à la même tentative. Ce même UPDATE sert de signe de vie.
+      const touch = buildTaskTouch(body.task_id, userId, attempt, request.agentKeyId);
       const { rowCount } = await pool.query(touch.sql, touch.values);
       if (rowCount !== 1) return guardFailure(reply, body.task_id, userId, attempt);
 
       // Heartbeat : simple signe de vie, pas de ligne d'évènement (évite de remplir la table).
       if (body.type === "heartbeat") return { success: true };
+
+      // Capture : gardée EN MÉMOIRE (GET /:id/screenshot), jamais insérée en base.
+      const { data, image } = extractEventImage(body.data ?? {});
+      if (image) rememberScreenshot(body.task_id, userId, image.b64, image.mime);
+      const stored = { ...data, source: "agent" }; // un agent ne peut pas se faire passer pour une formation
+      if (Buffer.byteLength(JSON.stringify(stored), "utf8") > MAX_EVENT_DATA_BYTES) {
+        return reply.status(400).send({ error: "data trop volumineux (64 Ko max hors capture)" });
+      }
 
       await pool.query(
         `INSERT INTO agent_events (task_id, user_id, type, message, data)
@@ -222,7 +218,7 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
           userId,
           body.type,
           typeof body.message === "string" ? body.message.slice(0, 4000) : null,
-          JSON.stringify(body.data ?? {}),
+          JSON.stringify(stored),
         ],
       );
       return { success: true };
@@ -237,15 +233,14 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
       const userId = request.agentUserId!;
       const { id } = request.params as { id: string };
       if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-      const { rows } = await pool.query(
-        "SELECT control FROM agent_tasks WHERE id = $1 AND user_id = $2",
-        [id, userId],
-      );
-      return { control: rows[0]?.control ?? "none" };
+      const { rows } = await pool.query("SELECT control FROM agent_tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+      if (rows.length === 0) return gone(reply);
+      return { control: rows[0].control ?? "none" };
     },
   );
 
   // --- App web : piloter l'exécution (pause | resume | stop) ---
+  // Renvoyer la même valeur est un no-op (ne prolonge pas le bail, cf. T45).
   app.post("/api/agent-tasks/:id/control", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
@@ -255,22 +250,115 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
     if (!value || !["none", "pause", "stop"].includes(value)) {
       return reply.status(400).send({ error: "control requis (pause|resume|stop)" });
     }
-    const { rowCount } = await pool.query(
-      "UPDATE agent_tasks SET control = $1, updated_at = now() WHERE id = $2 AND user_id = $3",
+    const { rows } = await pool.query(
+      `UPDATE agent_tasks SET control = $1
+        WHERE id = $2 AND user_id = $3 AND status IN ('pending', 'in_progress')
+          AND control IS DISTINCT FROM $1
+        RETURNING control`,
       [value, id, userId],
     );
-    if (rowCount === 0) return reply.status(404).send({ error: "Tâche introuvable" });
-    return { success: true, control: value };
+    if (rows.length === 1) return { success: true, control: value };
+    const cur = await pool.query("SELECT status, control FROM agent_tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+    if (cur.rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+    const { status, control: current } = cur.rows[0] as { status: string; control: string | null };
+    if ((TERMINAL_STATUSES as readonly string[]).includes(status)) {
+      return reply.status(409).send({ error: `Tâche déjà terminée (« ${status} »)`, status });
+    }
+    return { success: true, control: current ?? value, unchanged: true };
   });
 
-  // --- App web : historique d'évènements d'une tâche (chargement initial de la timeline) ---
+  // --- App web : annuler une tâche (contrat LOT 1 §2) ---
+  //  pending → 'cancelled' immédiatement ; in_progress → control 'stop' (l'agent termine
+  //  l'étape courante puis envoie un final 'cancelled'). Rejeter une correction = annuler.
+  app.post("/api/agent-tasks/:id/cancel", { preHandler: requireUser }, async (request, reply) => {
+    const userId = request.user!.id;
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+    const q = buildCancel(id, userId);
+    const { rows } = await pool.query(q.sql, q.values);
+    if (rows.length === 1) {
+      // Réponse : statut APRÈS l'appel et valeur de control (le front l'applique localement).
+      const row = rows[0] as { id: string; status: string; control: string | null };
+      if (row.status === "cancelled") {
+        insertEventBestEffort(id, userId, "task_cancelled", "Tâche annulée par l'utilisateur");
+      }
+      const control = row.control ?? "none";
+      return { success: true, status: row.status, control, task: { id, status: row.status, control } };
+    }
+    const cur = await pool.query("SELECT status FROM agent_tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+    if (cur.rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+    const status = cur.rows[0].status as string;
+    return reply.status(409).send({ error: `Tâche déjà terminée (« ${status} ») : annulation impossible`, status });
+  });
+
+  // --- App web : approuver une correction proposée par l'évaluateur (contrat LOT 1 §6) ---
+  app.post("/api/agent-tasks/:id/approve", { preHandler: requireUser }, async (request, reply) => {
+    const userId = request.user!.id;
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+    const q = buildApprove(id, userId);
+    const { rows } = await pool.query(q.sql, q.values);
+    if (rows.length === 1) {
+      insertEventBestEffort(id, userId, "task_approved", "Correction approuvée par l'utilisateur");
+      const t = rows[0] as { id: string; status: string; control: string | null; payload: unknown };
+      return {
+        success: true,
+        task_id: id,
+        status: t.status,
+        task: { id: t.id, status: t.status, control: t.control, payload: t.payload },
+      };
+    }
+    const cur = await pool.query("SELECT status FROM agent_tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+    if (cur.rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+    return reply
+      .status(409)
+      .send({ error: "Cette tâche n'est pas en attente d'approbation", status: cur.rows[0].status });
+  });
+
+  // --- App web : supprimer une tâche TERMINÉE (completed|failed|cancelled) → 204 ---
+  // Une tâche active s'arrête par /cancel, jamais par suppression (S9) ; prépare le retrait
+  // de la policy RLS DELETE côté client.
+  app.delete("/api/agent-tasks/:id", { preHandler: requireUser }, async (request, reply) => {
+    const userId = request.user!.id;
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+    const del = await pool.query(
+      `DELETE FROM agent_tasks WHERE id = $1 AND user_id = $2 AND status IN ('completed', 'failed', 'cancelled') RETURNING id`,
+      [id, userId],
+    );
+    if (del.rowCount === 1) {
+      forgetScreenshot(id);
+      return reply.status(204).send();
+    }
+    const cur = await pool.query("SELECT status FROM agent_tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+    if (cur.rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+    return reply.status(409).send({
+      error: "Tâche active : annulez-la d'abord (POST /api/agent-tasks/:id/cancel)",
+      status: cur.rows[0].status,
+    });
+  });
+
+  // --- App web : dernière capture d'écran d'une tâche (mémoire, TTL 10 min) ---
+  app.get("/api/agent-tasks/:id/screenshot", { preHandler: requireUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+    const shot = getScreenshot(id, request.user!.id);
+    if (!shot) return reply.status(404).send({ error: "Aucune capture récente pour cette tâche" });
+    reply.header("Cache-Control", "no-store");
+    return { image_b64: shot.image_b64, mime: shot.mime, at: shot.at };
+  });
+
+  // --- App web : historique d'évènements d'une tâche (sans aucune image) ---
   app.get("/api/agent-tasks/:id/events", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { rows } = await pool.query(
-      `SELECT id, type, message, data, created_at FROM agent_events
-       WHERE task_id = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 500`,
+      `SELECT id, type, message,
+              CASE WHEN data ? 'image_b64' THEN (data - 'image_b64') || '{"has_image": true}'::jsonb ELSE data END AS data,
+              created_at
+         FROM agent_events
+        WHERE task_id = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 500`,
       [id, userId],
     );
     return { events: rows };
@@ -282,12 +370,24 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id;
     const parsed = validateTaskCreateBody(request.body);
     if (!parsed.ok) return reply.status(400).send({ error: parsed.error });
-    const { task_type, payload, priority } = parsed.value;
+    const { task_type, priority, agent_key_id } = parsed.value;
+
+    // PC ciblé (contrat §7) puis chemins confinés à SES dossiers autorisés (S21).
+    const target = await resolveTargetKey(userId, agent_key_id);
+    if (!target.ok) return reply.status(target.status).send({ error: target.error, agents: target.agents });
+    const steps = parsed.value.payload.steps as Record<string, unknown>[];
+    const outside = findPathOutsideAllowed(steps, target.key?.allowed_dirs ?? []);
+    if (outside) return reply.status(400).send({ error: outside });
+    // Actions à effet réel → confirmation exigée sur le PC (le client ne peut pas l'abaisser).
+    const payload = {
+      ...parsed.value.payload,
+      requires_confirmation: requiresConfirmation(steps) || parsed.value.payload.requires_confirmation === true,
+    };
 
     const { rows } = await pool.query(
-      `INSERT INTO agent_tasks (user_id, task_type, payload, priority)
-       VALUES ($1, $2, $3::jsonb, $4) RETURNING ${LIST_COLS}`,
-      [userId, task_type, JSON.stringify(payload), priority],
+      `INSERT INTO agent_tasks (user_id, task_type, payload, priority, target_agent_key_id)
+       VALUES ($1, $2, $3::jsonb, $4, $5) RETURNING ${LIST_COLS}`,
+      [userId, task_type, JSON.stringify(payload), priority, target.key?.id ?? null],
     );
     return { success: true, task: rows[0] };
   });
@@ -313,4 +413,3 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
     return { tasks: rows.map((r) => ({ ...r, result: stripImageB64(r.result) })) };
   });
 }
-

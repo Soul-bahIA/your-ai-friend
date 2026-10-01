@@ -3,11 +3,12 @@
 // Fabrique le store selon KNOWLEDGE_STORE_PROVIDER (défaut : "supabase"). Pour migrer
 // vers Google Cloud plus tard : ajouter une GoogleCloudKnowledgeStore implémentant
 // KnowledgeStore et l'enregistrer ici — aucune autre ligne de code métier ne change.
-import { createHash } from "node:crypto";
-import { SupabaseKnowledgeStore } from "./supabaseStore";
-import type { KnowledgeStore, KnowledgeInput, KnowledgeEntry, SearchQuery } from "./types";
+import { SupabaseKnowledgeStore } from "./supabaseStore.js";
+import type { KnowledgeStore, KnowledgeInput, KnowledgeEntry, SearchQuery } from "./types.js";
 
-export * from "./types";
+export * from "./types.js";
+export { knowledgeHash, clampConfidence } from "./hash.js";
+import { knowledgeHash, clampConfidence } from "./hash.js";
 
 let _store: KnowledgeStore | null = null;
 
@@ -25,11 +26,6 @@ export function getKnowledgeStore(): KnowledgeStore {
   return _store;
 }
 
-/** Empreinte stable d'une connaissance (déduplication exacte). */
-export function knowledgeHash(title: string, content: string): string {
-  const norm = `${title.trim().toLowerCase()}\n${content.trim().toLowerCase()}`.replace(/\s+/g, " ");
-  return createHash("sha256").update(norm, "utf8").digest("hex");
-}
 
 /**
  * Service : ajoute déduplication + upsert par-dessus le store.
@@ -51,16 +47,23 @@ export class KnowledgeService {
     userId: string,
     input: KnowledgeInput,
   ): Promise<{ entry: KnowledgeEntry; deduped: boolean }> {
-    const hash = input.content_hash ?? knowledgeHash(input.title, input.content);
+    // L'empreinte est TOUJOURS recalculée (jamais fournie par un client).
+    const hash = knowledgeHash(input.title, input.content);
+    input = { ...input, confidence: input.confidence === undefined ? undefined : clampConfidence(input.confidence) };
     return this.store.upsertByHash(
       userId,
       { ...input, content_hash: hash },
-      (existing) => ({
-        ...input,
-        content_hash: hash,
-        // La confiance ne peut que se renforcer lors d'une reconfirmation.
-        confidence: Math.max(existing.confidence, input.confidence ?? existing.confidence),
-      }),
+      (existing) =>
+        // Une synthèse LLM non vérifiée ne doit jamais écraser (source, confiance) une
+        // connaissance existante d'une autre origine : simple reconfirmation datée.
+        input.source === "llm_synthesis" && existing.source !== "llm_synthesis"
+          ? {}
+          : {
+              ...input,
+              content_hash: hash,
+              // La confiance ne peut que se renforcer lors d'une reconfirmation.
+              confidence: Math.max(existing.confidence, input.confidence ?? existing.confidence),
+            },
       "Reconfirmation (déduplication)",
     );
   }
@@ -68,14 +71,19 @@ export class KnowledgeService {
   create(userId: string, input: KnowledgeInput) {
     return this.store.create(userId, {
       ...input,
-      content_hash: input.content_hash ?? knowledgeHash(input.title, input.content),
+      content_hash: knowledgeHash(input.title, input.content),
+      confidence: input.confidence === undefined ? undefined : clampConfidence(input.confidence),
     });
   }
   get(userId: string, id: string) {
     return this.store.getById(userId, id);
   }
+  /** Mise à jour versionnée ; l'empreinte est recalculée par le store sur le contenu fusionné. */
   update(userId: string, id: string, patch: Partial<KnowledgeInput>, note?: string) {
-    return this.store.update(userId, id, patch, note);
+    const { content_hash: _ignored, ...rest } = patch;
+    void _ignored;
+    const clean = rest.confidence === undefined ? rest : { ...rest, confidence: clampConfidence(rest.confidence) };
+    return this.store.update(userId, id, clean, note);
   }
   remove(userId: string, id: string) {
     return this.store.remove(userId, id);

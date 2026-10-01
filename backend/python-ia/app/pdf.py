@@ -2,7 +2,12 @@
 
 Produit un support complet : couverture, objectifs, modules (chapitres, points clés,
 exemples, exercices + corrigés, quiz + réponses, étude de cas, projet), glossaire, FAQ.
-Police Unicode (Arial Windows) pour gérer accents et symboles ; repli latin-1 sinon.
+
+Police (T6, portable Windows/Linux/macOS/Docker) : DejaVu Sans, LIVRÉE avec le code
+(app/assets/fonts, licence Bitstream Vera/DejaVu dans LICENSE-DejaVu.txt). Repli :
+Arial (Windows), DejaVu système (Linux), puis police PDF de base Helvetica en
+windows-1252 avec translittération : le PDF ne plante jamais sur un caractère hors
+police, quel que soit l'OS et le nombre de pages (l'en-tête des pages 2+ compris).
 """
 from __future__ import annotations
 
@@ -15,13 +20,59 @@ _ACCENT = (99, 102, 241)
 _DARK = (30, 30, 40)
 _MUTED = (110, 110, 120)
 
-_FONT_REG = r"C:\Windows\Fonts\arial.ttf"
-_FONT_BOLD = r"C:\Windows\Fonts\arialbd.ttf"
-_FONT_ITAL = r"C:\Windows\Fonts\ariali.ttf"
+_ASSETS_FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+
+# Jeux de polices candidats (normal, gras, italique), par ordre de préférence. La
+# police livrée passe en premier : rendu identique sur tous les OS.
+FONT_CANDIDATES: list[tuple[str, str, str]] = [
+    (
+        os.path.join(_ASSETS_FONTS, "DejaVuSans.ttf"),
+        os.path.join(_ASSETS_FONTS, "DejaVuSans-Bold.ttf"),
+        os.path.join(_ASSETS_FONTS, "DejaVuSans-Oblique.ttf"),
+    ),
+    (r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\ariali.ttf"),
+    (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+    ),
+]
+
+# Translittération pour la police de base (windows-1252) : caractères fréquents hors
+# cp1252 ; le reste devient « ? » (jamais d'exception).
+_CORE_TRANSLIT = str.maketrans({
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2212": "-",
+    "\u2192": "->", "\u2190": "<-", "\u21d2": "=>", "\u2264": "<=", "\u2265": ">=",
+    "\u2713": "v", "\u2714": "v", "\u2717": "x", "\u2718": "x",
+    "\u25cf": "\u2022", "\u25aa": "\u2022", "\u25e6": "\u2022",
+    "\u00a0": " ", "\u202f": " ", "\u2009": " ",
+})
+
+
+def resolve_fonts(candidates: list[tuple[str, str, str]] | None = None) -> tuple[str, str, str] | None:
+    """Premier jeu dont la police normale existe ; gras/italique retombent sur la
+    normale s'ils manquent. None = aucune police TrueType (repli police de base)."""
+    for reg, bold, ital in candidates if candidates is not None else FONT_CANDIDATES:
+        if os.path.isfile(reg):
+            return (
+                reg,
+                bold if os.path.isfile(bold) else reg,
+                ital if os.path.isfile(ital) else reg,
+            )
+    return None
+
+
+def core_safe(text: str) -> str:
+    """Texte compatible avec les polices de base PDF (windows-1252)."""
+    s = (text or "").translate(_CORE_TRANSLIT)
+    return s.encode("cp1252", "replace").decode("cp1252")
 
 
 class _PDF(FPDF):
     base_font = "Helvetica"
+
+    def prep(self, s: str) -> str:
+        return (s or "") if self.base_font != "Helvetica" else core_safe(s)
 
     def header(self):
         if self.page_no() == 1:
@@ -29,30 +80,33 @@ class _PDF(FPDF):
         self.set_font(self.base_font, "", 8)
         self.set_text_color(*_MUTED)
         self.set_x(self.l_margin)
-        self.cell(0, 6, "SoulBah AI — Formation", align="R")
+        self.cell(0, 6, self.prep("SoulBah AI — Formation"), align="R")
         self.ln(8)
 
     def footer(self):
         self.set_y(-15)
         self.set_font(self.base_font, "", 8)
         self.set_text_color(*_MUTED)
-        self.cell(0, 10, f"Page {self.page_no()}", align="C")
+        self.cell(0, 10, self.prep(f"Page {self.page_no()}"), align="C")
 
 
-def build_formation_pdf(curriculum: dict, out_path: str) -> dict:
+def build_formation_pdf(curriculum: dict, out_path: str,
+                        font_candidates: list[tuple[str, str, str]] | None = None) -> dict:
     pdf = _PDF()
+    # Police de base : encodage windows-1252 (tirets cadratins, puces, guillemets
+    # typographiques, €) plutôt que latin-1.
+    pdf.core_fonts_encoding = "windows-1252"
     base = "Helvetica"
-    if os.path.isfile(_FONT_REG):
-        pdf.add_font("Uni", "", _FONT_REG)
-        pdf.add_font("Uni", "B", _FONT_BOLD if os.path.isfile(_FONT_BOLD) else _FONT_REG)
-        pdf.add_font("Uni", "I", _FONT_ITAL if os.path.isfile(_FONT_ITAL) else _FONT_REG)
+    fonts = resolve_fonts(font_candidates)
+    if fonts:
+        reg, bold, ital = fonts
+        pdf.add_font("Uni", "", reg)
+        pdf.add_font("Uni", "B", bold)
+        pdf.add_font("Uni", "I", ital)
         base = "Uni"
     pdf.base_font = base
     pdf.set_auto_page_break(True, margin=18)
-
-    def prep(s: str) -> str:
-        s = s or ""
-        return s if base != "Helvetica" else s.encode("latin-1", "replace").decode("latin-1")
+    prep = pdf.prep
 
     def write(text: str, size: int = 11, style: str = "", color=_DARK, lh: float = 6):
         """Écrit un bloc en repartant TOUJOURS de la marge gauche (largeur pleine)."""
@@ -166,4 +220,4 @@ def build_formation_pdf(curriculum: dict, out_path: str) -> dict:
                 os.remove(partial)
             except OSError:
                 pass
-    return {"path": out_path, "pages": pdf.page_no(), "modules": len(modules)}
+    return {"path": out_path, "pages": pdf.page_no(), "modules": len(modules), "font": base}

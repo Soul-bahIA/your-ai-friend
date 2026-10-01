@@ -15,6 +15,10 @@
 - Aucune dépendance UI lourde — CSS maison, thème sombre.
 
 ## Fonctionnalités
+- Connexion : `POST /api/analyze` exige un JWT Supabase. La console propose une connexion
+  e-mail / mot de passe (si `VITE_SUPABASE_URL` et `VITE_SUPABASE_KEY` sont définis) ou le collage
+  d'un jeton d'accès. Le jeton est conservé pour l'onglet (sessionStorage) et envoyé en
+  `Authorization: Bearer …` ; la déconnexion appelle `POST /api/auth/logout`.
 - Formulaire d'analyse de texte → `POST /api/analyze` (Node → Python IA → Rust → Postgres).
 - Affichage du résultat (label, confiance, statistiques calculées par Rust).
 - Barre de santé temps réel (`GET /health/deep`) : état de l'API, de Postgres et du service IA.
@@ -35,6 +39,9 @@ Ouvre http://localhost:5173. Le backend (`cd backend && docker compose up`) doit
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `VITE_API_URL` | `http://localhost:3000` | URL de l'API Node à contacter |
+| `VITE_SUPABASE_URL` | — | URL du projet Supabase (connexion e-mail / mot de passe) |
+| `VITE_SUPABASE_KEY` | — | Clé publique (anon) Supabase |
+| `VITE_DEV_HOST` | `localhost` | Hôte du serveur de dev (`0.0.0.0` pour l'exposer au réseau) |
 
 > Vite fige les variables `VITE_*` **au build**. En Docker, elles sont passées via l'`ARG VITE_API_URL` du Dockerfile.
 
@@ -72,7 +79,9 @@ backend/console/
 │   ├── App.tsx
 │   ├── index.css
 │   ├── api/client.ts          # client HTTP typé (analyze, deepHealth)
+│   ├── api/auth.ts            # session : connexion Supabase ou jeton collé
 │   └── components/
+│       ├── AuthPanel.tsx
 │       ├── HealthBar.tsx
 │       └── ResultCard.tsx
 └── Dockerfile

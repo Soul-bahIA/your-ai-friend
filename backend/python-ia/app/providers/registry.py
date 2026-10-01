@@ -2,6 +2,9 @@
 
 Un fournisseur est activé s'il est configuré (clé présente, ou URL locale pour un
 modèle auto-hébergé). Ajouter un fournisseur futur = ajouter une entrée SPECS.
+Les capacités (vision, JSON natif, réflexion…) sont déclarées dans capabilities.py
+(vision=False par défaut ; surcharge : LLM_CAPABILITIES). Les modèles par rôle
+(planner/evaluator/vision/cheap) sont choisis par le routeur (LLM_MODEL_<RÔLE>).
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ SPECS: dict[str, dict[str, str]] = {
         "family": "anthropic",
         "key_env": "ANTHROPIC_API_KEY",
         "model_env": "ANTHROPIC_MODEL",
-        "default_model": "claude-opus-4-8",
+        "default_model": "claude-opus-5-5",
     },
     "openai": {
         "family": "openai-compat",

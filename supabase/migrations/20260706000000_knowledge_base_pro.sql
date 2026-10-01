@@ -53,12 +53,24 @@ CREATE TABLE IF NOT EXISTS public.knowledge_versions (
 
 ALTER TABLE public.knowledge_versions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users view own knowledge versions" ON public.knowledge_versions
-  FOR SELECT TO authenticated USING (auth.uid() = user_id);
-CREATE POLICY "Users create own knowledge versions" ON public.knowledge_versions
-  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users delete own knowledge versions" ON public.knowledge_versions
-  FOR DELETE TO authenticated USING (auth.uid() = user_id);
+-- [LOT 1 / T47] Gardes de rejeu ajoutées a posteriori (ici et pour knowledge_domains),
+-- sans changer le schéma obtenu : sur une base neuve la table n'a aucune policy → les
+-- policies sont créées à l'identique ; déjà appliquée → `supabase db push` ne rejoue
+-- pas ce fichier ; rejeu (CI ×2) → no-op. Garde « aucune policy sur la table » plutôt
+-- que DROP + CREATE : 20261002000000_lot1_fixes.sql resserre la policy d'INSERT et un
+-- rejeu de ce fichier ne doit pas la rouvrir.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                  WHERE schemaname = 'public' AND tablename = 'knowledge_versions') THEN
+    CREATE POLICY "Users view own knowledge versions" ON public.knowledge_versions
+      FOR SELECT TO authenticated USING (auth.uid() = user_id);
+    CREATE POLICY "Users create own knowledge versions" ON public.knowledge_versions
+      FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Users delete own knowledge versions" ON public.knowledge_versions
+      FOR DELETE TO authenticated USING (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_versions_entry ON public.knowledge_versions(entry_id, version DESC);
 
@@ -74,8 +86,14 @@ CREATE TABLE IF NOT EXISTS public.knowledge_domains (
 
 ALTER TABLE public.knowledge_domains ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Anyone authenticated reads domains" ON public.knowledge_domains
-  FOR SELECT TO authenticated USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                  WHERE schemaname = 'public' AND tablename = 'knowledge_domains') THEN
+    CREATE POLICY "Anyone authenticated reads domains" ON public.knowledge_domains
+      FOR SELECT TO authenticated USING (true);
+  END IF;
+END $$;
 
 INSERT INTO public.knowledge_domains (slug, label, is_system) VALUES
   ('general',           'Général',                 true),

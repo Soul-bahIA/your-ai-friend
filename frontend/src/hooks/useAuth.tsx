@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { sessionChanged } from "@/lib/authState";
+import { notifyServerLogout } from "@/lib/agentApi";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextType {
@@ -60,6 +61,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Invalide d'abord le cache JWT du backend (S26) ; les erreurs sont ignorées.
+    await notifyServerLogout();
     await supabase.auth.signOut();
   }, []);
 

@@ -3,16 +3,24 @@
 Un seul code couvre OpenAI, Google Gemini (endpoint OpenAI-compat), Mistral,
 DeepSeek, xAI (Grok), Qwen (DashScope) et les modèles locaux (Ollama / LM Studio),
 qui exposent tous la même forme d'API. On diffère seulement par l'URL de base, la
-clé et le modèle.
+clé et le modèle. Les capacités (vision…) sont EXPLICITES : voir capabilities.py.
 """
 from __future__ import annotations
 
 import json
+import logging
+import os
+import time
 from typing import Any
 
 import httpx
 
-from .base import LLMError, LLMProvider, upstream_error
+from .base import CompletionResult, LLMError, LLMProvider, ModelCapabilities, attach_images_last_user, upstream_error
+from .capabilities import capabilities_for
+
+logger = logging.getLogger("python-ia.llm")
+
+DEFAULT_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "100"))
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -23,24 +31,33 @@ class OpenAICompatProvider(LLMProvider):
         api_key: str,
         model: str,
         family: str = "openai-compat",
-        supports_vision: bool = True,
     ):
         self.id = provider_id
         self.family = family
         self.model = model
-        self.supports_vision = supports_vision
-        self.supports_json_schema = False  # via response_format json_object + consigne
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
 
-    async def complete(
+    def capabilities(self, model: str | None = None) -> ModelCapabilities:
+        return capabilities_for(self.id, self.family, model or self.model)
+
+    async def generate(
         self,
         system: str,
         messages: list[dict[str, Any]],
         max_tokens: int,
         json_schema: dict | None = None,
         images: list[str] | None = None,
-    ) -> str:
+        *,
+        model: str | None = None,
+        timeout_s: float | None = None,
+        effort: str | None = None,  # non supporté : ignoré
+    ) -> CompletionResult:
+        use_model = model or self.model
+        caps = self.capabilities(use_model)
+        if images and not caps.vision:
+            raise LLMError(400, f"Le modèle {use_model} ne prend pas en charge les images.", kind="no_vision")
+
         sys_text = system
         if json_schema is not None:
             # Pas de json_schema natif garanti partout : on impose le schéma en consigne
@@ -52,27 +69,16 @@ class OpenAICompatProvider(LLMProvider):
 
         chat_messages: list[dict[str, Any]] = [{"role": "system", "content": sys_text}]
         msgs = [dict(m) for m in messages]
-
         if images:
-            last = msgs[-1] if msgs else {"role": "user", "content": ""}
-            text = last.get("content", "") if isinstance(last.get("content"), str) else ""
-            content: list[dict[str, Any]] = [
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}}
-                for b in images
-            ]
-            content.append({"type": "text", "text": text})
-            last["content"] = content
-            if msgs:
-                msgs[-1] = last
-            else:
-                msgs = [{"role": "user", "content": content}]
-
+            msgs = attach_images_last_user(
+                messages, images, lambda b: {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}}
+            )
         chat_messages.extend(msgs)
 
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": use_model,
             "messages": chat_messages,
-            "max_tokens": max_tokens,
+            "max_tokens": max(1, min(max_tokens, caps.max_output_tokens)),
         }
         if json_schema is not None:
             payload["response_format"] = {"type": "json_object"}
@@ -81,20 +87,45 @@ class OpenAICompatProvider(LLMProvider):
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
+        timeout = timeout_s if timeout_s is not None else DEFAULT_TIMEOUT_S
+        t0 = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=180) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 r = await client.post(
                     f"{self._base_url}/chat/completions", headers=headers, json=payload
                 )
+        except httpx.TimeoutException:
+            raise LLMError(504, f"Service IA ({self.id}) : délai dépassé", fallback=True, kind="timeout")
         except httpx.HTTPError as e:
-            raise LLMError(502, f"Service IA ({self.id}) injoignable : {e}")
+            logger.warning("Fournisseur %s injoignable : %s", self.id, e)
+            raise LLMError(502, f"Service IA ({self.id}) injoignable", fallback=True, kind="connection")
+        latency_ms = int((time.monotonic() - t0) * 1000)
 
         if r.status_code >= 400:
-            # Le corps n'est pas renvoyé pour 401/403 (il peut contenir un extrait de clé).
-            raise upstream_error(self.id, r.status_code, r.text[:200])
+            # Le corps amont n'est JAMAIS renvoyé au client (il peut contenir un
+            # extrait de clé) : upstream_error le journalise seulement (hors 401/403).
+            raise upstream_error(self.id, r.status_code, r.text[:500])
 
         try:
             data = r.json()
-            return data["choices"][0]["message"]["content"] or ""
-        except (KeyError, IndexError, ValueError) as e:
-            raise LLMError(502, f"Réponse {self.id} inattendue : {e}")
+            choice = data["choices"][0]
+            text = choice["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError, ValueError) as e:
+            logger.warning("Réponse %s inattendue : %s", self.id, e)
+            raise LLMError(502, f"Réponse du fournisseur {self.id} inattendue", fallback=True, kind="bad_response")
+
+        finish = choice.get("finish_reason") if isinstance(choice, dict) else None
+        if finish == "content_filter":
+            raise LLMError(400, "Requête refusée par le modèle IA", kind="refusal")
+        usage = data.get("usage") if isinstance(data, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        return CompletionResult(
+            text=text,
+            provider=self.id,
+            model=str(data.get("model") or use_model),
+            input_tokens=usage.get("prompt_tokens"),
+            output_tokens=usage.get("completion_tokens"),
+            stop_reason=finish,
+            truncated=finish == "length",
+            latency_ms=latency_ms,
+        )

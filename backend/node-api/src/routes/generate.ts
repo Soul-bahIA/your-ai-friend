@@ -1,12 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { pool } from "../db";
-import { requireUser } from "../auth";
-import { logEvent } from "../services/logs";
-import { generateApplication, ServiceError } from "../clients/iaClient";
-import { formationEngine, curriculumToLessons } from "../services/formation";
-import { activeGenerations } from "../services/activeJobs";
-import { isUuid } from "../lib/sanitize";
-import { config } from "../config";
+import { pool } from "../db.js";
+import { requireUser } from "../auth.js";
+import { logEvent } from "../services/logs.js";
+import { generateApplication, ServiceError } from "../clients/iaClient.js";
+import { formationEngine, curriculumToLessons } from "../services/formation/index.js";
+import { activeGenerations } from "../services/activeJobs.js";
+import { isUuid } from "../lib/sanitize.js";
+import { config } from "../config.js";
+import { checkProviderOverride } from "../lib/providerOverride.js";
+import { runInBackground } from "../services/backgroundJobs.js";
 
 const generateRateLimit = { rateLimit: { max: Math.max(1, Math.floor(config.rateLimitExpensive / 2)), timeWindow: "1 minute" } };
 
@@ -21,7 +23,7 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
       topic?: string;
       details?: string;
       formationId?: string;
-      provider?: string;
+      provider?: unknown;
     };
     if (typeof topic !== "string" || !topic.trim() || !isUuid(formationId)) {
       return reply.status(400).send({ error: "topic et formationId (uuid) requis" });
@@ -29,17 +31,17 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
     if (topic.length > 500 || (details !== undefined && (typeof details !== "string" || details.length > 5000))) {
       return reply.status(400).send({ error: "topic (500 car.) ou details (5000 car.) trop long" });
     }
-    if (provider !== undefined && (typeof provider !== "string" || provider.length > 40)) {
-      return reply.status(400).send({ error: "provider invalide" });
-    }
+    const checkedProvider = checkProviderOverride(provider, config.llmAllowedOverrides);
+    if (!checkedProvider.ok) return reply.status(400).send({ error: checkedProvider.error });
 
     // Émission d'un évènement de progression (canal temps réel, task_id = formationId).
+    // data.source = 'formation' : le cockpit de l'agent ignore ces évènements (T29, contrat §8).
     const emit = (type: string, message: string, data: Record<string, unknown> = {}) =>
       pool
         .query(
           `INSERT INTO agent_events (task_id, user_id, type, message, data)
            VALUES ($1, $2, $3, $4, $5::jsonb)`,
-          [formationId, userId, type, message, JSON.stringify(data)],
+          [formationId, userId, type, message, JSON.stringify({ ...data, source: "formation", formation_id: formationId })],
         )
         .catch(() => {});
 
@@ -56,11 +58,11 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
     if (start.rowCount !== 1) return reply.status(404).send({ error: "Formation introuvable" });
     activeGenerations.add(formationId);
 
-    void (async () => {
+    void runInBackground("génération de formation", async () => {
       emit("task_started", `Génération de la formation « ${topic} »…`, { topic });
       try {
         const curriculum = await formationEngine.build(userId, topic, details ?? null, {
-          provider,
+          provider: checkedProvider.value,
           onProgress: (step, detail) => emit("step_started", detail ? `${step} — ${detail}` : step, { step }),
         });
         const lessons = curriculumToLessons(curriculum);
@@ -105,7 +107,7 @@ export async function generateRoutes(app: FastifyInstance): Promise<void> {
       } finally {
         activeGenerations.delete(formationId);
       }
-    })();
+    });
 
     // Réponse immédiate : le frontend suit la progression et se met à jour à la fin.
     return { success: true, async: true, formationId };

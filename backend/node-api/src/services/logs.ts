@@ -1,4 +1,4 @@
-import { pool } from "../db";
+import { pool } from "../db.js";
 
 /** Insère un événement dans system_logs (best-effort, n'échoue jamais l'appelant). */
 export async function logEvent(

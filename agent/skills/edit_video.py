@@ -4,6 +4,9 @@ Portée volontairement limitée à ce qui est fiable sans dépendance externe fr
 (pas d'ImageMagick) : concaténation ("coupes") + un titre rendu en image (PIL).
 Pas de transitions animées dans cette v1.
 
+L'audio des clips est CONSERVÉ (AAC) dès qu'au moins un clip en contient (T25) ;
+le titre est muet. L'export est vérifié par une sonde avant d'annoncer un succès.
+
 Exemple : {"type": "edit_video", "clips": ["a.mp4", "b.mp4"], "title": "Ma démo", "output": "final.mp4"}
 """
 from __future__ import annotations
@@ -11,6 +14,18 @@ from __future__ import annotations
 import os
 
 from skills.base import PathCheck, Skill, SkillResult
+from skills.media_probe import probe_video
+
+
+def _pillow_compat() -> None:
+    """moviepy 1.x référence encore `Image.ANTIALIAS`, retiré dans Pillow 10 :
+    on rétablit l'alias (LANCZOS, même filtre) avant d'importer moviepy."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    if not hasattr(Image, "ANTIALIAS"):
+        Image.ANTIALIAS = getattr(Image, "Resampling", Image).LANCZOS  # type: ignore[attr-defined]
 
 
 def _make_title_clip(title: str, size: tuple[int, int], duration: float = 2.0):
@@ -48,6 +63,9 @@ class EditVideoSkill(Skill):
         output = step.get("output")
         if not isinstance(output, str) or not output.lower().endswith(".mp4"):
             return "champ 'output' invalide (fichier .mp4 attendu)"
+        title = step.get("title")
+        if title is not None and (not isinstance(title, str) or len(title) > 200):
+            return "champ 'title' invalide (texte ≤ 200 caractères)"
         return None
 
     def run(self, step: dict) -> SkillResult:
@@ -63,14 +81,19 @@ class EditVideoSkill(Skill):
             if not isinstance(p, str) or not os.path.isfile(p):
                 return SkillResult(ok=False, detail=f"clip introuvable : {p}")
 
+        _pillow_compat()
         try:
             from moviepy.editor import VideoFileClip, concatenate_videoclips
         except ImportError:
             return SkillResult(ok=False, detail="dépendance 'moviepy' non installée")
 
+        out_dir = os.path.dirname(os.path.abspath(output))
+        base = os.path.splitext(os.path.basename(output))[0]
         video_clips = []
+        has_audio = False
         try:
             video_clips = [VideoFileClip(p) for p in clips_paths]
+            has_audio = any(getattr(c, "audio", None) is not None for c in video_clips)
             size = video_clips[0].size
             sequence = []
             if title:
@@ -78,7 +101,13 @@ class EditVideoSkill(Skill):
             sequence.extend(video_clips)
 
             final = concatenate_videoclips(sequence, method="compose")
-            final.write_videofile(output, codec="libx264", audio=False, logger=None)
+            kwargs = {"codec": "libx264", "audio": has_audio, "logger": None}
+            if has_audio:
+                kwargs["audio_codec"] = "aac"
+                # Fichier audio temporaire à côté de la sortie (dossier autorisé),
+                # pas dans le dossier courant de l'agent.
+                kwargs["temp_audiofile"] = os.path.join(out_dir, f"{base}.soulbah-temp-audio.m4a")
+            final.write_videofile(output, **kwargs)
             final.close()
         except Exception as e:  # noqa: BLE001
             return SkillResult(ok=False, detail=f"échec montage : {e}")
@@ -89,4 +118,9 @@ class EditVideoSkill(Skill):
                 except Exception:  # noqa: BLE001
                     pass
 
-        return SkillResult(ok=True, detail=f"vidéo montée : {output}", data={"path": output})
+        ok, info = probe_video(output)
+        if not ok:
+            return SkillResult(ok=False, detail=f"export invalide : {info}")
+        audio_note = "avec audio" if has_audio else "sans piste audio (aucun clip n'en contient)"
+        return SkillResult(ok=True, detail=f"vidéo montée ({audio_note}) : {output}",
+                           data={"path": output, "audio": has_audio, "probe": info})

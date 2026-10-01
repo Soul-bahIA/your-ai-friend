@@ -1,12 +1,17 @@
 name: soulbah-backend
 
-# Orchestration complète de l'architecture polyglotte.
-# Lance : PostgreSQL + Rust (calculs) + Python (IA) + Node (API principale).
+# Orchestration du backend : PostgreSQL (démo locale) + python-ia + node-api + console de test.
 # Démarrage : `docker compose up --build`
+# Avec la démo Rust (facultative, hors V2) : `docker compose --profile demo up --build`
 #
-# Seule l'API Node est publiée sur l'hôte (port ${NODE_API_PORT}). python-ia et
-# rust-compute restent internes au réseau docker ; postgres n'est publié que sur
-# 127.0.0.1 (outils locaux).
+# Exposition (S18) : TOUS les ports publiés sont liés à 127.0.0.1 — rien n'est joignable
+# depuis le réseau local. node-api écoute sur 0.0.0.0 DANS son conteneur (obligatoire
+# pour la publication de port), mais l'hôte ne publie que sur la boucle locale.
+# python-ia et rust-compute restent internes au réseau docker (aucun port publié).
+#
+# Environnement (contrat LOT 1 §1) : SOULBAH_ENV = dev | test | staging | production
+# (défaut dev). Hors dev/test, node-api et python-ia REFUSENT de démarrer sans
+# IA_SERVICE_TOKEN (et node-api sans PG_SSL_CA quand DATABASE_SSL=true).
 
 x-llm-env: &llm-env
   # Fournisseurs d'IA — un fournisseur est actif dès que sa clé est renseignée.
@@ -27,7 +32,11 @@ x-llm-env: &llm-env
   LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
   LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.1}
   LOCAL_LLM_KEY: ${LOCAL_LLM_KEY:-}
-  # Jeton partagé node-api → python-ia (en-tête x-ia-token). Fortement recommandé.
+
+x-soulbah-env: &soulbah-env
+  # dev | test | staging | production — hors dev/test, IA_SERVICE_TOKEN est obligatoire.
+  SOULBAH_ENV: ${SOULBAH_ENV:-dev}
+  # Jeton partagé node-api → python-ia (en-tête x-ia-token). Même valeur des deux côtés.
   IA_SERVICE_TOKEN: ${IA_SERVICE_TOKEN:-}
 
 services:
@@ -49,8 +58,11 @@ services:
       timeout: 3s
       retries: 10
 
+  # Démo Rust (T50) : gelée, aucun rôle en V2 (audit §9.2). Démarrée UNIQUEMENT avec
+  # `--profile demo`. Sans elle, python-ia /infer échoue proprement (service absent).
   rust-compute:
     build: ./rust-compute
+    profiles: ["demo"]
     restart: unless-stopped
     # Interne uniquement (appelé par python-ia via le réseau docker).
     expose:
@@ -60,7 +72,7 @@ services:
     build: ./python-ia
     restart: unless-stopped
     environment:
-      <<: *llm-env
+      <<: [*llm-env, *soulbah-env]
       RUST_SERVICE_URL: http://rust-compute:8080
       LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-}
       LLM_ROUTING: ${LLM_ROUTING:-}
@@ -81,16 +93,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-    depends_on:
-      rust-compute:
-        condition: service_started
+    # Pas de depends_on rust-compute : il n'est lancé qu'avec le profil `demo`.
 
   node-api:
     build: ./node-api
     restart: unless-stopped
     environment:
-      <<: *llm-env
+      <<: [*llm-env, *soulbah-env]
       PORT: 3000
+      # 0.0.0.0 DANS le conteneur uniquement ; la publication côté hôte est sur 127.0.0.1.
       HOST: 0.0.0.0
       # Origines web autorisées (CORS), séparées par des virgules.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173}
@@ -127,7 +138,7 @@ services:
     volumes:
       - media:/data/media:ro
     ports:
-      - "${NODE_API_PORT:-3000}:3000"
+      - "127.0.0.1:${NODE_API_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 15s
@@ -140,8 +151,8 @@ services:
       python-ia:
         condition: service_healthy
 
-  # Console web React/TypeScript (équivalent web du client Flutter).
-  # Console de test du backend (backend/console).
+  # Console de test du backend (backend/console) — ce n'est PAS l'application web
+  # (frontend/, lancée à part avec `npm run dev`).
   console:
     build:
       context: ./console
@@ -150,7 +161,7 @@ services:
         VITE_API_URL: http://localhost:${NODE_API_PORT:-3000}
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "127.0.0.1:${CONSOLE_PORT:-5173}:80"
     depends_on:
       - node-api
 

@@ -1,0 +1,17 @@
+# Dépendances de DÉVELOPPEMENT / TESTS de python-ia (en plus de requirements.txt).
+#
+# Environnement dédié (ne PAS installer dans le Python global partagé avec l'agent) :
+#
+#   cd backend/python-ia
+#   python -m venv .venv                      # .venv/ est ignoré par git (backend/.gitignore)
+#   .venv\Scripts\activate                    # Windows (PowerShell : .venv\Scripts\Activate.ps1)
+#   source .venv/bin/activate                 # Linux / macOS / git-bash : source .venv/Scripts/activate
+#   python -m pip install -r requirements-dev.txt   (inclut requirements.txt)
+#   python -m pytest tests -q
+#   python -m compileall -q app
+#
+# Lancer le service depuis ce venv : python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+# (SOULBAH_ENV=dev par défaut ; hors dev/test, IA_SERVICE_TOKEN est obligatoire).
+-r requirements.txt
+pytest==9.1.1
+# httpx (client de TestClient) est déjà épinglé dans requirements.txt.

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiUrl } from "@/lib/api";
-import type { DeepHealth, ServiceState } from "@/lib/systemStatus";
+import { supabase } from "@/integrations/supabase/client";
+import { computeOverallStatus, deepCheck, type DeepHealth, type OverallStatus, type ServiceState } from "@/lib/systemStatus";
 
 const TIMEOUT_MS = 5000;
 const REFRESH_MS = 30_000;
@@ -59,5 +60,43 @@ export function useBackendHealth() {
       backend.refetch();
       if (backend.data === "ok") deep.refetch();
     },
+  };
+}
+
+/** Supabase joignable : requête minimale (son propre profil, RLS), rafraîchie toutes les 60 s. */
+async function fetchSupabaseHealth(): Promise<ServiceState> {
+  try {
+    const { error } = await supabase.from("profiles").select("id", { count: "exact", head: true });
+    return error ? "down" : "ok";
+  } catch {
+    return "down";
+  }
+}
+
+export interface SystemStatus {
+  overall: OverallStatus;
+  backend: ServiceState;
+  supabase: ServiceState;
+  postgres: ServiceState;
+  pythonIa: ServiceState;
+}
+
+/** État réel du système (backend, dépendances profondes, Supabase) pour la barre latérale. */
+export function useSystemStatus(): SystemStatus {
+  const health = useBackendHealth();
+  const supa = useQuery({
+    queryKey: ["health", "supabase"],
+    queryFn: fetchSupabaseHealth,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const supabaseState: ServiceState = supa.data ?? "unknown";
+  const down = health.backend === "down";
+  return {
+    overall: computeOverallStatus({ backend: health.backend, deep: health.deep, supabase: supabaseState }),
+    backend: health.backend,
+    supabase: supabaseState,
+    postgres: down ? "down" : deepCheck(health.deep, "postgres"),
+    pythonIa: down ? "down" : deepCheck(health.deep, "python_ia"),
   };
 }

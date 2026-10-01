@@ -1,200 +1,180 @@
-# SoulBah AI — Analyse de l'existant & Architecture cible
+# SoulBah AI — Architecture (état réel, LOT 1)
 
-> Document vivant. Objectif : cadrer le passage d'une plateforme web (chat + génération)
-> vers un **agent IA autonome capable de contrôler l'ordinateur**, en réutilisant au
-> maximum l'existant et **sans supprimer de fonctionnalité** sans justification.
+> Document vivant : il décrit ce qui **existe** dans le dépôt et le **contrat LOT 1** en cours
+> d'implémentation. Il ne décrit pas la cible V2.
+> - Audit de référence : [`SOULBAH_V2_LOT0_AUDIT.md`](SOULBAH_V2_LOT0_AUDIT.md) (problèmes T#/S#,
+>   capacités C01–C38).
+> - Cible V2 : audit §9, architecture « Split-Plane ».
+> - Feuille de route en 15 lots : audit §13.
+> - Contrat commun du LOT 1 : [`LOT1_CONTRAT.md`](LOT1_CONTRAT.md).
+> - Reprise de Supabase : [`SUPABASE_REPRISE.md`](SUPABASE_REPRISE.md).
 
 ---
 
-## 1. Ce qui existe déjà (audit)
+## 1. Processus réels
 
-### Plan « cloud » (Supabase + React) — mature
-| Brique | Emplacement | État |
+Tout tourne sur **un seul PC Windows**, hors Docker. Le projet Supabase est actuellement en
+pause.
+
+```
+ Navigateur : app web frontend/ (Vite + React, :8080)
+   │ REST + JWT Supabase (/api/*)        ▲ Realtime : agent_tasks, agent_events, formations, system_logs
+   │ + accès PostgREST direct : chat_*, knowledge_base, formations, applications, system_logs,
+   │   DELETE agent_tasks (bornés par la RLS)
+   ▼
+ backend/node-api  Fastify 5 / TypeScript  :3000 (HOST=127.0.0.1 par défaut)
+   │ file agent_tasks · objectif → plan → évaluation · mémoire · KB · chat SSE · clés agent
+   ├── pg ──────────────────────────────► Supabase Postgres (+ Auth, Realtime, pgvector)
+   ├── HTTP + x-ia-token ───────────────► backend/python-ia  FastAPI :8000
+   │                                        prompts plan/évaluation, routeur de fournisseurs,
+   │                                        vidéo (slides + TTS), PDF
+   ▲
+   │ HTTP x-agent-key : announce · poll · claim/update · event · control
+ agent/  worker Python (venv agent/.venv) — exécute les étapes sur le poste, avec confirmation
+
+ backend/console      console web de test du backend (n'est pas l'application)
+ backend/rust-compute démo /infer gelée, profil compose `demo` uniquement, aucun rôle en V2
+```
+
+## 2. Composants
+
+| Dossier | Rôle | Remarques |
 |---|---|---|
-| Interface utilisateur | `frontend/src/` (React/Vite/TS) | ✅ Dashboard complet (Chat, Formations, Applications, KnowledgeBase, DatabaseAdmin, Automation…) |
-| Auth & permissions | `useAuth`, RLS SQL, `user_roles` | ✅ JWT + Row Level Security par `user_id` |
-| Moteur IA (LLM) | `backend/node-api` → `POST /api/chat` | ✅ Chat streaming multi-fournisseurs + **tool-calling** (create_formation/application, save_knowledge) |
-| Générateur de code | `POST /api/generate/application` (Node → `python-ia`) | ✅ Génère architecture d'app par IA |
-| Générateur de formation | `POST /api/generate/formation` (Node → `python-ia`) | ✅ |
-| Mémoire (permanente) | table `knowledge_base` | ✅ Contexte injecté dans le chat |
-| Mémoire (conversation) | `chat_conversations` / `chat_messages` | ✅ |
-| Journalisation | table `system_logs` + `ActivityFeed` | ✅ Historique d'événements temps réel |
-| BDD dynamique | `POST /api/database` + `user_schemas/…` | ✅ CRUD de tables utilisateur |
-| **File de tâches agent** | table `agent_tasks` + routes `/api/agent-tasks/*` (Node) | ✅ Agent local opérationnel (voir §2) |
-| Backend polyglotte | `backend/` (Node/Python/Rust/Postgres) | ✅ Scaffold récent, prêt à héberger raisonnement/vision |
+| `frontend/` | Application web (React, Vite, shadcn-ui) : chat, formations, applications, base de connaissances, automatisation (objectifs, tâches, cockpit), sécurité (clés agent). | Appelle `/api/*` avec le JWT Supabase. Lit certaines tables en direct (RLS). |
+| `backend/node-api` | API principale et plan de contrôle : JWT, file de tâches de l'agent, orchestration objectif → plan → évaluation, mémoire, KB (hash, versions, embeddings), chat SSE, maintenance. | Connexion Postgres en `postgres` aujourd'hui (S4) ; rôle `soulbah_api` prévu : [`SUPABASE_REPRISE.md`](SUPABASE_REPRISE.md) §10. |
+| `backend/python-ia` | Service IA sans état : plan et évaluation (LLM), génération de formations et d'applications, vidéo, PDF, routeur multi-fournisseurs. | Appelé par node-api uniquement, avec `x-ia-token`. |
+| `agent/` | Worker local : poll, claim, exécution des skills (souris, clavier, fenêtres, fichiers, commandes, capture, enregistrement, montage, téléphone), outbox des résultats. | Mode `confirm` par défaut ; workspace dédié (§4). |
+| `backend/console` | Console de test (`/api/analyze`, `/health/deep`). | Service compose `console`. |
+| `backend/rust-compute` | Démo `/infer`. | Gelée ; profil compose `demo`. |
+| `supabase/migrations` | Schéma versionné (source de vérité). | Voir §5. |
+| `scripts/` | Sauvegardes, venvs, régénération de `RESTAURATION_BASE.sql`, outillage CI (`scripts/ci/`). | |
 
-### Le germe déjà présent : `agent_tasks`
-La table `agent_tasks` et les routes `/api/agent-tasks/*` de `backend/node-api` implémentent le patron
-d'un agent :
+## 3. Flux d'une tâche agent
 
-```
-Web app (JWT) ── POST /api/agent-tasks ──▶ agent_tasks (file, status=pending)
-                                          ▲
-Worker LOCAL ── GET /api/agent-tasks/poll (x-agent-key) ─┘
-   exécute ── POST /api/agent-tasks/update (in_progress → completed/failed) ──▶ realtime ──▶ UI
-```
-- `task_type` prévus : `screen_recording`, `demo_execution`, `video_production`, `tts_generation`.
-- Cycle de vie : `pending → in_progress → completed | failed | cancelled`.
-- `payload` JSONB = instructions ; `result` / `error_message` = retour.
-- Auth worker par clé (`x-agent-key`, validée par hash dans `agent_keys`), séparée du JWT web.
-- Création/modification **uniquement via l'API Node** : la RLS n'autorise plus INSERT/UPDATE
-  directs sur `agent_tasks` (migration `20261001000000_hardening.sql`) ; l'app lit (Realtime) et supprime.
-- Contrôle d'exécution : colonne `control` (`none|pause|stop`) ; reprise des tâches orphelines
-  via `updated_at` (heartbeat) et `requeue_count`.
+Le statut d'`agent_tasks` garde ses 5 valeurs : `pending`, `in_progress`, `completed`,
+`failed`, `cancelled`. Le CHECK n'est jamais modifié. `control` vaut `none`, `pause` ou `stop`.
+`updated_at` sert de bail : un agent muet depuis 180 s voit sa tâche remise en file, au plus
+3 fois.
 
-### Remplacement des edge functions Supabase par le backend Node
-Les 5 edge functions Deno (`chat`, `generate-formation`, `generate-application`,
-`manage-database`, `agent-tasks`) ont été **retirées du dépôt** : leur logique vit dans
-`backend/node-api` (Fastify/TypeScript), qui se connecte au Postgres Supabase (`DATABASE_URL`)
-et vérifie les JWT Supabase. Supabase reste le fournisseur **d'authentification et de base
-de données** (RLS, Realtime) ; la génération IA sans état est déléguée à `backend/python-ia`.
+1. **Objectif** : `POST /api/agent/goal` (JWT). La mémoire et les `allowed_dirs` de la clé
+   ciblée alimentent le planner (python-ia `/agent/plan`), puis node-api valide les étapes et
+   insère la tâche `pending`.
+   - **Ciblage d'un PC** (contrat §7) : paramètre `agent_key_id` facultatif, stocké dans
+     `agent_tasks.target_agent_key_id`.
+   - Sans ce paramètre : si l'utilisateur a une seule clé active, elle est ciblée ; s'il en a
+     plusieurs, l'API répond 400 avec la liste des agents.
+2. **Poll** : `GET /api/agent-tasks/poll` (`x-agent-key`) renvoie au plus 5 tâches
+   `pending`, de l'utilisateur de la clé, avec `target_agent_key_id` NULL ou égal à la clé
+   appelante, hors corrections en attente d'approbation. Index partiel
+   `idx_agent_tasks_poll` (T46).
+3. **Claim** : `POST /api/agent-tasks/update` `in_progress` avec `attempt`. L'UPDATE est gardé
+   par `status='pending' AND requeue_count=attempt` (409 sinon). Le claim écrit
+   `claimed_by_key_id`.
+4. **Exécution** : étapes séquentielles, avec la permission vérifiée avant chaque action.
+   Contrat §12–§14 :
+   - l'événement `approval_required` est émis avant une confirmation, puis `approval_result` ;
+   - les textes saisis sont masqués dans les logs, événements et résultats ;
+   - un heartbeat part toutes les 30 s.
+5. **Fin** : `completed`, `failed` ou `cancelled`, gardé par `attempt`. Une erreur réseau
+   place le résultat dans l'outbox locale.
+6. **Évaluation** (node-api → python-ia `/agent/evaluate`). Elle n'a jamais lieu pour une
+   tâche `cancelled`, ni pour un résultat `empty_plan` ou `simulated`. Les mémoires sont
+   écrites en `proposed` ; seul l'utilisateur les passe en `validated` (contrat §4, §9).
+   Une correction proposée porte `goal_meta.awaiting_approval=true` (contrat §6) :
+   - elle ne part qu'après `POST /api/agent-tasks/:id/approve` ;
+   - la rejeter, c'est l'annuler.
 
-| Ancienne edge function | Remplacement (backend Node) |
+**Annulation** (contrat §2) : `POST /api/agent-tasks/:id/cancel` (JWT, propriétaire).
+- Une tâche `pending` passe en `cancelled` immédiatement.
+- Une tâche `in_progress` reçoit `control='stop'` : l'agent termine l'étape courante puis
+  envoie `cancelled`.
+- Poser `control`, même avec une valeur identique, ne prolonge plus le bail (trigger, T45) ;
+  le heartbeat, lui, le prolonge.
+
+**Tâche disparue** (contrat §3) : `control`, `event`, `update` et heartbeat répondent
+`410 {error:"gone"}`, et l'agent abandonne la tâche.
+
+**Événements** (`agent_events`, télémétrie, sans FK sur `task_id`, purgés à 3 jours) :
+- `data.source` vaut `agent` ou `formation` ;
+- les captures ne sont pas stockées en base (`data.has_image=true`) : la dernière est servie
+  par `GET /api/agent-tasks/:id/screenshot` (contrat §8).
+
+**Dry-run** (contrat §5) : `--dry-run --plan fichier.json` exécute un plan local en
+simulation. Il ne réclame aucune tâche au serveur, et son résultat porte `simulated=true`.
+
+## 4. Environnements, secrets, exposition
+
+| Sujet | Règle |
 |---|---|
-| `chat` | `POST /api/chat` |
-| `generate-formation` | `POST /api/generate/formation` (→ python-ia) |
-| `generate-application` | `POST /api/generate/application` (→ python-ia) |
-| `manage-database` | `POST /api/database` |
-| `agent-tasks` | `POST/GET /api/agent-tasks`, `GET /api/agent-tasks/poll`, `POST /api/agent-tasks/update`, `/api/agent-tasks/:id/control`, `/api/agent-tasks/:id/events` |
+| `SOULBAH_ENV` | `dev` (défaut), `test`, `staging` ou `production`. Hors `dev`/`test`, node-api et python-ia refusent de démarrer sans `IA_SERVICE_TOKEN`, et node-api sans `PG_SSL_CA` quand `DATABASE_SSL=true`. |
+| `IA_SERVICE_TOKEN` | Même valeur pour node-api et python-ia (`backend/.env`). Envoyé dans l'en-tête `x-ia-token`. |
+| `PG_SSL_CA` | Chemin du certificat CA de Supabase. Sans lui, la connexion est chiffrée mais non vérifiée (S13). |
+| Exposition réseau | node-api écoute par défaut sur `127.0.0.1` (`HOST`) hors Docker. Dans `backend/docker-compose.yml`, tous les ports publiés sont liés à `127.0.0.1`, et python-ia et rust-compute ne sont pas publiés. |
+| Python | Un venv par composant (`agent/.venv`, `backend/python-ia/.venv`), créé par `scripts/setup_venvs.ps1` ou `.sh` (T34). |
+| Workspace de l'agent | `SOULBAH_ALLOWED_DIRS` vaut par défaut `%USERPROFILE%\SoulbahWorkspace`, créé au besoin (contrat §14). L'agent refuse de démarrer si un dossier autorisé contient l'agent ou le dépôt. La deny-list est permanente : code et config de l'agent, `*.env`, `.ssh`, clés privées, `.git/hooks`, `git --separate-git-dir`/`--template`. |
+| Clé agent | Hachée (SHA-256) en base, affichée une seule fois et révocable depuis la page *Sécurité*. Elle est créée par `POST /api/agent-keys` ; le navigateur ne peut que la lire ou la supprimer (RLS, LOT 1). |
 
-Correspondance détaillée : [`backend/MIGRATION.md`](../backend/MIGRATION.md).
+## 5. Données
 
-**Conclusion : l'ossature d'orchestration existe. Ce qui manque, c'est le worker local qui
-touche réellement la machine, la vision, et la boucle de raisonnement.**
+- **Supabase Postgres**, schéma dans `supabase/migrations/` (18 migrations).
+  - Règles (audit §12) : migrations additives et idempotentes depuis `20260703000000` ;
+    contraintes `NOT VALID` puis `VALIDATE` tentée.
+  - Interdits : modifier le CHECK de statut d'`agent_tasks`, ajouter une FK sur
+    `agent_events.task_id`, supprimer `modules_status` (dépréciée, T48).
+- **Migration LOT 1** (`20261002000000_lot1_fixes.sql`) :
+  - ciblage d'un PC : FK `agent_keys` `ON DELETE SET NULL` et index de poll ;
+  - trigger de bail (T45) ;
+  - `has_role` retiré à anon, nouvelle fonction `is_admin()` (S19) ;
+  - `agent_keys` en lecture et suppression seules côté client, INSERT qui vérifient la
+    propriété de la ligne parente (S20) ;
+  - CHECK `status`/`level` sur `agent_memory`.
+- **RLS** : chaque table est filtrée par `user_id`. **Limite actuelle (S4)** : node-api se
+  connecte en `postgres` et contourne donc la RLS. Il applique lui-même le filtrage par
+  utilisateur dans chaque requête.
+- **Restauration** : `RESTAURATION_BASE.sql` concatène les migrations et sert pour un projet
+  **neuf** uniquement. Sur le projet existant, utiliser `supabase db push`.
+- **Sauvegardes** : `scripts/backup_db.ps1` / `.sh`. Le mot de passe passe par un fichier
+  pgpass temporaire, et le chiffrement gpg/age est facultatif (S30).
+- **pgvector** : absent du PG18 local. Le DDL vectoriel est remplacé par un stub en local
+  (`scripts/ci/apply_migrations.sh --stub-vector`) et vérifié pour de vrai dans le job CI
+  `db`, dont l'image `pgvector/pgvector` doit être épinglée sur la version de Supabase.
 
----
+## 6. Tests et CI
 
-## 2. Les deux plans de l'architecture cible
+`.github/workflows/ci.yml` :
 
-L'erreur à éviter : croire que l'agent tourne « dans le cloud ». Pour contrôler souris,
-clavier, fenêtres et logiciels installés, **un processus doit s'exécuter nativement sur le
-poste de l'utilisateur**. D'où deux plans :
+| Job | Contenu |
+|---|---|
+| `frontend` | Node 20/22 : lint, `tsc -p tsconfig.app.json`, vitest, build. |
+| `console` | Build de `backend/console` (avec `tsc`). |
+| `node-api` | `tsc`, vitest, `npm run build`. |
+| `python-ia` | Python 3.11/3.12 : venv, compileall, pytest. |
+| `agent` | `windows-latest` : venv, pytest `agent/tests` avec `SOULBAH_NO_DOTENV=1`. |
+| `db` | `pgvector/pgvector` + `scripts/ci/auth_stub.sql` : migrations appliquées deux fois, schéma identique après rejeu, assertions `scripts/ci/schema_checks.sql` (FK, trigger, policies, droits), `RESTAURATION_BASE.sql` à jour. |
+| `compose` | `docker compose config`, avec et sans le profil `demo`. |
+| `security` | `npm audit --omit=dev` (frontend, node-api), `pip-audit` (bloquant en prod, non bloquant en dev), gitleaks sur tout l'historique. |
 
-```
-┌──────────────────────── PLAN CLOUD (existe déjà en grande partie) ────────────────────────┐
-│  React UI  ·  Supabase (auth, mémoire, logs)  ·  file agent_tasks  ·  LLM Gateway         │
-│  Node API (backend/)  ·  raisonnement/planif (Python)  ·  calculs (Rust)                   │
-└───────────────────────────────────────────┬───────────────────────────────────────────────┘
-                                             │  file de tâches + résultats (polling / WS)
-┌───────────────────────────────────────────▼───────────────────────────────────────────────┐
-│                    PLAN LOCAL — « SoulBah Agent » (À CONSTRUIRE, cœur du projet)            │
-│                                                                                            │
-│   Boucle : Observer → Comprendre → Planifier → Exécuter → Vérifier → Corriger → Continuer  │
-│                                                                                            │
-│   ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌───────────────┐  ┌────────────────────┐  │
-│   │ Vision   │  │ Contrôle │  │ Gestionnaire │  │ Moteur vidéo  │  │ Système de         │  │
-│   │ (écran,  │  │ (souris, │  │ d'outils /   │  │ (enregistr.,  │  │ permissions        │  │
-│   │  OCR, UI)│  │  clavier,│  │ plugins      │  │  montage)     │  │ (validation user)  │  │
-│   │          │  │  fenêtres│  │              │  │               │  │                    │  │
-│   └──────────┘  └──────────┘  └──────────────┘  └───────────────┘  └────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+Plancher de non-régression (contrat §15) : agent 156, python-ia 55, node-api 38, front 48 tests.
 
-### Où se branche le backend polyglotte déjà scaffoldé
-- **Python (`python-ia/`)** → hôte naturel du **raisonnement, planification, vision** (écosystème ML/CV).
-- **Rust (`rust-compute/`)** → traitements lourds temps réel (diff d'images entre frames, encodage, matching visuel).
-- **Node (`node-api/`)** → API interne / passerelle, orchestration, persistance.
-- **Agent local** → nouveau service **hors conteneur**, sur le poste, qui parle à ce backend.
+## 7. Cible V2 (résumé, non implémenté)
 
----
+L'audit retient une architecture à trois plans (§9) :
 
-## 3. Cartographie : composants cibles → assets existants
+- **P1 contrôle** = node-api, seul écrivain d'un schéma `soulbah` additif. Il porte les
+  sessions, le DAG, le scheduler, les baux, l'audit chaîné et les niveaux L0–L3.
+- **P2 modèles** = python-ia, seul routeur de modèles.
+- **P3 exécution** = `agent/`, transformé en runtime à N sous-processus clôturés par bail,
+  avec un Tool Gateway et des preuves.
 
-| # | Composant cible | Statut | Base réutilisable / à créer |
-|---|---|---|---|
-| 1 | Moteur IA (LLM) | 🟢 Bon | `POST /api/chat` (Node) + routeur multi-fournisseurs (`python-ia`) |
-| 2 | Moteur de raisonnement | 🔴 À créer | boucle ReAct/planner (Python) |
-| 3 | Planificateur | 🔴 À créer | décompose objectif → DAG de sous-tâches |
-| 4 | Mémoire | 🟢 Bon | `knowledge_base`, `chat_*`, `system_logs` ; +ajouter mémoire tâches/erreurs/préférences |
-| 5 | Vision | 🔴 À créer | capture (`mss`) + OCR (`tesseract`) + détection UI (template/OCR/modèle) |
-| 6 | Contrôle ordinateur | 🟡 Germe | file `agent_tasks` ✅ ; **worker local à écrire** (`pyautogui`/OS APIs) |
-| 7 | Gestionnaire d'outils | 🟡 Partiel | 3 outils codés en dur → **registre + plugins** |
-| 8 | Générateur de code | 🟢 Bon | `POST /api/generate/application` réutilisable |
-| 9 | Moteur vidéo | 🟡 Germe | `task_type` vidéo + `FormationVideoPlayer` ; exécuteur local à écrire |
-| 10 | Système de plugins | 🔴 À créer | interface `Skill`/`Tool` chargée dynamiquement |
-| 11 | Système de permissions | 🟡 Partiel | RLS + `x-agent-key` ✅ ; **+gate d'approbation d'actions sensibles** |
-| 12 | Moteur d'apprentissage | 🔴 À créer | post-mortem → `knowledge_base` (erreurs/corrections) |
-| 13 | Journalisation | 🟢 Bon | `system_logs` + `ActivityFeed` |
-| 14 | Observabilité | 🟡 Partiel | logs ✅ ; +métriques/traces (health deep existe) |
-| 15 | API interne | 🟢 Bon | `backend/node-api` (remplace les anciennes edge functions Supabase) |
-| 16 | Interface utilisateur | 🟢 Bon | dashboard React |
+Une tâche n'y est terminée que sur preuves. Ordre de livraison : audit §13 (LOT 1 sécurité et
+défauts confirmés → … → LOT 15 dashboard et benchmarks).
 
-Légende : 🟢 réutilisable tel quel · 🟡 à étendre · 🔴 nouveau.
+## 8. Historique
 
----
-
-## 4. Roadmap par phases (incrémentale, livrable à chaque étape)
-
-Chaque phase produit quelque chose d'utilisable et testable. On ne construit **pas** tout d'un bloc.
-
-### Phase 0 — Consolidation (fait / en cours)
-- Audit + correctifs bugs (fait : 5 bugs corrigés).
-- Backend polyglotte scaffoldé (fait).
-- **Ce document** (fait).
-
-### Phase 1 — Agent local « squelette » + gate de permissions ⭐ recommandé pour démarrer
-Un worker local (Python) qui :
-- poll `agent_tasks` (protocole déjà défini) ;
-- **demande confirmation** avant toute action sensible (gate de permissions) ;
-- exécute un petit jeu de *skills* sûrs et déterministes : `open_app`, `screenshot`, `type_text`, `wait`, `move_file` ;
-- remonte `status` + `result` + logs.
-> Débloque toute la suite car la file de tâches existe déjà. Risque maîtrisé (skills limités, confirmation).
-
-### Phase 2 — Vision de base
-- Capture d'écran + OCR (lire le texte à l'écran).
-- Détection d'éléments par *template matching* + OCR (cliquer « le bouton Enregistrer » sans coordonnées fixes).
-- Skill `click_on(description)` / `find_on_screen(text)`.
-
-### Phase 3 — Boucle agentique (raisonnement + planification)
-- Planner LLM : objectif → plan de sous-tâches → tâches `agent_tasks`.
-- Boucle Observer→…→Corriger avec vérification par la vision après chaque action.
-- Reprise de tâche interrompue (état persistant).
-
-### Phase 4 — Gestionnaire d'outils & plugins
-- Registre d'outils typé, découverte dynamique, autorisations par outil.
-- Migration des 3 outils du chat vers ce registre.
-
-### Phase 5 — Moteur vidéo générique
-- Pipeline enregistrement → montage → export, piloté par la vision (générique, non lié à un logiciel précis).
-
-### Phase 6 — Apprentissage & observabilité
-- Post-mortem d'exécution → `knowledge_base` (erreurs/corrections réutilisées).
-- Métriques, traces, tableau de bord de fiabilité.
-
----
-
-## 5. Sécurité (transversal, non négociable)
-
-Un agent qui contrôle la machine est **sensible par nature**. Principes :
-- **Consentement explicite** par catégorie d'action (fichiers, réseau, exécution de scripts, saisie clavier).
-- **Gate de confirmation** avant toute action destructive ou irréversible.
-- **Journal d'audit** de chaque action réalisée par l'agent (horodaté, rejouable).
-- **Périmètre restreint** : dossiers autorisés, applications en liste blanche.
-- **Clé agent** stockée localement, révocable ; jamais dans le code.
-- **Mode « dry-run »** : l'agent décrit ce qu'il ferait sans l'exécuter.
-- Respect des permissions OS (l'agent n'a que les droits de l'utilisateur qui le lance).
-
----
-
-## 6. Améliorations proposées sur l'existant (sans rien retirer)
-
-Détectées pendant l'audit — à traiter en continu :
-1. ~~**Lint edge functions**~~ : edge functions **supprimées** (logique portée dans `backend/node-api`,
-   voir `backend/MIGRATION.md`). Le typage strict s'applique désormais au backend TypeScript (CI : `tsc --noEmit`).
-2. **Découplage LLM** : le modèle est codé en dur (`google/gemini-3-flash-preview`) dans plusieurs fonctions → centraliser dans un client configurable.
-3. **Données factices** du dashboard (CPU/RAM/menaces) → brancher sur de vraies métriques (lien avec l'observabilité, Phase 6).
-4. **Code-splitting** du bundle front (689 KB) → lazy-load des pages.
-5. **`.env` versionné** : la clé exposée est publique (anon), mais retirer `.env` du suivi git reste sain.
-6. **Mémoire agent** : ajouter tables `task_history`, `error_history`, `user_preferences` (extension de `profiles`).
-
-Aucune suppression de fonctionnalité proposée à ce stade.
-
----
-
-## 7. Prochaine action recommandée
-
-**Démarrer la Phase 1** : écrire le worker local `SoulBah Agent` (Python) qui poll `agent_tasks`,
-avec gate de permissions et 5 skills sûrs. C'est le plus petit incrément qui rend l'agent *réel*
-et exploite l'ossature déjà présente.
-```
-
+- Les 5 edge functions Supabase (`chat`, `generate-formation`, `generate-application`,
+  `manage-database`, `agent-tasks`) ont été remplacées par `backend/node-api`. Le détail est
+  dans [`backend/MIGRATION.md`](../backend/MIGRATION.md). Leur suppression côté Supabase
+  figure dans la check-list de reprise.
+- L'ancienne feuille de route en « phases 0–6 » de ce document est remplacée par le plan en
+  15 lots de l'audit LOT 0 : l'agent local, le planner et l'évaluateur LLM, la mémoire et la
+  KB existent désormais, à des niveaux de maturité détaillés dans l'audit §3.

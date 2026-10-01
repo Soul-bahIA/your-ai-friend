@@ -1,11 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { pool } from "../db";
-import { requireUser } from "../auth";
-import { generateFormationVideo, generateFormationPdf, ServiceError } from "../clients/iaClient";
-import { buildDemoTasks } from "../services/formation/demoTasks";
-import { logEvent } from "../services/logs";
-import { isUuid } from "../lib/sanitize";
-import { config } from "../config";
+import { pool } from "../db.js";
+import { requireUser } from "../auth.js";
+import { generateFormationVideo, generateFormationPdf, ServiceError } from "../clients/iaClient.js";
+import { logEvent } from "../services/logs.js";
+import { isUuid } from "../lib/sanitize.js";
+import { config } from "../config.js";
 
 // Production vidéo/PDF et mise en file de démos : coûteux → limite stricte par utilisateur.
 const formationRateLimit = { rateLimit: { max: Math.max(1, Math.floor(config.rateLimitExpensive / 4)), timeWindow: "1 minute" } };
@@ -55,34 +54,19 @@ export async function formationVideoRoutes(app: FastifyInstance): Promise<void> 
     }
   });
 
-  // --- Mettre en file les démonstrations de la formation pour l'agent local ---
+  // --- Démonstrations de la formation pour l'agent local : NON DISPONIBLE (T5) ---
+  // L'ancienne version mettait en file des tâches SANS étapes : faux succès côté agent,
+  // évaluation payante et mémoire polluée. Les démos seront générées par gabarit
+  // (planner + validation) au LOT 11 ; d'ici là la route répond 501 et ne crée rien.
   app.post("/api/formations/:id/demos", { preHandler: requireUser, config: formationRateLimit }, async (request, reply) => {
-    const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-
-    const { rows } = await pool.query(
-      `SELECT title, curriculum FROM formations WHERE id = $1 AND user_id = $2`,
-      [id, userId],
-    );
-    if (rows.length === 0) return reply.status(404).send({ error: "Formation introuvable" });
-    const curriculum = rows[0].curriculum as { title?: string; modules?: Record<string, unknown>[] } | null;
-    if (!curriculum) return reply.status(400).send({ error: "Cette formation n'a pas de curriculum (démos indisponibles)" });
-
-    const tasks = buildDemoTasks(curriculum);
-    if (tasks.length === 0) return reply.status(422).send({ error: "Aucune démonstration à exécuter dans ce curriculum" });
-
-    let queued = 0;
-    for (const t of tasks) {
-      await pool.query(
-        `INSERT INTO agent_tasks (user_id, task_type, status, priority, payload)
-         VALUES ($1, $2, 'pending', $3, $4::jsonb)`,
-        [userId, t.task_type, t.priority, JSON.stringify(t.payload)],
-      );
-      queued++;
-    }
-    await logEvent(userId, "Formations", `${queued} démonstration(s) mise(s) en file pour l'agent (« ${rows[0].title} »)`, "info");
-    return { success: true, queued };
+    return reply.status(501).send({
+      error:
+        "Les démonstrations automatiques ne sont pas encore disponibles : décrivez la démo comme un objectif " +
+        "(Automatisation → objectif) pour qu'un plan réel soit généré et validé.",
+      code: "demos_not_implemented",
+    });
   });
 
   // --- Support PDF de la formation (curriculum complet) ---

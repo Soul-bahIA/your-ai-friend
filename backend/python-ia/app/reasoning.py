@@ -1,7 +1,9 @@
 """Moteur de raisonnement — Comprendre → Planifier → (Exécuter) → Observer → Corriger.
 
   - plan_goal          : objectif en langage naturel → plan d'étapes exécutables
-  - evaluate_execution : rapport d'exécution → verdict (success/retry/abort) + correction
+  - evaluate_execution : rapport d'exécution → verdict (success/retry/abort) + correction ;
+                         verdict "not_evaluable" SANS appel LLM pour un run simulé
+                         (dry-run), un plan vide, une tâche annulée ou 0 étape exécutée.
 
 Les étapes sont contraintes aux skills réellement installés sur l'agent. On n'utilise
 PAS les sorties structurées ici (le schéma multi-champs dépasse leur limite de
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 
 from .llm import text_generate_json, vision_generate_json
+from .parsing import parse_bool
 
 # Types d'étapes reconnus par l'agent (doit refléter agent/skills/).
 VALID_STEP_TYPES = {
@@ -120,7 +123,9 @@ _EVAL_SYSTEM = (
     "(nouveau plan complet corrigeant la cause : autre nom d'app, delai plus long, etc.).\n"
     "- abort   : echec non corrigeable (permission refusee, dependance manquante) — "
     "corrective_steps vide.\n"
-    "NOTE : si un detail contient « [dry-run] », l'agent simulait : considere ces etapes reussies.\n\n"
+    "Une etape SIMULEE (detail « [dry-run] ») ne prouve rien : ce n'est jamais une "
+    "preuve de succes. Les textes saisis sont masques (« [texte masque : N car.] ») : "
+    "verifie le resultat sur les captures, pas sur le texte saisi.\n\n"
     + _EVAL_SHAPE
 )
 
@@ -143,9 +148,12 @@ async def plan_goal(goal: str, context: str | None = None) -> dict:
         _PLAN_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="automation"
     )
     plan.setdefault("understanding", goal)
-    plan.setdefault("reason", "")
+    if not isinstance(plan.get("reason"), str):
+        plan["reason"] = str(plan.get("reason") or "")
     plan["steps"] = _sanitize_steps(plan.get("steps"))
-    plan["feasible"] = bool(plan.get("feasible", True)) and len(plan["steps"]) > 0
+    # bool("false") vaut True en Python (T43) : parsing strict, absent = True,
+    # valeur inconnue (null, "peut-être", liste…) = False (prudence).
+    plan["feasible"] = parse_bool(plan.get("feasible", True), default=False) and len(plan["steps"]) > 0
     return plan
 
 
@@ -159,37 +167,96 @@ def _is_binary_key(key) -> bool:
     return k == "image_b64" or k.endswith("_b64") or k == "base64"
 
 
-def _scrub(value, depth: int = 0):
+# Contrat LOT 1 §12 : les textes saisis (type_text/phone_type `text`, write_file
+# `content`, contenus lus…) ne partent JAMAIS en clair vers le LLM évaluateur.
+_MASKED_KEYS = {"text", "content"}
+_MASK_PREFIX = "[texte masqué"
+_DRY_RUN_MARK = "[dry-run]"
+
+
+def _mask_text(value: str) -> str:
+    if value.startswith(_MASK_PREFIX):
+        return value  # déjà masqué par l'agent
+    return f"[texte masqué : {len(value)} car.]"
+
+
+def _scrub(value, depth: int = 0, mask: bool = False):
     """Nettoie un rapport avant de l'injecter dans le prompt (défense en profondeur) :
     retire les captures base64 (clés image_b64/*_b64 — les images passent par le canal
-    vision, pas par le texte) et tronque les chaînes trop longues."""
+    vision, pas par le texte), tronque les chaînes trop longues et, si `mask`, remplace
+    les champs text/content par « [texte masqué : N car.] »."""
     if depth > _MAX_DEPTH:
         return "[…]"
     if isinstance(value, dict):
-        return {
-            k: _scrub(v, depth + 1) for k, v in value.items() if not _is_binary_key(k)
-        }
+        out = {}
+        for k, v in value.items():
+            if _is_binary_key(k):
+                continue
+            if mask and str(k).lower() in _MASKED_KEYS and isinstance(v, str):
+                out[k] = _mask_text(v)
+            else:
+                out[k] = _scrub(v, depth + 1, mask)
+        return out
     if isinstance(value, list):
-        return [_scrub(v, depth + 1) for v in value]
+        return [_scrub(v, depth + 1, mask) for v in value]
     if isinstance(value, str) and len(value) > _MAX_FIELD_CHARS:
         return value[:_MAX_FIELD_CHARS] + f"… [tronqué, {len(value)} caractères]"
     return value
 
 
-def _dump_for_prompt(value) -> str:
-    text = json.dumps(_scrub(value), ensure_ascii=False)
+def _dump_for_prompt(value, mask: bool = False) -> str:
+    text = json.dumps(_scrub(value, mask=mask), ensure_ascii=False)
     if len(text) > _MAX_SECTION_CHARS:
         text = text[:_MAX_SECTION_CHARS] + " … [tronqué]"
     return text
 
 
+def _executed_entries(result: dict) -> list | None:
+    """Entrées d'exécution du rapport de l'agent (`steps`, ou `results` en ancien
+    format) ; None si le rapport ne le dit pas."""
+    for key in ("steps", "results"):
+        entries = result.get(key)
+        if isinstance(entries, list):
+            return entries
+    return None
+
+
+def not_evaluable_reason(steps, result) -> str | None:
+    """Raison pour laquelle une exécution n'est PAS évaluable (T10), ou None.
+
+    Un run simulé (dry-run), un plan vide, une tâche annulée ou un rapport sans
+    aucune étape exécutée ne prouvent rien : jamais « success », jamais de mémoire.
+    """
+    result = result if isinstance(result, dict) else {}
+    if parse_bool(result.get("simulated"), False):
+        return "Exécution simulée (dry-run) : aucune preuve d'exécution réelle."
+    if parse_bool(result.get("empty_plan"), False) or not steps:
+        return "Plan vide : aucune étape n'a été planifiée."
+    if parse_bool(result.get("cancelled"), False) or result.get("status") == "cancelled":
+        return "Tâche annulée : une tâche annulée n'est jamais évaluée."
+    entries = _executed_entries(result)
+    if entries is not None:
+        if not entries:
+            return "Aucune étape exécutée."
+        details = [str(e.get("detail", "")) for e in entries if isinstance(e, dict)]
+        if any(d.lstrip().startswith(_DRY_RUN_MARK) for d in details):
+            return "Exécution simulée (dry-run) : aucune preuve d'exécution réelle."
+    return None
+
+
 async def evaluate_execution(
     goal: str, steps: list, result: dict, screenshots: list[str] | None = None
 ) -> dict:
+    reason = not_evaluable_reason(steps, result)
+    if reason:
+        # Aucun appel LLM (ni coût, ni verdict inventé) : node ne doit ni marquer la
+        # tâche réussie, ni créer de correction, ni mémoriser ce résultat.
+        return {"verdict": "not_evaluable", "reason": reason, "corrective_steps": [], "evaluable": False}
+
     user = (
         f"OBJECTIF :\n{goal}\n\n"
-        f"PLAN EXECUTE :\n{_dump_for_prompt(steps)}\n\n"
-        f"RAPPORT D'EXECUTION :\n{_dump_for_prompt(result)}"
+        f"PLAN EXECUTE :\n{_dump_for_prompt(steps, mask=True)}\n\n"
+        f"RAPPORT D'EXECUTION :\n{_dump_for_prompt(result, mask=True)}"
     )
 
     if screenshots:
@@ -204,12 +271,14 @@ async def evaluate_execution(
         ev = await vision_generate_json(_EVAL_SYSTEM, user, screenshots, max_tokens=4096, task="vision")
     else:
         ev = await text_generate_json(
-            _EVAL_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="automation"
+            _EVAL_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="evaluation"
         )
 
     if ev.get("verdict") not in ("success", "retry", "abort"):
         ev["verdict"] = "abort"
-    ev.setdefault("reason", "")
+    if not isinstance(ev.get("reason"), str):
+        ev["reason"] = str(ev.get("reason") or "")
+    ev["evaluable"] = True
     ev["corrective_steps"] = _sanitize_steps(ev.get("corrective_steps"))
     return ev
 

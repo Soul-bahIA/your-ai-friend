@@ -1,7 +1,8 @@
 import { Agent, fetch as undiciFetch } from "undici";
-import { config } from "../config";
-import { mapUpstreamStatus } from "../lib/upstream";
-import { logger } from "../lib/logger";
+import { config } from "../config.js";
+import { mapUpstreamStatus } from "../lib/upstream.js";
+import { logger } from "../lib/logger.js";
+import { parseLlmUsage, recordLlmUsage } from "../services/llmUsage.js";
 
 /** Erreur portant un code HTTP à propager (429/402/502…). */
 export class ServiceError extends Error {
@@ -27,13 +28,24 @@ export function iaHeaders(extra: Record<string, string> = {}): Record<string, st
   return h;
 }
 
+/** Marge laissée à python-ia pour répondre avant que node n'abandonne l'appel. */
+const DEADLINE_MARGIN_MS = 2_000;
+
+/**
+ * Budget transmis à python-ia (en-tête x-deadline-ms) : le temps restant du délai node
+ * pour CET appel, moins une marge — python ne travaille (ni ne paie) jamais après l'abandon de node.
+ */
+export function deadlineHeaderMs(timeoutMs: number): number {
+  return Math.min(3_600_000, Math.max(1_000, Math.trunc(timeoutMs - DEADLINE_MARGIN_MS)));
+}
+
 async function postIa<T>(path: string, body: unknown, opts: { long?: boolean } = {}): Promise<T> {
   const timeoutMs = opts.long ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
   let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
     res = await undiciFetch(`${config.iaServiceUrl}${path}`, {
       method: "POST",
-      headers: iaHeaders({ "Content-Type": "application/json" }),
+      headers: iaHeaders({ "Content-Type": "application/json", "x-deadline-ms": String(deadlineHeaderMs(timeoutMs)) }),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
       ...(opts.long ? { dispatcher: longDispatcher } : {}),
@@ -46,15 +58,15 @@ async function postIa<T>(path: string, body: unknown, opts: { long?: boolean } =
     logger.warn({ path, err: err.message }, "python-ia injoignable");
     throw new ServiceError(502, "Service IA injoignable");
   }
+  const usage = parseLlmUsage(res.headers.get("x-llm-usage"));
+  if (usage) recordLlmUsage(path, usage);
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { detail?: unknown; error?: unknown };
     const detail = typeof data.detail === "string" ? data.detail : typeof data.error === "string" ? data.error : "";
     const mapped = mapUpstreamStatus(res.status);
     logger.warn({ path, upstreamStatus: res.status, detail: detail.slice(0, 500) }, "python-ia a répondu en erreur");
-    throw new ServiceError(
-      mapped.status,
-      mapped.exposeDetail && detail ? `${mapped.message} : ${detail.slice(0, 300)}` : mapped.message,
-    );
+    // S23 : jamais de texte d'erreur amont (fournisseur LLM, exception python) vers le client.
+    throw new ServiceError(mapped.status, mapped.message);
   }
   return (await res.json()) as T;
 }
@@ -189,9 +201,11 @@ export interface GoalPlan {
   steps: AgentStep[];
 }
 export interface GoalEvaluation {
-  verdict: "success" | "retry" | "abort";
+  /** not_evaluable : run simulé, plan vide, annulé ou sans étape exécutée (aucun appel LLM). */
+  verdict: "success" | "retry" | "abort" | "not_evaluable";
   reason: string;
   corrective_steps: AgentStep[];
+  evaluable?: boolean;
 }
 
 export async function planGoal(goal: string, context?: string): Promise<GoalPlan> {

@@ -20,8 +20,11 @@ cat <<'HEADER'
 --
 -- ATTENTION
 --   * À exécuter sur un projet Supabase NEUF et VIDE (schéma public vierge).
---     Les premières migrations utilisent CREATE TABLE / CREATE POLICY sans
+--     Les 4 migrations de février 2026 utilisent CREATE TABLE / CREATE POLICY sans
 --     IF NOT EXISTS : rejouer ce script sur une base existante échouera.
+--     JAMAIS sur le projet existant : utiliser `supabase db push` (docs/SUPABASE_REPRISE.md).
+--     Les migrations à partir de 20260703000000 sont rejouables ; c'est vérifié par
+--     scripts/ci/apply_migrations.sh (job CI `db`).
 --   * Le script s'exécute dans UNE transaction : en cas d'erreur, rien n'est appliqué.
 --   * Prérequis Supabase : schéma auth, rôles authenticated/anon, publication
 --     supabase_realtime et extension pgvector (disponible par défaut sur Supabase).

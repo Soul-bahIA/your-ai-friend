@@ -1,49 +1,38 @@
 import type { FastifyInstance } from "fastify";
-import { pool } from "../db";
-import { requireUser } from "../auth";
-import { analyzePerformance, ServiceError } from "../clients/iaClient";
-import { isUuid } from "../lib/sanitize";
-import { logEvent } from "../services/logs";
+import { pool } from "../db.js";
+import { requireUser } from "../auth.js";
+import { analyzePerformance, ServiceError } from "../clients/iaClient.js";
+import { isPlainObject, isUuid } from "../lib/sanitize.js";
+import { logEvent } from "../services/logs.js";
+import {
+  GENERAL_GOAL,
+  effectiveMemoryStatus,
+  formatMemoryContext,
+  memoryWords,
+  rankMemories,
+  type MemoryRow,
+} from "../lib/memoryRanking.js";
 
-// Mémoire d'exécution de l'agent : erreurs, solutions validées, bonnes pratiques.
-// Réinjectée dans la planification (getMemoryContext) et enrichie après chaque
-// objectif terminé (writeMemory, appelé depuis agentGoal.ts).
+// Mémoire d'exécution de l'agent : erreurs, solutions, bonnes pratiques.
+// Réinjectée dans la planification (getMemoryContext) et enrichie après chaque objectif
+// évalué (writeMemory, appelé depuis agentGoal.ts). Tout ce qui vient de l'évaluateur ou
+// de l'auto-amélioration est PROPOSÉ ; seule une action explicite de l'utilisateur
+// (POST/PATCH status='validated') valide une entrée (metadata.validated_by).
 
-/** Contexte mémoire pertinent pour un objectif (mots-clés en commun), injecté dans le plan. */
+const CANDIDATES_LIMIT = 60;
+
+/** Contexte mémoire pertinent pour un objectif, injecté (comme données non fiables) dans le plan. */
 export async function getMemoryContext(userId: string, goal: string): Promise<string | undefined> {
-  const words = Array.from(
-    new Set(
-      goal
-        .toLowerCase()
-        .split(/[^a-zà-ÿ0-9]+/i)
-        .filter((w) => w.length > 3),
-    ),
-  ).slice(0, 6);
-  if (words.length === 0) return undefined;
-
-  const conditions = words.map((_, i) => `goal ILIKE $${i + 2}`).join(" OR ");
-  const params = [userId, ...words.map((w) => `%${w}%`)];
-  // On n'injecte JAMAIS une optimisation seulement PROPOSÉE : seules les entrées
-  // validées (ou les faits d'exécution : erreurs/solutions) nourrissent le plan.
+  const words = memoryWords(goal).slice(0, 8);
+  const patterns = words.map((w) => `%${w}%`);
   const { rows } = await pool.query(
-    `SELECT type, goal, content FROM agent_memory
-     WHERE user_id = $1 AND (${conditions})
-       AND (status = 'validated' OR type IN ('error', 'solution'))
-     ORDER BY created_at DESC LIMIT 5`,
-    params,
+    `SELECT id, type, level, status, goal, content, metadata, created_at FROM agent_memory
+      WHERE user_id = $1 AND status <> 'rejected'
+        AND (goal = $2 OR goal ILIKE ANY($3::text[]))
+      ORDER BY created_at DESC LIMIT ${CANDIDATES_LIMIT}`,
+    [userId, GENERAL_GOAL, patterns],
   );
-  if (rows.length === 0) return undefined;
-
-  const lines = rows.map((r: { type: string; goal: string; content: string }) => {
-    if (r.type === "error") {
-      return `- [ÉCHEC PASSÉ] pour un objectif similaire (« ${r.goal} ») : ${r.content} — évite de répéter cette approche.`;
-    }
-    if (r.type === "solution") {
-      return `- [SOLUTION VALIDÉE] pour un objectif similaire (« ${r.goal} ») : ${r.content}`;
-    }
-    return `- [BONNE PRATIQUE] ${r.content}`;
-  });
-  return `MÉMOIRE — expériences passées pertinentes :\n${lines.join("\n")}`;
+  return formatMemoryContext(rankMemories(goal, rows as MemoryRow[]));
 }
 
 // Niveaux de mémoire (extensible) : mémoire de travail, projet, utilisateur, technique,
@@ -59,7 +48,11 @@ export type MemoryLevel =
   | "optimization";
 export type MemoryStatus = "proposed" | "validated" | "rejected";
 
-/** Enregistre une expérience dans la mémoire (niveau + statut de validation). */
+const TYPES = ["error", "solution", "practice"];
+const LEVELS = ["working", "project", "user", "technical", "documentary", "workflow", "error", "optimization"];
+const STATUSES = ["proposed", "validated", "rejected"];
+
+/** Enregistre une expérience dans la mémoire (PROPOSÉE par défaut — jamais validée d'office). */
 export async function writeMemory(
   userId: string,
   type: "error" | "solution" | "practice",
@@ -67,34 +60,56 @@ export async function writeMemory(
   content: string,
   metadata: unknown = {},
   level: MemoryLevel = "workflow",
-  status: MemoryStatus = "validated",
+  status: MemoryStatus = "proposed",
 ): Promise<void> {
   await pool.query(
     `INSERT INTO agent_memory (user_id, type, goal, content, metadata, level, status)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
-    [userId, type, goal, content, JSON.stringify(metadata), level, status],
+    [userId, type, goal.slice(0, 2000), content.slice(0, 10_000), JSON.stringify(metadata), level, status],
   );
 }
 
+/** Métadonnées fournies par un client : objet borné, sans les champs de validation (posés par le serveur). */
+function clientMetadata(v: unknown): Record<string, unknown> | null {
+  if (v === undefined || v === null) return {};
+  if (!isPlainObject(v)) return null;
+  const { validated_by: _vb, validated_at: _va, ...rest } = v;
+  void _vb;
+  void _va;
+  return JSON.stringify(rest).length > 10_000 ? null : rest;
+}
+
 export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
-  // --- Lister sa mémoire (JWT), filtrable par niveau et statut ---
-  app.get("/api/agent/memory", { preHandler: requireUser }, async (request) => {
+  // --- Lister sa mémoire (JWT), filtrable par niveau et statut (statut EFFECTIF) ---
+  app.get("/api/agent/memory", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const q = request.query as { level?: string; status?: string };
+    if (q.level !== undefined && !LEVELS.includes(q.level)) return reply.status(400).send({ error: "level invalide" });
+    if (q.status !== undefined && !STATUSES.includes(q.status)) return reply.status(400).send({ error: "status invalide" });
     const where: string[] = ["user_id = $1"];
     const params: unknown[] = [userId];
-    let i = 2;
-    if (q.level) { where.push(`level = $${i++}`); params.push(q.level); }
-    if (q.status) { where.push(`status = $${i++}`); params.push(q.status); }
+    if (q.level) {
+      params.push(q.level);
+      where.push(`level = $${params.length}`);
+    }
+    if (q.status === "validated") where.push("status = 'validated' AND metadata ? 'validated_by'");
+    else if (q.status === "proposed") where.push("(status = 'proposed' OR (status = 'validated' AND NOT metadata ? 'validated_by'))");
+    else if (q.status === "rejected") where.push("status = 'rejected'");
     const { rows } = await pool.query(
-      `SELECT id, type, level, status, goal, content, created_at FROM agent_memory
+      `SELECT id, type, level, status, goal, content, metadata, created_at FROM agent_memory
        WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 100`,
       params,
     );
-    return { memory: rows };
+    return {
+      memory: rows.map(({ metadata, ...r }) => ({
+        ...r,
+        stored_status: r.status,
+        status: effectiveMemoryStatus({ status: r.status, metadata }),
+      })),
+    };
   });
 
-  // --- Écrire une entrée de mémoire à un niveau donné (JWT) ---
+  // --- Écrire une entrée de mémoire à un niveau donné (JWT) — proposée par défaut ---
   app.post("/api/agent/memory", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const body = (request.body ?? {}) as {
@@ -109,17 +124,19 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
     if (body.content.length > 10_000 || (body.goal !== undefined && (typeof body.goal !== "string" || body.goal.length > 2000))) {
       return reply.status(400).send({ error: "content (10000 car.) ou goal (2000 car.) trop long" });
     }
-    const TYPES = ["error", "solution", "practice"];
-    const LEVELS = ["working", "project", "user", "technical", "documentary", "workflow", "error", "optimization"];
-    const STATUSES = ["proposed", "validated", "rejected"];
     if (body.type !== undefined && !TYPES.includes(body.type)) return reply.status(400).send({ error: "type invalide" });
     if (body.level !== undefined && !LEVELS.includes(body.level)) return reply.status(400).send({ error: "level invalide" });
     if (body.status !== undefined && !STATUSES.includes(body.status)) return reply.status(400).send({ error: "status invalide" });
+    const metadata = clientMetadata(body.metadata);
+    if (metadata === null) return reply.status(400).send({ error: "metadata invalide (objet ≤ 10 Ko)" });
+    const status = body.status ?? "proposed";
+    // Valider à la création est une action EXPLICITE de l'utilisateur : tracée.
+    if (status === "validated") Object.assign(metadata, { validated_by: userId, validated_at: new Date().toISOString() });
     await writeMemory(
-      userId, body.type ?? "practice", body.goal ?? "(général)", body.content,
-      body.metadata ?? {}, body.level ?? "workflow", body.status ?? "validated",
+      userId, body.type ?? "practice", body.goal ?? GENERAL_GOAL, body.content,
+      metadata, body.level ?? "workflow", status,
     );
-    return { success: true };
+    return { success: true, status };
   });
 
   // --- Valider / rejeter une entrée (l'utilisateur garde le contrôle) ---
@@ -128,15 +145,21 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
     const { status } = (request.body ?? {}) as { status?: MemoryStatus };
-    if (!status || !["proposed", "validated", "rejected"].includes(status)) {
+    if (!status || !STATUSES.includes(status)) {
       return reply.status(400).send({ error: "status valide requis (proposed|validated|rejected)" });
     }
+    const metaExpr =
+      status === "validated"
+        ? `COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('validated_by', $4::text, 'validated_at', now())`
+        : `COALESCE(metadata, '{}'::jsonb) - 'validated_by' - 'validated_at'`;
+    const params: unknown[] = [status, id, userId];
+    if (status === "validated") params.push(userId);
     const { rowCount } = await pool.query(
-      "UPDATE agent_memory SET status = $1, updated_at = now() WHERE id = $2 AND user_id = $3",
-      [status, id, userId],
+      `UPDATE agent_memory SET status = $1, metadata = ${metaExpr}, updated_at = now() WHERE id = $2 AND user_id = $3`,
+      params,
     );
     if (rowCount === 0) return reply.status(404).send({ error: "Entrée introuvable" });
-    return { success: true };
+    return { success: true, status };
   });
 
   // --- Oublier une entrée (réversible : l'utilisateur garde le contrôle) ---
@@ -156,9 +179,12 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/agent/self-improve", { preHandler: requireUser, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = request.user!.id;
 
+    // Runs simulés / à plan vide exclus : ils ne disent rien de l'exécution réelle.
     const { rows } = await pool.query(
       `SELECT payload, result, status, created_at FROM agent_tasks
        WHERE user_id = $1 AND task_type = 'goal' AND status IN ('completed', 'failed')
+         AND (result -> 'simulated') IS DISTINCT FROM 'true'::jsonb
+         AND (result -> 'empty_plan') IS DISTINCT FROM 'true'::jsonb
        ORDER BY created_at DESC LIMIT 20`,
       [userId],
     );
@@ -170,7 +196,7 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
       .map((r, i) => {
         const goal = r.payload?.goal_meta?.goal ?? "(objectif inconnu)";
         const verdict = r.result?.evaluation?.verdict ?? r.status;
-        const steps = (r.result?.steps ?? [])
+        const steps = (Array.isArray(r.result?.steps) ? r.result.steps : [])
           .map((s: { type: string; ok: boolean; duration_s?: number }) =>
             `${s.type}(ok=${s.ok}${s.duration_s !== undefined ? `,${s.duration_s}s` : ""})`,
           )
@@ -187,11 +213,11 @@ export async function agentMemoryRoutes(app: FastifyInstance): Promise<void> {
       throw e;
     }
 
-    // Traçable ET validée : chaque suggestion est PROPOSÉE (status='proposed'), pas
-    // encore appliquée. Elle ne nourrira la planification qu'après validation explicite.
+    // Chaque suggestion est PROPOSÉE (status='proposed') : elle ne nourrira la
+    // planification qu'après validation explicite de l'utilisateur.
     for (const suggestion of report.suggestions) {
       await writeMemory(
-        userId, "practice", "(général)", suggestion,
+        userId, "practice", GENERAL_GOAL, suggestion,
         { source: "self-improve" }, "optimization", "proposed",
       );
     }
