@@ -67,6 +67,8 @@ CATEGORIES: tuple[dict[str, str], ...] = (
     {"id": "git", "label": "Dépôts git (worktrees)",
      "planner_note": "une worktree et une branche soulbah/<session>/<tâche> par tâche ; fusion vers "
                      "soulbah/<session>/integration seulement, tests verts exigés ; suppression et push = L3"},
+    {"id": "voice", "label": "Voix (locale)",
+     "planner_note": "synthèse vocale par les voix installées sur le PC (hors ligne) ; texte court et clair"},
     {"id": "web", "label": "Web (lecture)",
      "planner_note": "lecture seule, http/https publics ; cite l'URL lue (preuve http_status + sha256)"},
 )
@@ -632,6 +634,24 @@ MANIFESTS: tuple[dict[str, Any], ...] = (
         evidence=(_ev("process", "low", "Exécutable lancé (ne prouve pas que la fenêtre est prête).", "exe"),),
         examples=({"type": "vscode_open", "path": f"{_W}/app"},),
         known_errors=("VS Code introuvable sur ce poste", "chemin introuvable", _INPUT_LOCK),
+    ),
+    # --- Voix (V3 LOT 11) ------------------------------------------------------------
+    _tool(
+        "speak_text",
+        category="voice", level="L1", idempotent=True, timeout_s=180,
+        description="Énonce un texte avec une voix installée sur le PC (Windows, hors ligne), sur le haut-parleur "
+                    "ou dans un fichier .wav (narration de vidéo). Voix française par défaut.",
+        params=(
+            _param("text", "string", "Texte à énoncer.", required=True, max_length=5000, is_secret_text=True),
+            _param("voice", "string", "Nom (ou partie du nom) de la voix, ex. « Hortense ».", max_length=100),
+            _param("rate", "integer", "Débit de -10 (lent) à 10 (rapide).", minimum=-10, maximum=10, default=0),
+            _param("output", "string", "Fichier .wav de sortie ; sans output : haut-parleur.", is_path=True,
+                   extensions=(".wav",)),
+        ),
+        evidence=(_ev("file_path", "high", "Fichier audio produit.", "path"),
+                  _ev("self_report", "low", "Voix utilisée et nombre de caractères énoncés.")),
+        examples=({"type": "speak_text", "text": "Bonjour, je travaille hors ligne.", "output": f"{_W}/narration.wav"},),
+        known_errors=("voix introuvable", "voix Windows uniquement", "fichier audio absent ou vide après synthèse"),
     ),
     # --- Téléphone ---------------------------------------------------------------
     _tool(

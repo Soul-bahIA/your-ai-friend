@@ -27,11 +27,11 @@ const PHONE = ["phone_list_devices", "phone_screenshot", "phone_tap", "phone_swi
 export const ROLES: readonly RoleDef[] = [
   {
     name: "desktop_operator",
-    version: "1.1.0",
+    version: "1.2.0",
     description: "Pilote le bureau Windows (souris, clavier, fenêtres, applications, VS Code) ; observe (capture ou inspection d'interface) avant d'agir.",
     executor: "runtime",
     max_security_level: "L2",
-    tools: [...DESKTOP, "ui_snapshot", "vscode_open", ...FILES_READ, "record_screen", "start_recording_bg", "stop_recording_bg"],
+    tools: [...DESKTOP, "ui_snapshot", "vscode_open", "speak_text", ...FILES_READ, "record_screen", "start_recording_bg", "stop_recording_bg"],
   },
   {
     name: "coder",
@@ -51,11 +51,11 @@ export const ROLES: readonly RoleDef[] = [
   },
   {
     name: "video_editor",
-    version: "1.0.0",
-    description: "Enregistre l'écran et monte les vidéos de démonstration.",
+    version: "1.1.0",
+    description: "Enregistre l'écran, produit la narration avec une voix locale et monte les vidéos de démonstration.",
     executor: "runtime",
     max_security_level: "L2",
-    tools: [...VIDEO, ...FILES_READ, ...FILES_WRITE, "wait"],
+    tools: [...VIDEO, "speak_text", ...FILES_READ, ...FILES_WRITE, "wait"],
   },
   {
     name: "phone_operator",
@@ -89,5 +89,5 @@ export const P1_ROLE_NAMES: readonly string[] = ROLES.filter((r) => r.executor =
 
 /** Forme publiée (shared/roles/roles.json). */
 export function rolesDocument() {
-  return { version: "1.1.0", generated_from: "backend/node-api/src/v2/planner/roles.ts", roles: ROLES };
+  return { version: "1.2.0", generated_from: "backend/node-api/src/v2/planner/roles.ts", roles: ROLES };
 }

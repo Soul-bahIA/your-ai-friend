@@ -126,14 +126,21 @@ def test_recommendations_follow_the_machine():
 
 
 # --- capacités ---------------------------------------------------------------------
-PROFILE = {"tools": {"git": "git", "ffmpeg": "ffmpeg", "vscode": "code"}, "tts_voices": ["Microsoft Julie - French (France)"],
+PROFILE = {"tools": {"git": "git", "ffmpeg": "ffmpeg", "vscode": "code"},
+           "tts_voices": ["Microsoft Hortense Desktop - French", "Microsoft Julie - French (France)"],
+           "sapi5_voices": ["Microsoft Hortense Desktop - French"],
            "python_packages": {"pyautogui": "1", "mss": "1", "cv2": "1", "moviepy": "1"}}
 
 
 def test_capabilities_by_mode_and_switches():
     hy = capabilities.local_capabilities(settings(), PROFILE)
     assert hy["web.read"]["status"] == "available" and hy["git.remote"]["status"] == "available"
-    assert hy["voice.stt"]["status"] == "unavailable" and "Julie" in hy["voice.tts"]["reason"]
+    assert hy["voice.stt"]["status"] == "unavailable"
+    if IS_WIN:
+        assert hy["voice.tts"]["status"] == "available" and "Hortense" in hy["voice.tts"]["via"]
+        assert "Julie" not in hy["voice.tts"]["via"], "voix OneCore inutilisable par speak_text"
+    else:
+        assert hy["voice.tts"]["status"] == "unavailable"
     assert hy["llm.engine"]["status"] == "unavailable"
     off = capabilities.local_capabilities(settings(SOULBAH_MODE="OFFLINE"), PROFILE)
     assert off["web.read"]["status"] == "disabled" and off["git.remote"]["status"] == "disabled"

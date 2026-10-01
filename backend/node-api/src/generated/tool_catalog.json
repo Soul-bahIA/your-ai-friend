@@ -57,6 +57,11 @@
       "planner_note": "une worktree et une branche soulbah/<session>/<tâche> par tâche ; fusion vers soulbah/<session>/integration seulement, tests verts exigés ; suppression et push = L3"
     },
     {
+      "id": "voice",
+      "label": "Voix (locale)",
+      "planner_note": "synthèse vocale par les voix installées sur le PC (hors ligne) ; texte court et clair"
+    },
+    {
       "id": "web",
       "label": "Web (lecture)",
       "planner_note": "lecture seule, http/https publics ; cite l'URL lue (preuve http_status + sha256)"
@@ -2143,6 +2148,90 @@
       "requires_desktop_input": true,
       "security_level": "L2",
       "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "voice",
+      "description": "Énonce un texte avec une voix installée sur le PC (Windows, hors ligne), sur le haut-parleur ou dans un fichier .wav (narration de vidéo). Voix française par défaut.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Fichier audio produit.",
+          "field": "path",
+          "kind": "file_path"
+        },
+        {
+          "confidence": "low",
+          "description": "Voix utilisée et nombre de caractères énoncés.",
+          "kind": "self_report"
+        }
+      ],
+      "examples": [
+        {
+          "output": "<dossier autorisé>/narration.wav",
+          "text": "Bonjour, je travaille hors ligne.",
+          "type": "speak_text"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "voix introuvable",
+        "voix Windows uniquement",
+        "fichier audio absent ou vide après synthèse"
+      ],
+      "name": "speak_text",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Texte à énoncer.",
+          "is_path": false,
+          "is_secret_text": true,
+          "max_length": 5000,
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Nom (ou partie du nom) de la voix, ex. « Hortense ».",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 100,
+          "name": "voice",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 0,
+          "deprecated": false,
+          "description": "Débit de -10 (lent) à 10 (rapide).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 10,
+          "min": -10,
+          "name": "rate",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "deprecated": false,
+          "description": "Fichier .wav de sortie ; sans output : haut-parleur.",
+          "extensions": [
+            ".wav"
+          ],
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "output",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": 180,
       "version": "1.0.0"
     },
     {

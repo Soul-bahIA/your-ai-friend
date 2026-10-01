@@ -34,7 +34,6 @@ def _off(reason: str) -> dict[str, str]:
 def local_capabilities(settings: Mapping[str, Any], profile: Mapping[str, Any]) -> dict[str, dict[str, str]]:
     tools = profile.get("tools") or {}
     pkgs = profile.get("python_packages") or {}
-    voices = profile.get("tts_voices") or []
     mode = settings.get("mode")
     caps: dict[str, dict[str, str]] = {}
 
@@ -77,10 +76,11 @@ def local_capabilities(settings: Mapping[str, Any], profile: Mapping[str, Any]) 
     caps["video.edit"] = _ok("moviepy + FFmpeg") if (pkgs.get("moviepy") and tools.get("ffmpeg")) else \
         _no("moviepy ou FFmpeg absent")
 
-    tts_reason = "synthèse vocale locale non branchée (LOT 11 V3)"
-    if voices:
-        tts_reason += f" ; voix installées : {', '.join(voices[:6])}"
-    caps["voice.tts"] = _no(tts_reason)
+    sapi5 = profile.get("sapi5_voices") or []
+    if IS_WIN and sapi5:
+        caps["voice.tts"] = _ok(f"voix Windows (speak_text) : {', '.join(sapi5[:6])}")
+    else:
+        caps["voice.tts"] = _no("aucune voix de synthèse locale installée")
     caps["voice.stt"] = _no("aucun moteur de reconnaissance vocale local (LOT 11 V3)")
 
     if not settings.get("computer_control", True):

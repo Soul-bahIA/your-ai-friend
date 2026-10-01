@@ -286,10 +286,14 @@ def _packages() -> dict[str, str | None]:
     return out
 
 
-def tts_voices() -> list[str]:
-    """Voix de synthèse vocale installées (SAPI 5 et OneCore sous Windows)."""
+def tts_voices(sapi5_only: bool = False) -> list[str]:
+    """Voix de synthèse vocale installées (SAPI 5 et OneCore sous Windows). `sapi5_only` : seulement
+    celles que `System.Speech` (outil speak_text) peut utiliser."""
     names: list[str] = []
-    for base in (r"SOFTWARE\Microsoft\Speech\Voices\Tokens", r"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens"):
+    bases = [r"SOFTWARE\Microsoft\Speech\Voices\Tokens"]
+    if not sapi5_only:
+        bases.append(r"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens")
+    for base in bases:
         for sub in _reg_subkeys(base):
             name = _reg(f"{base}\\{sub}", "")
             if name and str(name) not in names:
@@ -374,6 +378,7 @@ def profile(with_bench: bool = False, extra_paths: list[str] | None = None) -> d
         "tools": _tools(),
         "python_packages": _packages(),
         "tts_voices": tts_voices(),
+        "sapi5_voices": tts_voices(sapi5_only=True),
     }
     if with_bench:
         p["bench"] = bench()
@@ -397,6 +402,7 @@ def summary(p: dict[str, Any]) -> dict[str, Any]:
         "tools": {k: bool(v) for k, v in (p.get("tools") or {}).items() if k not in ENGINES},
         "python_packages": {k: v for k, v in (p.get("python_packages") or {}).items() if v},
         "tts_voices": p.get("tts_voices"),
+        "sapi5_voices": p.get("sapi5_voices"),
         "bench": p.get("bench"),
         "recommendations": p.get("recommendations"),
     }

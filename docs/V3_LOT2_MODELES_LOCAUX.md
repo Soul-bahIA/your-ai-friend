@@ -58,7 +58,43 @@ puis `phi-3.5-mini-instruct` (2,2 Go) pour comparaison au banc d'essai.
 
 python-ia : `tests/test_v3_network_guard.py::test_local_provider_sends_schema_for_constrained_json`.
 
-## 4. Ce qui attend ton accord
+## 4. Installation réalisée (accord « pack minimal » du 2026-10-01)
 
-Le téléchargement réel du moteur et des modèles, puis le banc d'essai sur ce PC. Rien n'est installé sans
-`--yes --accept-license`.
+| Élément | Résultat |
+|---|---|
+| Moteur `llama.cpp-win-cpu-x64` b11325 (18 Mo, MIT) | installé, sha256 vérifiée, `llama-server --version` OK (backend CPU AVX2 choisi automatiquement) |
+| `qwen2.5-1.5b-instruct-q4_k_m` (1,04 Go, Apache-2.0) | installé, sha256 vérifiée, statut `verified` après banc d'essai |
+| `nomic-embed-text-v1.5-q8_0` (0,14 Go, Apache-2.0) | installé, sha256 vérifiée (servira au LOT 7) |
+| Écartés d'office | Qwen2.5 3B (licence de recherche non commerciale), Llama 3.2 3B (licence communautaire) |
+
+Banc d'essai sur ce PC (i5-6300U, 8 Go, RAM très sollicitée par les applications ouvertes), serveur partagé à
+1 contexte, 2 threads :
+
+| Tâche | Résultat | Durée | Jetons/s |
+|---|---|---|---|
+| plan_json (sortie contrainte par schéma) | réussi | 6,6 s | 10,4 |
+| reasoning (calcul 12 × 7 − 5) | **échoué** | 1,6 s | 20,8 |
+| code_review (ligne fautive) | réussi | 2,2 s | 25,3 |
+| doc_qa (lecture d'un passage) | réussi | 3,5 s | 12,6 |
+| french_summary (consigne en français) | réussi | 3,5 s | 11,9 |
+| **Total** | **4/5** | 17,4 s | 11,5 en moyenne ; mémoire de pointe 1,34 Go |
+
+L'estimation du LOT 1 (≈ 13,5 jetons/s pour un fichier de 1 Go) était du bon ordre. L'échec au calcul confirme
+qu'un modèle de 1,5 milliard de paramètres ne doit pas faire seul les calculs : les outils et les critères à règles
+restent indispensables.
+
+**Raisonnement hors ligne prouvé** : `backend/python-ia/tests/test_v3_local_live.py` (lancé avec
+`LIVE_LOCAL_LLM_URL=http://127.0.0.1:8091/v1`) — mode OFFLINE, NetworkGuard actif (résolution de
+`api.anthropic.com` refusée), clé cloud présente mais ignorée ; le routeur ne retient que `local` et le modèle
+produit en 19 s un plan JSON valide : écrire « bonjour hors ligne » dans `C:\w
+ote.txt` puis le relire.
+
+Pour l'utiliser :
+
+```text
+cd agent
+.venv\Scripts\python.exe soulbah_models.py serve qwen2.5-1.5b-instruct-q4_k_m --parallel 1
+set LOCAL_LLM_URL=http://127.0.0.1:8091/v1
+set LOCAL_LLM_MODEL=qwen2.5-1.5b-instruct-q4_k_m
+set SOULBAH_MODE=OFFLINE
+```

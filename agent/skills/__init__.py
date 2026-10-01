@@ -30,6 +30,7 @@ from skills.git_workspace import (
 from skills.browser import BrowserGetSkill
 from skills.ui_snapshot import UiSnapshotSkill
 from skills.vscode import VsCodeOpenSkill
+from skills.speak import SpeakTextSkill
 
 _ALL_SKILLS: list[Skill] = [
     OpenAppSkill(),
@@ -58,6 +59,8 @@ _ALL_SKILLS: list[Skill] = [
     BrowserGetSkill(),
     UiSnapshotSkill(),
     VsCodeOpenSkill(),
+    # V3 LOT 11
+    SpeakTextSkill(),
 ]
 
 # Table de dispatch : type d'étape -> instance de skill

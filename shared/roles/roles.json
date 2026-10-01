@@ -1,10 +1,10 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "generated_from": "backend/node-api/src/v2/planner/roles.ts",
   "roles": [
     {
       "name": "desktop_operator",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "description": "Pilote le bureau Windows (souris, clavier, fenêtres, applications, VS Code) ; observe (capture ou inspection d'interface) avant d'agir.",
       "executor": "runtime",
       "max_security_level": "L2",
@@ -23,6 +23,7 @@
         "wait",
         "ui_snapshot",
         "vscode_open",
+        "speak_text",
         "read_file",
         "list_dir",
         "record_screen",
@@ -67,8 +68,8 @@
     },
     {
       "name": "video_editor",
-      "version": "1.0.0",
-      "description": "Enregistre l'écran et monte les vidéos de démonstration.",
+      "version": "1.1.0",
+      "description": "Enregistre l'écran, produit la narration avec une voix locale et monte les vidéos de démonstration.",
       "executor": "runtime",
       "max_security_level": "L2",
       "tools": [
@@ -77,6 +78,7 @@
         "stop_recording_bg",
         "edit_video",
         "resolve_montage",
+        "speak_text",
         "read_file",
         "list_dir",
         "write_file",
