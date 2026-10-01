@@ -64,6 +64,11 @@ CATEGORIES: tuple[dict[str, str], ...] = (
     {"id": "phone", "label": "Téléphone Android",
      "planner_note": "adb + appareil connecté ; commence TOUJOURS par phone_list_devices ; iOS non supporté"},
     {"id": "video", "label": "Démonstrations vidéo", "planner_note": "chemins dans les dossiers autorisés"},
+    {"id": "git", "label": "Dépôts git (worktrees)",
+     "planner_note": "une worktree et une branche soulbah/<session>/<tâche> par tâche ; fusion vers "
+                     "soulbah/<session>/integration seulement, tests verts exigés ; suppression et push = L3"},
+    {"id": "web", "label": "Web (lecture)",
+     "planner_note": "lecture seule, http/https publics ; cite l'URL lue (preuve http_status + sha256)"},
 )
 
 PARAM_TYPES = ("string", "integer", "number", "boolean", "array")
@@ -72,11 +77,17 @@ CONFIDENCES = ("high", "medium", "low", "none")
 EVIDENCE_KINDS = (
     "command_output", "device_list", "dir_listing", "exit_code", "file_content", "file_path",
     "process", "screenshot", "self_report", "video_probe", "video_stats", "window_title",
+    # LOT 12 (mêmes noms que shared/schemas/evidence.schema.json)
+    "http_status", "sha256", "test_report", "ui_state",
 )
 
 _IDENT_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _LEVELS = ("L0", "L1", "L2", "L3")
+
+# Branches que l'agent peut créer, valider, fusionner, supprimer ou pousser (LOT 12).
+GIT_BRANCH_PATTERN = r"^soulbah/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}$"
+GIT_INTEGRATION_PATTERN = r"^soulbah/[a-z0-9][a-z0-9_-]{0,63}/integration$"
 
 
 # --- Constructeurs (forme normalisée, identique à celle du catalogue JSON) ----------
@@ -472,6 +483,156 @@ MANIFESTS: tuple[dict[str, Any], ...] = (
                       "interpréteur Python introuvable (raccourci Microsoft Store)",
                       "délai dépassé : arbre de processus arrêté"),
     ),
+    # --- Git (LOT 12 : une worktree par tâche, fusion testée) ----------------------
+    _tool(
+        "git_worktree",
+        category="git", level="L1", idempotent=True, timeout_s=120,
+        description="Crée (ou retire) la worktree git d'une tâche sur sa branche soulbah/<session>/<tâche>, à partir "
+                    "de base (HEAD par défaut). Idempotent : une worktree déjà prête sur la branche est réutilisée. "
+                    "Chaque tâche de code travaille dans SA worktree.",
+        params=(
+            _param("repo", "string", "Dépôt git source (dossier autorisé).", required=True, is_path=True),
+            _param("path", "string", "Dossier de la worktree (vide ou inexistant).", required=True, is_path=True),
+            _param("branch", "string", "Branche de la tâche : soulbah/<session>/<tâche> (minuscules).", required=True,
+                   max_length=140, pattern=GIT_BRANCH_PATTERN),
+            _param("base", "string", "Référence de départ (branche, tag ou commit).", max_length=200),
+            _param("action", "string", "create (défaut) ou remove.", enum=("create", "remove"), default="create"),
+        ),
+        evidence=(_ev("file_path", "medium", "Dossier de la worktree prête.", "path"),),
+        examples=({"type": "git_worktree", "repo": f"{_W}/app", "path": f"{_W}/wt/t1", "branch": "soulbah/s1/t1"},),
+        known_errors=("champ 'branch' : branche soulbah/<session>/<tâche> attendue",
+                      "le dossier de worktree existe déjà et n'est pas vide", "git introuvable dans le PATH"),
+    ),
+    _tool(
+        "git_commit",
+        category="git", level="L1", idempotent=True, timeout_s=120,
+        description="git add -A puis commit dans la worktree d'une tâche (branche soulbah/… uniquement). Rien à "
+                    "valider = succès. Identité « SoulBah Agent » si le dépôt n'en a pas.",
+        params=(
+            _param("cwd", "string", "Worktree de la tâche.", required=True, is_path=True),
+            _param("message", "string", "Message de commit.", required=True, max_length=500),
+            _param("add_all", "boolean", "Ajoute tous les fichiers modifiés avant le commit.", default=True),
+        ),
+        evidence=(_ev("exit_code", "high", "Code de sortie de git commit.", "returncode"),
+                  _ev("command_output", "medium", "Branche et commit produit.", "stdout")),
+        examples=({"type": "git_commit", "cwd": f"{_W}/wt/t1", "message": "Ajoute la fonction de tri"},),
+        known_errors=("pas une worktree git", "commit refusé hors d'une branche Soulbah"),
+    ),
+    _tool(
+        "git_merge",
+        category="git", level="L2", requires_confirmation=True, idempotent=False, timeout_s=900,
+        description="Fusionne la branche d'une tâche dans soulbah/<session>/integration, DANS la worktree "
+                    "d'intégration, puis lance les tests (test_program/test_args, mêmes règles que run_command). "
+                    "Conflit = fusion abandonnée ; tests rouges = fusion annulée. Jamais vers une branche de "
+                    "l'utilisateur.",
+        params=(
+            _param("repo", "string", "Dépôt git source.", required=True, is_path=True),
+            _param("path", "string", "Worktree d'intégration (créée si absente).", required=True, is_path=True),
+            _param("source", "string", "Branche de la tâche à fusionner.", required=True, max_length=140,
+                   pattern=GIT_BRANCH_PATTERN),
+            _param("target", "string", "Branche d'intégration soulbah/<session>/integration.", required=True,
+                   max_length=140, pattern=GIT_INTEGRATION_PATTERN),
+            _param("base", "string", "Point de départ de la branche d'intégration si elle n'existe pas.",
+                   max_length=200),
+            _param("test_program", "string", "Programme de tests (allowlist de run_command).",
+                   enum=("npm", "python", "python3", "node", "pytest")),
+            _param("test_args", "array", "Arguments des tests, ex. [\"test\"].", items="string", max_items=64),
+            _param("test_timeout", "number", "Délai des tests en secondes.", minimum=1, maximum=600, clamped=True,
+                   default=600),
+        ),
+        evidence=(_ev("exit_code", "high", "Code de sortie des tests après fusion.", "returncode"),
+                  _ev("command_output", "medium", "Branche d'intégration, commit de fusion et branche fusionnée.",
+                      "summary"),
+                  _ev("test_report", "high", "Rapport des tests lancés sur le résultat de la fusion.", "test_report")),
+        examples=({"type": "git_merge", "repo": f"{_W}/app", "path": f"{_W}/wt/integration", "source": "soulbah/s1/t1",
+                   "target": "soulbah/s1/integration", "test_program": "npm", "test_args": ["test"]},),
+        known_errors=("conflit de fusion : fusion abandonnée", "tests rouges après fusion : intégration remise à son état",
+                      "commande de tests refusée", "fusion déjà en cours"),
+    ),
+    _tool(
+        "git_branch_delete",
+        category="git", level="L3", requires_confirmation=True, idempotent=False, timeout_s=60,
+        description="Supprime une branche soulbah/… (force=true : même non fusionnée). Action L3 : approbation par "
+                    "action, jamais couverte par un grant de session.",
+        params=(
+            _param("repo", "string", "Dépôt git.", required=True, is_path=True),
+            _param("branch", "string", "Branche soulbah/<session>/<tâche> à supprimer.", required=True, max_length=140,
+                   pattern=GIT_BRANCH_PATTERN),
+            _param("force", "boolean", "Supprime même une branche non fusionnée (-D).", default=False),
+        ),
+        evidence=(_ev("exit_code", "high", "Code de sortie de git branch.", "returncode"),),
+        examples=({"type": "git_branch_delete", "repo": f"{_W}/app", "branch": "soulbah/s1/t1"},),
+        known_errors=("seules les branches soulbah/… peuvent être supprimées",
+                      "action L3 : « confirmer » attendu ou approbation L3"),
+    ),
+    _tool(
+        "git_push",
+        category="git", level="L3", requires_confirmation=True, idempotent=False, timeout_s=300,
+        description="Pousse une branche soulbah/… vers un dépôt distant, JAMAIS en force. Action L3 : approbation par "
+                    "action.",
+        params=(
+            _param("repo", "string", "Dépôt git.", required=True, is_path=True),
+            _param("branch", "string", "Branche soulbah/<session>/… à pousser.", required=True, max_length=140,
+                   pattern=GIT_BRANCH_PATTERN),
+            _param("remote", "string", "Dépôt distant.", max_length=64, default="origin"),
+        ),
+        evidence=(_ev("exit_code", "high", "Code de sortie de git push.", "returncode"),
+                  _ev("command_output", "medium", "Sortie de git push.", "stdout")),
+        examples=({"type": "git_push", "repo": f"{_W}/app", "branch": "soulbah/s1/integration"},),
+        known_errors=("seules les branches soulbah/… peuvent être poussées", "push refusé (non fast-forward)"),
+    ),
+    # --- Web, interface, éditeur (LOT 12) ------------------------------------------
+    _tool(
+        "browser_get",
+        category="web", level="L1", idempotent=True, timeout_s=90,
+        description="Lit une page web publique (http/https) : statut, URL finale, titre, sha256 du contenu, extrait "
+                    "de texte. engine=browser : Chromium sans interface (Playwright) pour les pages JavaScript. "
+                    "Adresses privées ou locales refusées.",
+        params=(
+            _param("url", "string", "URL http(s) à lire.", required=True, max_length=2000),
+            _param("engine", "string", "auto (HTTP simple), http ou browser.", enum=("auto", "http", "browser"),
+                   default="auto"),
+            _param("timeout", "number", "Délai en secondes.", minimum=1, maximum=60, default=20),
+        ),
+        evidence=(_ev("http_status", "high", "Statut HTTP et URL lue.", "http"),
+                  _ev("sha256", "high", "Empreinte du contenu reçu.", "sha256"),
+                  _ev("command_output", "low", "Extrait du texte visible (2000 caractères au plus).", "excerpt")),
+        examples=({"type": "browser_get", "url": "https://example.com/"},),
+        known_errors=("schéma refusé (http ou https seulement)", "adresse non publique refusée",
+                      "page trop volumineuse", "Playwright n'est pas installé"),
+    ),
+    _tool(
+        "ui_snapshot",
+        category="screen", level="L0", idempotent=True, timeout_s=30,
+        description="Inspecte une fenêtre sans agir : titre, classe, processus, DPI, état et contrôles (libellés). "
+                    "Le texte d'un champ de saisie n'est jamais renvoyé : seulement sa longueur et son sha256. "
+                    "Rapide (< 2 s) : à utiliser pour observer avant et vérifier après une action.",
+        params=(
+            _param("window_title", "string", "Titre (ou partie) de la fenêtre ; sans titre : fenêtre au premier plan.",
+                   max_length=200),
+            _param("max_controls", "integer", "Nombre maximal de contrôles décrits.", minimum=0, maximum=1000,
+                   default=200),
+            _param("hash_text", "boolean", "Calcule l'empreinte du champ de texte principal.", default=True),
+        ),
+        evidence=(_ev("window_title", "high", "Titre de la fenêtre inspectée.", "title"),
+                  _ev("ui_state", "high", "État de la fenêtre (nom, état, classe, contrôles, DPI).", "ui_state"),
+                  _ev("sha256", "high", "Empreinte UTF-8 du texte du champ principal.", "text_sha256")),
+        examples=({"type": "ui_snapshot", "window_title": "Bloc-notes"},),
+        known_errors=("aucune fenêtre visible dont le titre contient …", "ui_snapshot n'est disponible que sous Windows"),
+    ),
+    _tool(
+        "vscode_open",
+        category="app_launch", level="L2", requires_desktop_input=True, idempotent=False,
+        description="Ouvre un dossier ou un fichier (à une ligne) dans VS Code installé sur le PC.",
+        params=(
+            _param("path", "string", "Dossier ou fichier à ouvrir.", required=True, is_path=True),
+            _param("line", "integer", "Ligne où placer le curseur (fichier).", minimum=1, maximum=1000000),
+            _param("new_window", "boolean", "Ouvre une nouvelle fenêtre.", default=False),
+        ),
+        evidence=(_ev("process", "low", "Exécutable lancé (ne prouve pas que la fenêtre est prête).", "exe"),),
+        examples=({"type": "vscode_open", "path": f"{_W}/app"},),
+        known_errors=("VS Code introuvable sur ce poste", "chemin introuvable", _INPUT_LOCK),
+    ),
     # --- Téléphone ---------------------------------------------------------------
     _tool(
         "phone_list_devices",
@@ -670,6 +831,41 @@ def confirm_step_types() -> frozenset[str]:
 def secret_param_names() -> frozenset[str]:
     """Paramètres de texte libre à masquer (journaux, évènements, LLM)."""
     return frozenset(p["name"] for m in MANIFESTS for p in m["params"] if p["is_secret_text"])
+
+
+def declared_param_error(step: dict[str, Any]) -> str | None:
+    """Contraintes DÉCLARÉES par le manifeste de l'étape (LOT 12) : type, enum, bornes non
+    « clamped », longueur, nombre d'éléments et motif. Les skills récents l'appellent depuis
+    validate() : le manifeste est alors la seule source de ces règles."""
+    m = get_manifest(str(step.get("type", "")).strip())
+    if m is None:
+        return None
+    for p in m["params"]:
+        name = p["name"]
+        value = step.get(name)
+        if value is None:
+            continue
+        if not _type_ok(value, p["type"]):
+            return f"champ '{name}' : type {p['type']} attendu"
+        if "enum" in p and value not in p["enum"]:
+            return f"champ '{name}' : valeur attendue parmi {', '.join(p['enum'])}"
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and not p.get("clamped"):
+            if "min" in p and value < p["min"]:
+                return f"champ '{name}' : minimum {p['min']}"
+            if "max" in p and value > p["max"]:
+                return f"champ '{name}' : maximum {p['max']}"
+        if isinstance(value, str):
+            if "max_length" in p and len(value) > p["max_length"]:
+                return f"champ '{name}' : {p['max_length']} caractères au plus"
+            if "pattern" in p and not re.match(p["pattern"], value):
+                return f"champ '{name}' : format invalide — {p['description']}"
+        if isinstance(value, list):
+            if "max_items" in p and len(value) > p["max_items"]:
+                return f"champ '{name}' : {p['max_items']} éléments au plus"
+            item_type = (p.get("items") or {}).get("type")
+            if item_type and not all(_type_ok(v, item_type) for v in value):
+                return f"champ '{name}' : éléments de type {item_type} attendus"
+    return None
 
 
 # --- Contrôle structurel ----------------------------------------------------------

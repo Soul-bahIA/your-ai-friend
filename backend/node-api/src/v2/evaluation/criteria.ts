@@ -9,7 +9,7 @@
 //   command_succeeds    {command?}                 run_command (de cette commande) avec exit_code 0
 //   tests_pass          {command?}                 test_report réussi, ou commande de tests avec exit_code 0
 //   http_status         {status, url?}             preuve http_status
-//   git_branch_contains {branch, text}             sortie d'une commande git mentionnant la branche et le texte
+//   git_branch_contains {branch, text}             sortie de git_commit / git_merge ou d'une commande git, mentionnant la branche et le texte
 //   video_valid         {path?}                    video_probe sans erreur (durée > 0 si connue)
 //   ui_element_state    {name?, state?, window_title?}  preuve ui_state ou window_title
 //   artifact_hash       {sha256}                   une preuve porte exactement cette empreinte
@@ -222,9 +222,11 @@ export function evaluateCriterion(c: Criterion, actions: readonly ActionEvidence
       const branch = String(c.params.branch);
       const needle = String(c.params.text);
       for (const a of done) {
-        if (a.tool !== "run_command" || !/\bgit\b/i.test(commandOf(a))) continue;
+        // LOT 12 : outils git dédiés (git_commit, git_merge : sortie structurée, confiance haute) ou run_command git.
+        const gitTool = a.tool === "git_commit" || a.tool === "git_merge";
+        if (!gitTool && (a.tool !== "run_command" || !/\bgit\b/i.test(commandOf(a)))) continue;
         const out = a.evidence.filter((e) => e.kind === "command_output").map((e) => text(e.value)).join("\n");
-        if ((out.includes(branch) || commandOf(a).includes(branch)) && out.includes(needle) && exitZero(a).length) hits.push({ confidence: "medium", step: a.step_index });
+        if ((out.includes(branch) || commandOf(a).includes(branch)) && out.includes(needle) && exitZero(a).length) hits.push({ confidence: gitTool ? "high" : "medium", step: a.step_index });
       }
       reason = hits.length ? `branche ${branch} : « ${needle.slice(0, 40)} » trouvé` : `branche ${branch} : « ${needle.slice(0, 40)} » non attesté`;
       break;

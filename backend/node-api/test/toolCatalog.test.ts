@@ -104,18 +104,19 @@ describe("catalogue généré (LOT 2)", () => {
     expect(findInvalidStep([{ type: "move_mouse", x: 1 }])).toContain("« y »");
   });
 
-  it("chemins contrôlés = paramètres is_path du catalogue (mêmes clés qu'au LOT 1)", () => {
-    expect([...PATH_KEYS].sort()).toEqual(["audio", "cwd", "dest", "output", "path", "src"]);
+  it("chemins contrôlés = paramètres is_path du catalogue (clés du LOT 1 + repo, LOT 12)", () => {
+    expect([...PATH_KEYS].sort()).toEqual(["audio", "cwd", "dest", "output", "path", "repo", "src"]);
     expect(PATH_LIST_KEYS).toEqual(["clips"]);
     expect(findPathOutsideAllowed([{ type: "resolve_montage", clips: [`${WS}\\a.png`], audio: "D:/n.mp3", output: `${WS}\\o.mp4` }], [WS]))
       .toContain("D:/n.mp3");
   });
 
-  it("étapes à confirmer = outils requires_confirmation (+ alias), identiques au LOT 1", () => {
+  it("étapes à confirmer = outils requires_confirmation (+ alias) : LOT 1 + git (LOT 12)", () => {
     expect([...SENSITIVE_STEP_TYPES].sort()).toEqual(
       [
         "run_command", "run_script", "shell", "write_file", "move_file", "move", "type_text", "type", "keyboard",
         "hotkey", "press", "key", "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
+        "git_merge", "git_branch_delete", "git_push",
       ].sort(),
     );
     expect(requiresConfirmation([{ type: "start_recording_bg" }, { type: "click" }])).toBe(false);

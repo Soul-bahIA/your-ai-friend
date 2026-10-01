@@ -24,6 +24,12 @@ from skills.record_bg import StartRecordingBgSkill, StopRecordingBgSkill
 from skills.edit_video import EditVideoSkill
 from skills.resolve_montage import ResolveMontageSkill
 from skills.phone import PhoneSkill, PhoneListDevicesSkill
+from skills.git_workspace import (
+    GitBranchDeleteSkill, GitCommitSkill, GitMergeSkill, GitPushSkill, GitWorktreeSkill,
+)
+from skills.browser import BrowserGetSkill
+from skills.ui_snapshot import UiSnapshotSkill
+from skills.vscode import VsCodeOpenSkill
 
 _ALL_SKILLS: list[Skill] = [
     OpenAppSkill(),
@@ -43,6 +49,15 @@ _ALL_SKILLS: list[Skill] = [
     ResolveMontageSkill(),
     PhoneListDevicesSkill(),
     PhoneSkill(),
+    # LOT 12
+    GitWorktreeSkill(),
+    GitCommitSkill(),
+    GitMergeSkill(),
+    GitBranchDeleteSkill(),
+    GitPushSkill(),
+    BrowserGetSkill(),
+    UiSnapshotSkill(),
+    VsCodeOpenSkill(),
 ]
 
 # Table de dispatch : type d'étape -> instance de skill

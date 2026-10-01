@@ -133,7 +133,11 @@
             "self_report",
             "video_probe",
             "video_stats",
-            "window_title"
+            "window_title",
+            "http_status",
+            "sha256",
+            "test_report",
+            "ui_state"
           ]
         },
         "confidence": { "enum": ["high", "medium", "low", "none"] },

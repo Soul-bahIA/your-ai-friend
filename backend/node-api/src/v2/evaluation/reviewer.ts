@@ -87,14 +87,27 @@ export async function runReviews(opts: { limit?: number; judge?: RubricJudge; no
           toRole: "planner",
         });
         if (!rr.ok) throw new Error(`REVIEW_RESULT refusé : ${rr.error}`);
-        const res = await postMessage(client, {
-          task: (await getTask(client, running.id)) ?? running,
-          type: "TASK_RESULT",
-          payload: { result: { ok: true, review_of: reviewOf, approved, reasons } },
-          actor: SYSTEM_REVIEWER,
-          attempt: running.attempt,
-        });
-        if (!res.ok) throw new Error(`TASK_RESULT refusé : ${res.error}`);
+        // LOT 12 : une relecture PLANIFIÉE (review_of_key, ou blocking) est une porte : refusée,
+        // elle échoue (sans nouvel essai) et bloque ses dépendants — ex. la fusion git.
+        const blocking = typeof spec.review_of_key === "string" || spec.blocking === true;
+        const current = (await getTask(client, running.id)) ?? running;
+        const res =
+          blocking && !approved
+            ? await postMessage(client, {
+                task: current,
+                type: "ERROR",
+                payload: { kind: "policy_refused", message: `relecture refusée : ${reasons.join(" ; ")}`.slice(0, 2000) },
+                actor: SYSTEM_REVIEWER,
+                attempt: running.attempt,
+              })
+            : await postMessage(client, {
+                task: current,
+                type: "TASK_RESULT",
+                payload: { result: { ok: true, review_of: reviewOf, approved, reasons } },
+                actor: SYSTEM_REVIEWER,
+                attempt: running.attempt,
+              });
+        if (!res.ok) throw new Error(`résultat de relecture refusé : ${res.error}`);
         return "done" as const;
       });
       if (outcome === "empty") break;

@@ -10,8 +10,12 @@
 //  5. chemins : absolus, dans les dossiers autorisés, hors deny-list (.env, .git, clés…) ;
 //  6. critères : valides ; un nœud à effet (L2+, ou outil à confirmation) en exige au moins un ;
 //  7. observer avant d'agir : un nœud qui prend la main sur le bureau commence par une capture
-//     ou dépend (directement ou non) d'un nœud qui en fait une ;
-//  8. ressource exclusive `desktop.input:<utilisateur>` ajoutée aux nœuds qui pilotent le bureau.
+//     (ou une inspection d'interface, LOT 12) ou dépend (directement ou non) d'un nœud qui en fait une ;
+//  8. ressource exclusive `desktop.input:<utilisateur>` ajoutée aux nœuds qui pilotent le bureau ;
+//  9. LOT 12 : une relecture planifiée (`qa_reviewer`) désigne la tâche relue par `spec.review_of_key`
+//     et en dépend (dépendance dure) ; `spec.review_of` (identifiant brut) est interdit dans un plan ;
+// 10. LOT 12 : un nœud qui fusionne (`git_merge`) dépend (dépendance dure, même indirecte) d'une
+//     relecture QA — une relecture refusée échoue et bloque la fusion.
 import { TOOL_BY_TYPE, findPathOutsideAllowed, validateSteps } from "../../lib/agentSteps.js";
 import type { SecurityLevel } from "../../lib/toolCatalog.js";
 import { isPlainObject } from "../../lib/sanitize.js";
@@ -39,6 +43,9 @@ function stepsOf(node: PlanNode): Record<string, unknown>[] {
   return Array.isArray(steps) ? (steps.filter(isPlainObject) as Record<string, unknown>[]) : [];
 }
 
+/** Outils qui observent l'écran sans agir (règle 7). */
+export const OBSERVE_TOOLS: ReadonlySet<string> = new Set(["screenshot", "ui_snapshot"]);
+
 function canonical(type: unknown): string | null {
   const m = TOOL_BY_TYPE.get(String(type ?? ""));
   return m ? m.name : null;
@@ -51,6 +58,9 @@ export function validateDag(raw: unknown, ctx: DagContext): DagCheck {
   const errors: string[] = [];
   const touchesDesktop = new Map<string, boolean>();
   const observes = new Map<string, boolean>();
+  const merges = new Map<string, boolean>();
+  const reviewers = new Set<string>();
+  const keys = new Set(plan.nodes.map((n) => n.key));
 
   for (const node of plan.nodes) {
     const where = `nœud « ${node.key} »`;
@@ -90,7 +100,21 @@ export function validateDag(raw: unknown, ctx: DagContext): DagCheck {
       if (outside) errors.push(`${where} : ${outside}`);
     }
     touchesDesktop.set(node.key, desktop);
-    observes.set(node.key, canonical(steps[0]?.type) === "screenshot" || steps.some((s) => canonical(s.type) === "screenshot"));
+    observes.set(node.key, steps.some((s) => OBSERVE_TOOLS.has(canonical(s.type) ?? "")));
+    merges.set(node.key, steps.some((s) => canonical(s.type) === "git_merge"));
+    if (role.name === "qa_reviewer") {
+      reviewers.add(node.key);
+      const spec = isPlainObject(node.spec) ? node.spec : {};
+      if (spec.review_of !== undefined) errors.push(`${where} : spec.review_of interdit dans un plan (utilisez spec.review_of_key)`);
+      const target = spec.review_of_key;
+      if (target !== undefined) {
+        if (typeof target !== "string" || !keys.has(target)) errors.push(`${where} : spec.review_of_key « ${String(target).slice(0, 60)} » ne désigne aucun nœud du plan`);
+        else if (target === node.key) errors.push(`${where} : un nœud ne peut pas se relire lui-même`);
+        else if (!plan.edges.some((e) => e.kind === "hard" && e.from === target && e.to === node.key)) {
+          errors.push(`${where} : la relecture doit dépendre (dépendance dure) du nœud relu « ${target} »`);
+        }
+      }
+    }
 
     const crit = parseCriteria(node.acceptance_criteria);
     if (!crit.ok) errors.push(`${where} : ${crit.error}`);
@@ -110,11 +134,24 @@ export function validateDag(raw: unknown, ctx: DagContext): DagCheck {
     }
     return false;
   };
+  const hasAncestor = (key: string, pred: (k: string) => boolean, seen = new Set<string>()): boolean => {
+    for (const p of parents.get(key) ?? []) {
+      if (seen.has(p)) continue;
+      seen.add(p);
+      if (pred(p) || hasAncestor(p, pred, seen)) return true;
+    }
+    return false;
+  };
+  for (const node of plan.nodes) {
+    if (merges.get(node.key) && !hasAncestor(node.key, (k) => reviewers.has(k))) {
+      errors.push(`nœud « ${node.key} » : fusion git sans relecture QA préalable (dépendez d'un nœud qa_reviewer qui relit les branches fusionnées)`);
+    }
+  }
   for (const node of plan.nodes) {
     if (!touchesDesktop.get(node.key)) continue;
     const first = canonical(stepsOf(node)[0]?.type);
-    if (first !== "screenshot" && !ancestorObserves(node.key)) {
-      errors.push(`nœud « ${node.key} » : pilote le bureau sans observation préalable (commencez par une capture ou dépendez d'un nœud d'observation)`);
+    if (!OBSERVE_TOOLS.has(first ?? "") && !ancestorObserves(node.key)) {
+      errors.push(`nœud « ${node.key} » : pilote le bureau sans observation préalable (commencez par une capture ou une inspection d'interface, ou dépendez d'un nœud d'observation)`);
     }
   }
   if (errors.length) return { ok: false, errors };

@@ -200,16 +200,19 @@ def test_escalation_matches_confirm_level(tmp_path):
     assert RunCommandSkill().confirm_level(step) == 3
     for m in manifests.MANIFESTS:
         if "escalation" not in m:
-            assert _skill(m).confirm_level(_example(m, tmp_path)) == 2, m["name"]
+            # Outil L3 par nature (LOT 12 : suppression de branche, push) : toujours niveau 3.
+            expected = 3 if m["security_level"] == "L3" else 2
+            assert _skill(m).confirm_level(_example(m, tmp_path)) == expected, m["name"]
 
 
 # --- Gate de permissions : mêmes clés que le catalogue, compatibles LOT 1 ------------
 def test_gate_path_keys_and_confirm_types_come_from_manifests():
-    assert set(_PATH_KEYS) == {"src", "dest", "path", "cwd", "output", "audio"}
+    assert set(_PATH_KEYS) == {"src", "dest", "path", "cwd", "output", "audio", "repo"}
     assert _PATH_LIST_KEYS == ("clips",)
     assert SERVER_CONFIRM_STEP_TYPES == frozenset({
         "run_command", "run_script", "shell", "write_file", "move_file", "move", "type_text", "type", "keyboard",
         "hotkey", "press", "key", "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
+        "git_merge", "git_branch_delete", "git_push",
     })
     assert manifests.secret_param_names() <= set(MASKED_KEYS)
 

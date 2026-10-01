@@ -62,3 +62,37 @@ def exe_stem(info: dict[str, Any] | None) -> str:
     """Nom d'exécutable sans extension, en minuscules ('' si inconnu)."""
     exe = (info or {}).get("exe") or ""
     return os.path.splitext(os.path.basename(exe))[0].lower()
+
+
+_DPI_DONE: dict[str, str] = {}
+
+
+def ensure_dpi_awareness() -> str:
+    """Rend le processus sensible au DPI (LOT 12, audit §9.7), une seule fois.
+
+    Sans cela, sur un écran mis à l'échelle (125 %, 150 %…), Windows « virtualise » les
+    coordonnées : les clics (pyautogui) et les positions de fenêtres seraient en pixels
+    logiques alors que les captures (mss) sont en pixels physiques. Ordre d'essai : par
+    moniteur v2 (Windows 10 1703+), par moniteur (8.1+), système (Vista+). Doit être appelé
+    tôt, avant la création de toute fenêtre ; sans effet hors Windows. Retourne le mode obtenu."""
+    if "mode" in _DPI_DONE:
+        return _DPI_DONE["mode"]
+    mode = "unsupported"
+    if sys.platform == "win32":
+        try:
+            if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+                mode = "per_monitor_v2"
+        except (AttributeError, OSError):
+            pass
+        if mode == "unsupported":
+            try:
+                hr = ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                # E_ACCESSDENIED (0x80070005) : déjà défini pour ce processus — on garde le réglage existant.
+                mode = "per_monitor" if hr == 0 else "already_set"
+            except (AttributeError, OSError):
+                try:
+                    mode = "system" if ctypes.windll.user32.SetProcessDPIAware() else "already_set"
+                except (AttributeError, OSError):
+                    mode = "unsupported"
+    _DPI_DONE["mode"] = mode
+    return mode

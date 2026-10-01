@@ -26,7 +26,11 @@ BY_NAME = {m["name"]: m for m in MANIFESTS}
 
 def _subst(value, root: str):
     if isinstance(value, str):
-        return value.replace(WORKSPACE_PLACEHOLDER, root).replace("/", os.sep)
+        # Seuls les chemins (préfixés par le dossier autorisé) changent de séparateur : une
+        # branche git (soulbah/s1/t1) ou une URL garde ses « / ».
+        if value.startswith(WORKSPACE_PLACEHOLDER):
+            return value.replace(WORKSPACE_PLACEHOLDER, root).replace("/", os.sep)
+        return value
     if isinstance(value, list):
         return [_subst(v, root) for v in value]
     return value

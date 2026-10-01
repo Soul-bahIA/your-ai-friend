@@ -44,6 +44,7 @@ describe("gabarits", () => {
       desktop_goal: { goal: "Écris bonjour dans le bloc-notes", steps: [{ type: "open_app", app: "notepad" }, { type: "type_text", text: "bonjour" }, { type: "screenshot" }] },
       formation: { topic: "Python", modules: ["Variables", { title: "Fonctions" }, "Classes"] },
       demo_video: { title: "Ouvrir le bloc-notes", output_dir: "C:\\w\\demos", steps: [{ type: "open_app", app: "notepad" }, { type: "type_text", text: "démo" }] },
+      code_parallel: { repo: "C:\\w\\app", worktrees_dir: "C:\\w\\wt", session_slug: "s1", tasks: [{ key: "t1", steps: [] }, { key: "t2", steps: [] }] },
     };
     for (const name of TEMPLATE_NAMES) {
       const t = buildFromTemplate(name, params[name]);

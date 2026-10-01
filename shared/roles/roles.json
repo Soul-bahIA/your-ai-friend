@@ -1,11 +1,11 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "generated_from": "backend/node-api/src/v2/planner/roles.ts",
   "roles": [
     {
       "name": "desktop_operator",
-      "version": "1.0.0",
-      "description": "Pilote le bureau Windows (souris, clavier, fenêtres, applications) ; observe avant d'agir.",
+      "version": "1.1.0",
+      "description": "Pilote le bureau Windows (souris, clavier, fenêtres, applications, VS Code) ; observe (capture ou inspection d'interface) avant d'agir.",
       "executor": "runtime",
       "max_security_level": "L2",
       "tools": [
@@ -21,6 +21,8 @@
         "window",
         "open_app",
         "wait",
+        "ui_snapshot",
+        "vscode_open",
         "read_file",
         "list_dir",
         "record_screen",
@@ -30,29 +32,35 @@
     },
     {
       "name": "coder",
-      "version": "1.0.0",
-      "description": "Lit, écrit et exécute du code dans le workspace (commandes en allowlist, sans shell).",
+      "version": "1.1.0",
+      "description": "Lit, écrit et exécute du code dans SA worktree git (branche soulbah/<session>/<tâche>) ; fusionne vers l'intégration avec tests verts après relecture QA.",
       "executor": "runtime",
       "max_security_level": "L2",
       "tools": [
         "run_command",
+        "git_worktree",
+        "git_commit",
+        "git_merge",
         "read_file",
         "list_dir",
         "write_file",
         "make_dir",
         "move_file",
+        "browser_get",
         "wait"
       ]
     },
     {
       "name": "researcher",
-      "version": "1.0.0",
-      "description": "Lit le workspace pour collecter des faits ; aucun effet.",
+      "version": "1.1.0",
+      "description": "Collecte des faits : workspace, pages web publiques (lecture seule), état des fenêtres ; aucun effet.",
       "executor": "runtime",
       "max_security_level": "L1",
       "tools": [
         "read_file",
         "list_dir",
+        "browser_get",
+        "ui_snapshot",
         "wait",
         "screenshot"
       ]

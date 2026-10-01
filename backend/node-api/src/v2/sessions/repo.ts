@@ -164,6 +164,13 @@ export async function setPlan(q: Queryable, session: SessionRow, plan: Plan, act
   for (const e of plan.edges) {
     await q.query("INSERT INTO soulbah.task_dependencies (task_id, depends_on_task_id, kind) VALUES ($1, $2, $3)", [byKey.get(e.to)!.id, byKey.get(e.from)!.id, e.kind]);
   }
+  // LOT 12 : une relecture planifiée désigne la tâche relue par sa clé de nœud ; l'identifiant
+  // n'existe qu'ici (le relecteur P1 lit spec.review_of).
+  for (const n of plan.nodes) {
+    const target = n.spec && typeof n.spec === "object" ? (n.spec as Record<string, unknown>).review_of_key : undefined;
+    if (typeof target !== "string" || !byKey.has(target)) continue;
+    await q.query("UPDATE soulbah.tasks SET spec = spec || jsonb_build_object('review_of', $2::text) WHERE id = $1", [byKey.get(n.key)!.id, byKey.get(target)!.id]);
+  }
   const updated =
     session.status === "AWAITING_APPROVAL"
       ? await updatePlanInPlace(q, session, plan, version)

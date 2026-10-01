@@ -161,6 +161,10 @@ class Skill:
     # Délai max d'exécution (secondes). None = délai global (SOULBAH_STEP_TIMEOUT).
     timeout_s: float | None = None
 
+    # True => confirmation TOUJOURS exigée, même en mode auto (LOT 12 : fusion git qui lance
+    # les tests du dépôt, comme la catégorie « shell »).
+    always_confirm: bool = False
+
     def describe(self, step: dict) -> str:
         """Phrase lisible décrivant l'action (affichée à l'utilisateur, journalisée et
         envoyée au backend) : ne doit JAMAIS contenir de texte saisi en clair."""

@@ -18,3 +18,9 @@ os.environ["SOULBAH_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="soulbah-tests-runti
 AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
+
+
+def pytest_configure(config):
+    # LOT 12 : tests qui ouvrent de vraies fenêtres sur le bureau (audit §15) — lancés
+    # seulement avec SOULBAH_DESKTOP_TESTS=1.
+    config.addinivalue_line("markers", "desktop: ouvre des applications sur le bureau (SOULBAH_DESKTOP_TESTS=1)")

@@ -384,6 +384,10 @@ def build_executor(cfg: Config) -> tuple[Executor | None, int]:
     Retourne (executor, 0) ou (None, 2) si le démarrage est refusé : catalogue d'outils
     incohérent (LOT 2) ou workspace dans le dépôt (S1 / contrat §14). Partagé avec
     `runtime.supervisor` et `runtime.worker` pour ne pas dupliquer ces règles."""
+    # LOT 12 : coordonnées en pixels physiques partout (clics, fenêtres, captures, UI).
+    from skills.desktop import ensure_dpi_awareness
+
+    log.debug("Sensibilité DPI : %s", ensure_dpi_awareness())
     problems = skills.manifest_errors()
     if problems:
         for problem in problems:

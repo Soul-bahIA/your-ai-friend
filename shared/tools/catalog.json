@@ -50,6 +50,16 @@
       "id": "video",
       "label": "Démonstrations vidéo",
       "planner_note": "chemins dans les dossiers autorisés"
+    },
+    {
+      "id": "git",
+      "label": "Dépôts git (worktrees)",
+      "planner_note": "une worktree et une branche soulbah/<session>/<tâche> par tâche ; fusion vers soulbah/<session>/integration seulement, tests verts exigés ; suppression et push = L3"
+    },
+    {
+      "id": "web",
+      "label": "Web (lecture)",
+      "planner_note": "lecture seule, http/https publics ; cite l'URL lue (preuve http_status + sha256)"
     }
   ],
   "common_fields": [
@@ -65,6 +75,90 @@
     "L3": "irréversible (suppression, scripts d'installation, secrets, promotion) — approbation par action, payload complet, jamais en lot"
   },
   "tools": [
+    {
+      "aliases": [],
+      "category": "web",
+      "description": "Lit une page web publique (http/https) : statut, URL finale, titre, sha256 du contenu, extrait de texte. engine=browser : Chromium sans interface (Playwright) pour les pages JavaScript. Adresses privées ou locales refusées.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Statut HTTP et URL lue.",
+          "field": "http",
+          "kind": "http_status"
+        },
+        {
+          "confidence": "high",
+          "description": "Empreinte du contenu reçu.",
+          "field": "sha256",
+          "kind": "sha256"
+        },
+        {
+          "confidence": "low",
+          "description": "Extrait du texte visible (2000 caractères au plus).",
+          "field": "excerpt",
+          "kind": "command_output"
+        }
+      ],
+      "examples": [
+        {
+          "type": "browser_get",
+          "url": "https://example.com/"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "schéma refusé (http ou https seulement)",
+        "adresse non publique refusée",
+        "page trop volumineuse",
+        "Playwright n'est pas installé"
+      ],
+      "name": "browser_get",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "URL http(s) à lire.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 2000,
+          "name": "url",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": "auto",
+          "deprecated": false,
+          "description": "auto (HTTP simple), http ou browser.",
+          "enum": [
+            "auto",
+            "http",
+            "browser"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "engine",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 20,
+          "deprecated": false,
+          "description": "Délai en secondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 60,
+          "min": 1,
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": 90,
+      "version": "1.0.0"
+    },
     {
       "aliases": [
         "mouse"
@@ -356,6 +450,445 @@
       "requires_desktop_input": false,
       "security_level": "L1",
       "timeout_s": 1800,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "git",
+      "description": "Supprime une branche soulbah/… (force=true : même non fusionnée). Action L3 : approbation par action, jamais couverte par un grant de session.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Code de sortie de git branch.",
+          "field": "returncode",
+          "kind": "exit_code"
+        }
+      ],
+      "examples": [
+        {
+          "branch": "soulbah/s1/t1",
+          "repo": "<dossier autorisé>/app",
+          "type": "git_branch_delete"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "seules les branches soulbah/… peuvent être supprimées",
+        "action L3 : « confirmer » attendu ou approbation L3"
+      ],
+      "name": "git_branch_delete",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Dépôt git.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "repo",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Branche soulbah/<session>/<tâche> à supprimer.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 140,
+          "name": "branch",
+          "pattern": "^soulbah/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": false,
+          "deprecated": false,
+          "description": "Supprime même une branche non fusionnée (-D).",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "force",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L3",
+      "timeout_s": 60,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "git",
+      "description": "git add -A puis commit dans la worktree d'une tâche (branche soulbah/… uniquement). Rien à valider = succès. Identité « SoulBah Agent » si le dépôt n'en a pas.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Code de sortie de git commit.",
+          "field": "returncode",
+          "kind": "exit_code"
+        },
+        {
+          "confidence": "medium",
+          "description": "Branche et commit produit.",
+          "field": "stdout",
+          "kind": "command_output"
+        }
+      ],
+      "examples": [
+        {
+          "cwd": "<dossier autorisé>/wt/t1",
+          "message": "Ajoute la fonction de tri",
+          "type": "git_commit"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "pas une worktree git",
+        "commit refusé hors d'une branche Soulbah"
+      ],
+      "name": "git_commit",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Worktree de la tâche.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "cwd",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Message de commit.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 500,
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": true,
+          "deprecated": false,
+          "description": "Ajoute tous les fichiers modifiés avant le commit.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "add_all",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": 120,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "git",
+      "description": "Fusionne la branche d'une tâche dans soulbah/<session>/integration, DANS la worktree d'intégration, puis lance les tests (test_program/test_args, mêmes règles que run_command). Conflit = fusion abandonnée ; tests rouges = fusion annulée. Jamais vers une branche de l'utilisateur.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Code de sortie des tests après fusion.",
+          "field": "returncode",
+          "kind": "exit_code"
+        },
+        {
+          "confidence": "medium",
+          "description": "Branche d'intégration, commit de fusion et branche fusionnée.",
+          "field": "summary",
+          "kind": "command_output"
+        },
+        {
+          "confidence": "high",
+          "description": "Rapport des tests lancés sur le résultat de la fusion.",
+          "field": "test_report",
+          "kind": "test_report"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/wt/integration",
+          "repo": "<dossier autorisé>/app",
+          "source": "soulbah/s1/t1",
+          "target": "soulbah/s1/integration",
+          "test_args": [
+            "test"
+          ],
+          "test_program": "npm",
+          "type": "git_merge"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "conflit de fusion : fusion abandonnée",
+        "tests rouges après fusion : intégration remise à son état",
+        "commande de tests refusée",
+        "fusion déjà en cours"
+      ],
+      "name": "git_merge",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Dépôt git source.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "repo",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Worktree d'intégration (créée si absente).",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Branche de la tâche à fusionner.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 140,
+          "name": "source",
+          "pattern": "^soulbah/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Branche d'intégration soulbah/<session>/integration.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 140,
+          "name": "target",
+          "pattern": "^soulbah/[a-z0-9][a-z0-9_-]{0,63}/integration$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Point de départ de la branche d'intégration si elle n'existe pas.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 200,
+          "name": "base",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Programme de tests (allowlist de run_command).",
+          "enum": [
+            "npm",
+            "python",
+            "python3",
+            "node",
+            "pytest"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "test_program",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Arguments des tests, ex. [\"test\"].",
+          "is_path": false,
+          "is_secret_text": false,
+          "items": {
+            "type": "string"
+          },
+          "max_items": 64,
+          "name": "test_args",
+          "required": false,
+          "type": "array"
+        },
+        {
+          "clamped": true,
+          "default": 600,
+          "deprecated": false,
+          "description": "Délai des tests en secondes.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 600,
+          "min": 1,
+          "name": "test_timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L2",
+      "timeout_s": 900,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "git",
+      "description": "Pousse une branche soulbah/… vers un dépôt distant, JAMAIS en force. Action L3 : approbation par action.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Code de sortie de git push.",
+          "field": "returncode",
+          "kind": "exit_code"
+        },
+        {
+          "confidence": "medium",
+          "description": "Sortie de git push.",
+          "field": "stdout",
+          "kind": "command_output"
+        }
+      ],
+      "examples": [
+        {
+          "branch": "soulbah/s1/integration",
+          "repo": "<dossier autorisé>/app",
+          "type": "git_push"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "seules les branches soulbah/… peuvent être poussées",
+        "push refusé (non fast-forward)"
+      ],
+      "name": "git_push",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Dépôt git.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "repo",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Branche soulbah/<session>/… à pousser.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 140,
+          "name": "branch",
+          "pattern": "^soulbah/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "default": "origin",
+          "deprecated": false,
+          "description": "Dépôt distant.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 64,
+          "name": "remote",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": true,
+      "requires_desktop_input": false,
+      "security_level": "L3",
+      "timeout_s": 300,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "git",
+      "description": "Crée (ou retire) la worktree git d'une tâche sur sa branche soulbah/<session>/<tâche>, à partir de base (HEAD par défaut). Idempotent : une worktree déjà prête sur la branche est réutilisée. Chaque tâche de code travaille dans SA worktree.",
+      "evidence": [
+        {
+          "confidence": "medium",
+          "description": "Dossier de la worktree prête.",
+          "field": "path",
+          "kind": "file_path"
+        }
+      ],
+      "examples": [
+        {
+          "branch": "soulbah/s1/t1",
+          "path": "<dossier autorisé>/wt/t1",
+          "repo": "<dossier autorisé>/app",
+          "type": "git_worktree"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "champ 'branch' : branche soulbah/<session>/<tâche> attendue",
+        "le dossier de worktree existe déjà et n'est pas vide",
+        "git introuvable dans le PATH"
+      ],
+      "name": "git_worktree",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Dépôt git source (dossier autorisé).",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "repo",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Dossier de la worktree (vide ou inexistant).",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Branche de la tâche : soulbah/<session>/<tâche> (minuscules).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 140,
+          "name": "branch",
+          "pattern": "^soulbah/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}$",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Référence de départ (branche, tag ou commit).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 200,
+          "name": "base",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": "create",
+          "deprecated": false,
+          "description": "create (défaut) ou remove.",
+          "enum": [
+            "create",
+            "remove"
+          ],
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "action",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L1",
+      "timeout_s": 120,
       "version": "1.0.0"
     },
     {
@@ -1815,6 +2348,147 @@
       ],
       "required_any": [],
       "requires_confirmation": true,
+      "requires_desktop_input": true,
+      "security_level": "L2",
+      "timeout_s": null,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "screen",
+      "description": "Inspecte une fenêtre sans agir : titre, classe, processus, DPI, état et contrôles (libellés). Le texte d'un champ de saisie n'est jamais renvoyé : seulement sa longueur et son sha256. Rapide (< 2 s) : à utiliser pour observer avant et vérifier après une action.",
+      "evidence": [
+        {
+          "confidence": "high",
+          "description": "Titre de la fenêtre inspectée.",
+          "field": "title",
+          "kind": "window_title"
+        },
+        {
+          "confidence": "high",
+          "description": "État de la fenêtre (nom, état, classe, contrôles, DPI).",
+          "field": "ui_state",
+          "kind": "ui_state"
+        },
+        {
+          "confidence": "high",
+          "description": "Empreinte UTF-8 du texte du champ principal.",
+          "field": "text_sha256",
+          "kind": "sha256"
+        }
+      ],
+      "examples": [
+        {
+          "type": "ui_snapshot",
+          "window_title": "Bloc-notes"
+        }
+      ],
+      "idempotent": true,
+      "known_errors": [
+        "aucune fenêtre visible dont le titre contient …",
+        "ui_snapshot n'est disponible que sous Windows"
+      ],
+      "name": "ui_snapshot",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Titre (ou partie) de la fenêtre ; sans titre : fenêtre au premier plan.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max_length": 200,
+          "name": "window_title",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "default": 200,
+          "deprecated": false,
+          "description": "Nombre maximal de contrôles décrits.",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 1000,
+          "min": 0,
+          "name": "max_controls",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": true,
+          "deprecated": false,
+          "description": "Calcule l'empreinte du champ de texte principal.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "hash_text",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
+      "requires_desktop_input": false,
+      "security_level": "L0",
+      "timeout_s": 30,
+      "version": "1.0.0"
+    },
+    {
+      "aliases": [],
+      "category": "app_launch",
+      "description": "Ouvre un dossier ou un fichier (à une ligne) dans VS Code installé sur le PC.",
+      "evidence": [
+        {
+          "confidence": "low",
+          "description": "Exécutable lancé (ne prouve pas que la fenêtre est prête).",
+          "field": "exe",
+          "kind": "process"
+        }
+      ],
+      "examples": [
+        {
+          "path": "<dossier autorisé>/app",
+          "type": "vscode_open"
+        }
+      ],
+      "idempotent": false,
+      "known_errors": [
+        "VS Code introuvable sur ce poste",
+        "chemin introuvable",
+        "contrôle d'entrée non pré-autorisé : confirmation exigée sur le PC"
+      ],
+      "name": "vscode_open",
+      "params": [
+        {
+          "deprecated": false,
+          "description": "Dossier ou fichier à ouvrir.",
+          "is_path": true,
+          "is_secret_text": false,
+          "name": "path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "deprecated": false,
+          "description": "Ligne où placer le curseur (fichier).",
+          "is_path": false,
+          "is_secret_text": false,
+          "max": 1000000,
+          "min": 1,
+          "name": "line",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "default": false,
+          "deprecated": false,
+          "description": "Ouvre une nouvelle fenêtre.",
+          "is_path": false,
+          "is_secret_text": false,
+          "name": "new_window",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "required_any": [],
+      "requires_confirmation": false,
       "requires_desktop_input": true,
       "security_level": "L2",
       "timeout_s": null,

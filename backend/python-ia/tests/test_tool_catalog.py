@@ -82,7 +82,7 @@ def test_valid_step_types_are_the_catalog_names():
 
 def test_path_constraint_lists_every_catalog_path_param():
     paths = tool_catalog.path_params()
-    assert paths == ["audio", "clips", "cwd", "dest", "output", "path", "src"]
+    assert paths == ["audio", "clips", "cwd", "dest", "output", "path", "repo", "src"]  # repo : LOT 12 (git)
     assert f"chaque chemin ({', '.join(paths)})" in reasoning.SKILLS_CATALOG
 
 

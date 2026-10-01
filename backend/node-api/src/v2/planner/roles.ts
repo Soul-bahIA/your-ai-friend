@@ -21,32 +21,33 @@ const DESKTOP = ["screenshot", "click", "double_click", "right_click", "move_mou
 const FILES_READ = ["read_file", "list_dir"];
 const FILES_WRITE = ["write_file", "make_dir", "move_file"];
 const VIDEO = ["record_screen", "start_recording_bg", "stop_recording_bg", "edit_video", "resolve_montage"];
+const GIT = ["git_worktree", "git_commit", "git_merge"]; // LOT 12 : suppression et push (L3) hors rôles
 const PHONE = ["phone_list_devices", "phone_screenshot", "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app"];
 
 export const ROLES: readonly RoleDef[] = [
   {
     name: "desktop_operator",
-    version: "1.0.0",
-    description: "Pilote le bureau Windows (souris, clavier, fenêtres, applications) ; observe avant d'agir.",
+    version: "1.1.0",
+    description: "Pilote le bureau Windows (souris, clavier, fenêtres, applications, VS Code) ; observe (capture ou inspection d'interface) avant d'agir.",
     executor: "runtime",
     max_security_level: "L2",
-    tools: [...DESKTOP, ...FILES_READ, "record_screen", "start_recording_bg", "stop_recording_bg"],
+    tools: [...DESKTOP, "ui_snapshot", "vscode_open", ...FILES_READ, "record_screen", "start_recording_bg", "stop_recording_bg"],
   },
   {
     name: "coder",
-    version: "1.0.0",
-    description: "Lit, écrit et exécute du code dans le workspace (commandes en allowlist, sans shell).",
+    version: "1.1.0",
+    description: "Lit, écrit et exécute du code dans SA worktree git (branche soulbah/<session>/<tâche>) ; fusionne vers l'intégration avec tests verts après relecture QA.",
     executor: "runtime",
     max_security_level: "L2",
-    tools: ["run_command", ...FILES_READ, ...FILES_WRITE, "wait"],
+    tools: ["run_command", ...GIT, ...FILES_READ, ...FILES_WRITE, "browser_get", "wait"],
   },
   {
     name: "researcher",
-    version: "1.0.0",
-    description: "Lit le workspace pour collecter des faits ; aucun effet.",
+    version: "1.1.0",
+    description: "Collecte des faits : workspace, pages web publiques (lecture seule), état des fenêtres ; aucun effet.",
     executor: "runtime",
     max_security_level: "L1",
-    tools: [...FILES_READ, "wait", "screenshot"],
+    tools: [...FILES_READ, "browser_get", "ui_snapshot", "wait", "screenshot"],
   },
   {
     name: "video_editor",
@@ -88,5 +89,5 @@ export const P1_ROLE_NAMES: readonly string[] = ROLES.filter((r) => r.executor =
 
 /** Forme publiée (shared/roles/roles.json). */
 export function rolesDocument() {
-  return { version: "1.0.0", generated_from: "backend/node-api/src/v2/planner/roles.ts", roles: ROLES };
+  return { version: "1.1.0", generated_from: "backend/node-api/src/v2/planner/roles.ts", roles: ROLES };
 }

@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable
 
 from skills.base import Skill
-from skills.manifests import confirm_step_types, path_param_names
+from skills.manifests import confirm_step_types, get_manifest, path_param_names
 from skills.safety import canonical_path, deny_reason, workspace_errors  # noqa: F401 - réexporté
 
 log = logging.getLogger("soulbah.permissions")
@@ -32,6 +32,23 @@ ALWAYS_CONFIRM_CATEGORIES = frozenset({"shell"})
 # confirmations : il ne dispense jamais d'une vérification locale.
 SERVER_CONFIRM_STEP_TYPES = confirm_step_types()
 SERVER_CONFIRM_REASON = "confirmation exigée par le serveur pour cette action à effet réel (requires_confirmation)"
+
+# LOT 12 (audit §9.10) : une action de niveau L3 (suppression de branche, push…) est TOUJOURS
+# confirmée au niveau 3 (« confirmer » sur la console, approbation L3 dans l'app), quel que soit le
+# mode, allow_input_control ou un grant de session.
+def manifest_level(step: dict) -> str | None:
+    m = get_manifest(str(step.get("type", "")).strip())
+    return m["security_level"] if m else None
+
+
+def is_l3(skill: Skill, step: dict) -> bool:
+    try:
+        if skill.confirm_level(step) >= 3:
+            return True
+    except Exception:  # noqa: BLE001 - doute = niveau le plus strict
+        return True
+    return manifest_level(step) == "L3"
+
 
 # Champs de chemin vérifiés (whitelist + deny-list) quelle que soit la catégorie : tous
 # les paramètres `is_path` des manifestes (texte, ou liste de chemins comme `clips`).
@@ -230,7 +247,7 @@ class PermissionGate:
         emit: EmitFn | None = ctx.get("emit")
         index = ctx.get("step_index")
         summary = skill.describe(step)
-        level = 3 if skill.confirm_level(step) >= 3 else 2
+        level = 3 if is_l3(skill, step) else 2
         action = str(step.get("type", skill.name))
 
         def _emit(etype: str, message: str, data: dict) -> None:
@@ -347,8 +364,10 @@ class PermissionGate:
         if self.dry_run:
             return True, "dry-run"
 
-        # 4. Commandes : confirmation interactive TOUJOURS exigée, même en mode auto.
-        if skill.category in ALWAYS_CONFIRM_CATEGORIES:
+        # 4. Commandes (et skills qui exécutent du code, ex. git_merge) : confirmation TOUJOURS
+        #    exigée, même en mode auto. Actions L3 : idem, au niveau 3 (LOT 12).
+        if (skill.category in ALWAYS_CONFIRM_CATEGORIES or getattr(skill, "always_confirm", False)
+                or is_l3(skill, step)):
             return self._confirm(skill, step, ctx)
 
         # 4 bis. S21 : le serveur exige une confirmation pour les actions à effet réel

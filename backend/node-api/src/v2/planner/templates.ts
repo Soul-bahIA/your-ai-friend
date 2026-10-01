@@ -5,13 +5,14 @@
 //   desktop_goal : objectif sur le PC (étapes du planificateur V1) → [observer] → agir
 //   formation    : N modules rédigés EN PARALLÈLE par P1 (content_writer) → assemblage
 //   demo_video   : observer → enregistrer + actions → montage (vidéo vérifiée par probe)
+//   code_parallel: N codeurs en worktrees git → relecture QA bloquante → fusion testée (LOT 12)
 import { TOOL_BY_TYPE } from "../../lib/agentSteps.js";
 import type { SecurityLevel } from "../../lib/toolCatalog.js";
 import { isPlainObject } from "../../lib/sanitize.js";
 import { levelRank } from "../security/policy.js";
 import { ROLES } from "./roles.js";
 
-export const TEMPLATE_NAMES = ["desktop_goal", "formation", "demo_video"] as const;
+export const TEMPLATE_NAMES = ["desktop_goal", "formation", "demo_video", "code_parallel"] as const;
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 
 type RawNode = Record<string, unknown>;
@@ -143,9 +144,81 @@ export function demoVideo(params: Record<string, unknown>): TemplateResult {
   };
 }
 
+const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
+const RESERVED_KEYS = new Set(["merge", "integration"]);
+
+/**
+ * Code en parallèle (LOT 12, audit §9.7) : N codeurs, chacun dans SA worktree et sa branche
+ * soulbah/<session>/<tâche> (git_worktree → étapes → git_commit) → une relecture QA bloquante par
+ * codeur → fusion dans soulbah/<session>/integration avec tests verts (git_merge), sur une
+ * ressource exclusive : une seule fusion à la fois.
+ */
+export function codeParallel(params: Record<string, unknown>): TemplateResult {
+  const repo = str(params.repo, 1000);
+  const wtDir = str(params.worktrees_dir, 1000);
+  const session = str(params.session_slug, 41)?.toLowerCase() ?? null;
+  if (!repo || !wtDir) return { ok: false, error: "code_parallel : repo et worktrees_dir requis" };
+  if (!session || !SLUG_RE.test(session)) return { ok: false, error: "code_parallel : session_slug requis ([a-z0-9][a-z0-9_-]*)" };
+  const tasks = Array.isArray(params.tasks) ? params.tasks.filter(isPlainObject) : [];
+  if (tasks.length < 1 || tasks.length > 8) return { ok: false, error: "code_parallel : 1 à 8 tâches attendues" };
+  const test = isPlainObject(params.test) ? params.test : null;
+  const testProgram = test ? str(test.program, 20) : null;
+  const testArgs = test && Array.isArray(test.args) ? test.args.map(String).slice(0, 64) : [];
+  const base = str(params.base, 200) ?? "HEAD";
+  const target = `soulbah/${session}/integration`;
+  const integrationPath = joinPath(wtDir, "integration");
+
+  const nodes: RawNode[] = [];
+  const edges: RawPlan["edges"] = [];
+  const merges: Record<string, unknown>[] = [];
+  const mergeCriteria: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const t of tasks) {
+    const key = str(t.key, 41)?.toLowerCase() ?? "";
+    if (!SLUG_RE.test(key) || RESERVED_KEYS.has(key) || key.startsWith("review_")) return { ok: false, error: `code_parallel : clé de tâche invalide « ${key.slice(0, 40)} »` };
+    if (seen.has(key)) return { ok: false, error: `code_parallel : clé de tâche en double « ${key} »` };
+    seen.add(key);
+    const title = str(t.title, 200) ?? key;
+    const userSteps = Array.isArray(t.steps) ? (t.steps.filter(isPlainObject) as Record<string, unknown>[]) : [];
+    const branch = `soulbah/${session}/${key}`;
+    const path = joinPath(wtDir, key);
+    const marker = `soulbah:${key}`;
+    const steps = [
+      { type: "git_worktree", repo, path, branch, base },
+      ...userSteps,
+      { type: "git_commit", cwd: path, message: `${marker} ${title}`.slice(0, 500) },
+    ];
+    nodes.push({
+      key,
+      title: `Coder : ${title}`,
+      role: "coder",
+      security_level: levelFor(steps),
+      spec: { steps, worktree: path, branch },
+      acceptance_criteria: [{ type: "git_branch_contains", branch, text: marker }, ...criteriaFromSteps(userSteps)],
+    });
+    nodes.push({ key: `review_${key}`, title: `Relecture : ${title}`, role: "qa_reviewer", security_level: "L0", spec: { review_of_key: key }, acceptance_criteria: [] });
+    edges.push({ from: key, to: `review_${key}`, kind: "hard" }, { from: `review_${key}`, to: "merge", kind: "hard" });
+    merges.push({ type: "git_merge", repo, path: integrationPath, source: branch, target, base, ...(testProgram ? { test_program: testProgram, test_args: testArgs } : {}) });
+    mergeCriteria.push({ type: "git_branch_contains", branch: target, text: branch });
+  }
+  if (testProgram) mergeCriteria.unshift({ type: "tests_pass" });
+  nodes.push({
+    key: "merge",
+    title: `Fusionner dans ${target}${testProgram ? " (tests verts)" : ""}`,
+    role: "coder",
+    security_level: "L2",
+    spec: { steps: merges },
+    acceptance_criteria: mergeCriteria,
+    resources: [{ key: `git.merge:${session}`, mode: "exclusive" }],
+  });
+  return { ok: true, plan: { nodes, edges } };
+}
+
 export function buildFromTemplate(name: unknown, params: unknown): TemplateResult {
   const p = isPlainObject(params) ? params : {};
   switch (name) {
+    case "code_parallel":
+      return codeParallel(p);
     case "desktop_goal":
       return desktopGoal(p);
     case "formation":

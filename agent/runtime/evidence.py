@@ -34,6 +34,7 @@ MAX_DESCRIPTION_CHARS = 2000
 MAX_HASH_BYTES = 256 * 1024 * 1024
 # Même seuil que backend/node-api/src/v2/evidence.ts (containsBinaryBlob).
 _BASE64_BLOB = re.compile(r"^[A-Za-z0-9+/=\r\n]{256,}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # Téléverse (contenu, mime, kind) → (artifact_id | None, sha256) ; None si indisponible.
 Uploader = Callable[[bytes, str, str], "tuple[str | None, str] | None"]
@@ -165,6 +166,12 @@ def build_evidence(step_type: str, ok: bool, detail: str, data: dict[str, Any] |
         if field not in data:
             continue
         value = data.get(field)
+        if kind == "sha256":
+            # Empreinte calculée par le skill (page web, texte d'un champ…) : portée par `sha256`.
+            if isinstance(value, str) and _SHA256_RE.match(value):
+                out.append(_entry(kind, conf, description=spec.get("description") or detail, sha256=value,
+                                  step_index=step_index))
+            continue
         if field == "content":
             text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
             out.append(_entry(kind, conf, description=f"{len(text)} caractères lus (contenu non transmis)",
