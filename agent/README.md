@@ -22,7 +22,10 @@ résultat en temps réel.
    - `failed` : étape en échec/refusée, délai dépassé, ou **plan vide** (`result.empty_plan = true`) ;
    - `cancelled` : arrêt demandé depuis l'app (`control = stop`) ou Ctrl+C sur le PC.
      Un arrêt n'est jamais un échec : le serveur ne l'évalue pas.
-   Le thread heartbeat est arrêté **et terminé** avant l'envoi du final.
+   Le thread heartbeat est arrêté **et terminé** avant l'envoi du final. Un évènement
+   terminal est toujours émis pour le poste de pilotage : `task_completed`, `task_cancelled`
+   ou `task_failed` (`{index, timed_out}` ; échec, refus, délai dépassé, plan vide ou
+   invalide) — sauf après un 409/410, la tâche n'étant plus la nôtre.
 
 Garanties de robustesse :
 - **409 sur un évènement/heartbeat** (tentative périmée ou tâche plus `in_progress`) :
@@ -38,7 +41,9 @@ Garanties de robustesse :
     le résultat est conservé 24 h : si la tâche revient au poll, l'agent la réclame et
     **renvoie ce résultat sans la ré-exécuter** (`result.final_replayed = true`) ;
   - final **rejeté** (400/404…) : remplacé par un final `failed` minimal
-    (`result.final_rejected = true`, `artifacts` = fichiers produits).
+    (`result.final_rejected = true`, `artifacts` = fichiers produits) qui garde les drapeaux
+    de non-évaluation (`simulated`, `empty_plan`, et `cancelled`/`stopped` pour un arrêt :
+    un final `cancelled` rejeté ne devient jamais un échec évaluable).
 - **Délai par étape** (`SOULBAH_STEP_TIMEOUT`, 900 s par défaut, étendu pour les skills
   longs par nature : montage, commandes) : au-delà, l'étape échoue et la tâche s'arrête.
   Un heartbeat sans progression finit par s'arrêter : une tâche bloquée ne reste pas vivante.
@@ -48,6 +53,14 @@ Garanties de robustesse :
   (`wait`, enregistrements, commandes, rendu Resolve s'interrompent proprement). En pause :
   une lecture toutes les 2 s, un seul évènement (+ un rappel par minute) ; une **erreur de
   lecture pendant la pause ne relance pas** l'exécution.
+  Un **stop interrompt l'étape en cours** (jeton annulé, 10 s de grâce, enregistrements
+  finalisés ; l'étape est rapportée « interrompue (arrêt demandé) ») au lieu d'attendre sa
+  fin — plus sûr pour une commande ou un rendu de plusieurs minutes — puis le final
+  `cancelled` est envoyé.
+- **Stop pendant une confirmation** : le contrôle est aussi lu (toutes les 2 s) pendant
+  qu'une confirmation attend sur la console ; un stop la **refuse** (l'action ne s'exécute
+  pas, même approuvée ensuite sur le PC) et la tâche passe en `cancelled`. Après toute
+  confirmation, le contrôle est relu **avant d'agir** (stop → `cancelled`, pause → attente).
 - **Ctrl+C** : interrompt la tâche en cours (étape annulée, final `cancelled`, une
   confirmation en attente est refusée), puis arrête l'agent. Un second Ctrl+C force l'arrêt.
 - **Clé révoquée** : 401/403 sont diagnostiqués « clé agent révoquée ou invalide » (et non
@@ -114,6 +127,7 @@ Détails utiles :
 | `confirm` (défaut) | Confirmation `[o/N]` avant chaque action sensible. Sans réponse en `SOULBAH_CONFIRM_TIMEOUT` s (120) : **refus**. Sans console : refus. |
 | `auto` (`--auto`) | Pas de confirmation pour fichiers/vidéo/captures (toujours bornés par la whitelist et la deny-list). **`run_command`, les actions d'entrée et le téléphone restent confirmés.** |
 | `--allow-input-control` | Pré-autorise souris/clavier/fenêtres/applis/téléphone (pas `run_command`), **sauf actions à risque**. |
+| `payload.requires_confirmation` | Posé par le serveur (le client ne peut pas l'abaisser) dès qu'une tâche contient une action à effet réel. Ces étapes (`run_command`, `write_file`, `move_file`, `type_text`, `hotkey`, `phone_*` et leurs alias) sont alors **toujours confirmées** sur le PC : ni `--auto` ni `--allow-input-control` n'en dispensent (S21). Les autres étapes de la tâche suivent le mode. |
 | `--dry-run --plan plan.json` | Simule un **plan local** : aucune tâche n'est réclamée au serveur, aucune action n'est exécutée, le rapport (JSON sur la sortie standard) porte `simulated: true`. `--plan` seul implique `--dry-run`. |
 
 Les confirmations affichent le **contenu complet**, sur la console locale uniquement :
@@ -133,9 +147,15 @@ taille et sha256), commande complète avec son `cwd` et ce qu'elle exécute. Une
   l'agent et tout le dépôt SoulBah, fichiers `.env` / `*.env` / `.env.*`, dossiers `.ssh` /
   `.gnupg`, clés privées (`id_rsa*`, `id_ed25519*`, `*.pem`, `*.key`, `*.ppk`, `*.p12`,
   `*.pfx`), tout dossier `.git` (hooks compris) et tout dossier qui **est** un dépôt git
-  (dépôt nu, `--separate-git-dir`).
+  (dépôt nu, `--separate-git-dir`). Les noms sont comparés **tels que Windows les créera** :
+  points/espaces finaux (`a.env `, `a.env.`, `.ssh.`) et flux NTFS (`a.env::$DATA`,
+  `.git::$INDEX_ALLOCATION`) ne contournent pas la liste. Les formes longues (`\\?\C:\…`)
+  et les alias UNC (`\\localhost\c$\…`) du dossier de l'agent ou du dépôt sont reconnus
+  (comparaison par identité disque).
 - **TOCTOU** : les chemins sont revalidés **juste avant l'exécution** (après la confirmation) :
-  un lien/jonction remplacé entre-temps est refusé.
+  un lien/jonction remplacé entre-temps est refusé. Les skills de fichiers (`write_file`,
+  `read_file`, `list_dir`, `make_dir`, `move_file`) revérifient en plus, au moment d'agir,
+  la deny-list **et la whitelist** du gate (liée au thread de l'étape par l'executor).
 - **`run_command`** : aucun shell ; `cwd` obligatoire dans le workspace ; programmes et
   sous-commandes en allowlist fermée :
   - `git` : `status | diff | log | show | branch | add | commit | init` — jamais d'option

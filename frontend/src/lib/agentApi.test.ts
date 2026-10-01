@@ -10,6 +10,7 @@ import {
   agentChoiceFromError,
   approveAgentTask,
   cancelAgentTask,
+  deleteAgentTask,
   fetchTaskScreenshot,
   goalErrorMessage,
   listAgents,
@@ -130,6 +131,34 @@ describe("cancel / approve", () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: "Tâche déjà terminée" }, 409));
     await expect(cancelAgentTask("a/b")).rejects.toMatchObject({ status: 409, message: "Tâche déjà terminée" });
     expect(fetchMock.mock.calls[0][0]).toBe(apiUrl("/api/agent-tasks/a%2Fb/cancel"));
+  });
+});
+
+describe("suppression (S9)", () => {
+  it("DELETE /api/agent-tasks/:id avec le jeton (plus d'écriture Supabase directe) → 204", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(deleteAgentTask("t-9")).resolves.toEqual({ kind: "deleted" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(apiUrl("/api/agent-tasks/t-9"));
+    expect(init.method).toBe("DELETE");
+    expect((init.headers as Headers).get("Authorization")).toBe("Bearer tok-1");
+  });
+
+  it("404 → déjà supprimée ; 409 → tâche active avec son statut réel", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "Tâche introuvable" }, 404));
+    await expect(deleteAgentTask("t-9")).resolves.toEqual({ kind: "gone" });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: "Tâche active : annulez-la d'abord (POST /api/agent-tasks/:id/cancel)", status: "in_progress" }, 409),
+    );
+    await expect(deleteAgentTask("t-9")).resolves.toEqual({ kind: "active", status: "in_progress" });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "conflit" }, 409));
+    await expect(deleteAgentTask("t-9")).resolves.toEqual({ kind: "active", status: null });
+  });
+
+  it("encode l'identifiant et propage les autres erreurs", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: "Boom" }, 500));
+    await expect(deleteAgentTask("a/b")).rejects.toMatchObject({ status: 500 });
+    expect(fetchMock.mock.calls[0][0]).toBe(apiUrl("/api/agent-tasks/a%2Fb"));
   });
 });
 

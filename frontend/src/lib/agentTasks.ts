@@ -5,8 +5,9 @@ export interface AgentTaskEvaluation {
   verdict?: string | null;
   reason?: string;
   /**
-   * Décision effective de l'évaluateur : memory_proposed | correction_awaiting_approval |
-   * correction_invalid | max_attempts_reached | abandoned | evaluation_failed.
+   * Décision effective de l'évaluateur : none (verdict not_evaluable) | memory_proposed |
+   * correction_awaiting_approval | correction_invalid | max_attempts_reached | abandoned |
+   * evaluation_failed.
    */
   action_taken?: string | null;
   /** Présent UNIQUEMENT si une tâche corrective a réellement été créée. */
@@ -124,6 +125,20 @@ export function applyApproveResponse(task: AgentTask, resp?: { task?: Record<str
   };
 }
 
+/** Issue d'une suppression via DELETE /api/agent-tasks/:id (voir deleteAgentTask). */
+export type DeleteOutcome = { kind: "deleted" | "gone" } | { kind: "active"; status: string | null };
+
+/**
+ * Applique localement l'issue d'une suppression (S9) : supprimée (204) ou introuvable (404) →
+ * retirée ; refusée car active (409) → conservée, avec le statut réel renvoyé par le serveur.
+ */
+export function applyDeleteOutcome(tasks: AgentTask[], taskId: string, outcome: DeleteOutcome): AgentTask[] {
+  if (outcome.kind !== "active") return tasks.filter((t) => t.id !== taskId);
+  const status = outcome.status;
+  if (!status) return tasks;
+  return tasks.map((t) => (t.id === taskId ? { ...t, status } : t));
+}
+
 export interface EvaluationView {
   text: string;
   tone: Tone;
@@ -155,6 +170,10 @@ export function evaluationView(task: AgentTask, tasks: readonly AgentTask[]): Ev
   if (!ev || typeof ev !== "object") return null;
   const reason = typeof ev.reason === "string" && ev.reason ? ` — ${ev.reason}` : "";
   if (ev.action_taken === "evaluation_failed") return { text: `Évaluation impossible${reason}`, tone: "muted" };
+  // Non évaluable (python-ia not_evaluable → action_taken 'none') : ni correction, ni mémoire.
+  if (ev.verdict === "not_evaluable" || ev.action_taken === "none") {
+    return { text: `Non évaluable${reason}`, tone: "muted" };
+  }
   if (ev.verdict === "success") return { text: `Objectif atteint${reason}`, tone: "success" };
 
   const correction = findCorrection(task, tasks);
@@ -202,12 +221,33 @@ const STEP_LABELS: Record<string, string> = {
   open_software: "Ouvrir",
 };
 
-const clip = (s: string, max = 80) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
-/** Résumé lisible d'une étape planifiée (C36). */
-export function describeStep(step: unknown): string {
+/**
+ * Types d'étapes sensibles (même liste que node-api `SENSITIVE_STEP_TYPES`) : une étape de ce
+ * type exige la confirmation sur le PC ; dans une correction à approuver, son contenu complet
+ * (texte saisi, commande, contenu de fichier) est affiché avant le bouton Approuver (S10).
+ */
+export const SENSITIVE_STEP_TYPES: ReadonlySet<string> = new Set([
+  "run_command", "run_script", "shell",
+  "write_file", "move_file", "move",
+  "type_text", "type", "keyboard",
+  "hotkey", "press", "key",
+  "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
+]);
+
+export const isSensitiveStep = (step: unknown): boolean =>
+  !!step && typeof step === "object" && SENSITIVE_STEP_TYPES.has(str((step as Record<string, unknown>).type));
+
+export interface DescribeStepOptions {
+  /** Aucun texte tronqué (carte d'approbation d'une correction, S10). */
+  full?: boolean;
+}
+
+/** Résumé lisible d'une étape planifiée (C36) ; tronqué sauf `{ full: true }`. */
+export function describeStep(step: unknown, { full = false }: DescribeStepOptions = {}): string {
   if (!step || typeof step !== "object") return "Étape invalide";
+  const clip = (v: string, max = 80) => (!full && v.length > max ? `${v.slice(0, max - 1)}…` : v);
   const s = step as Record<string, unknown>;
   const type = str(s.type) || "?";
   const label = STEP_LABELS[type] ?? type;
@@ -256,6 +296,31 @@ export function describeStep(step: unknown): string {
   const note = str(s.note) || str(s.description);
   const main = detail ? `${label} : ${clip(detail)}` : label;
   return note && note !== detail ? `${main} (${clip(note, 60)})` : main;
+}
+
+/**
+ * Contenu INTÉGRAL d'une étape (JSON indenté, rien de tronqué ni d'omis) : c'est exactement ce
+ * que l'agent recevra. Affiché pour chaque étape d'une correction en attente d'approbation (S10).
+ */
+export function stepFullDetail(step: unknown): string {
+  try {
+    return JSON.stringify(step, null, 2) ?? String(step);
+  } catch {
+    return String(step);
+  }
+}
+
+export interface ApprovalStepView {
+  /** Résumé non tronqué. */
+  summary: string;
+  /** Étape complète (JSON). */
+  detail: string;
+  sensitive: boolean;
+}
+
+/** Vue d'une étape dans la carte d'approbation d'une correction : rien n'est masqué (S10). */
+export function approvalStepView(step: unknown): ApprovalStepView {
+  return { summary: describeStep(step, { full: true }), detail: stepFullDetail(step), sensitive: isSensitiveStep(step) };
 }
 
 /** Étapes planifiées d'une tâche (payload.steps), [] si absent. */

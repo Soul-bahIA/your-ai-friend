@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { pool } from "../db.js";
+import { pool, withTransaction, type Queryable } from "../db.js";
 import { requireUser } from "../auth.js";
 import { planGoal, evaluateGoal, ServiceError } from "../clients/iaClient.js";
 import { logEvent } from "../services/logs.js";
@@ -16,7 +16,7 @@ import {
   validateGoalBody,
 } from "../lib/agentSteps.js";
 import { isPlainObject, stripImageB64 } from "../lib/sanitize.js";
-import { maskTypedText } from "../lib/redact.js";
+import { findMaskedPlaceholder, maskTypedText, omitTypedText, restoreMaskedParams } from "../lib/redact.js";
 import { getScreenshot } from "../services/screenshots.js";
 import { config } from "../config.js";
 
@@ -47,11 +47,12 @@ async function createGoalTask(
   steps: Record<string, unknown>[],
   meta: GoalMeta,
   targetKeyId: string | null,
+  db: Queryable = pool,
 ): Promise<string> {
   const id = randomUUID();
   const goalMeta: GoalMeta = { ...meta, root_task_id: meta.root_task_id ?? id, awaiting_approval: meta.awaiting_approval ?? false };
   const payload = { steps, goal_meta: goalMeta, requires_confirmation: requiresConfirmation(steps) };
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `INSERT INTO agent_tasks (id, user_id, task_type, status, priority, payload, target_agent_key_id)
      VALUES ($1, $2, 'goal', 'pending', 3, $3::jsonb, $4) RETURNING id`,
     [id, userId, JSON.stringify(payload), targetKeyId],
@@ -133,7 +134,10 @@ export async function planAndQueueGoal(
     };
   }
   const steps = checked.value;
-  const invalid = findInvalidStep(steps) ?? findPathOutsideAllowed(steps, allowedDirs);
+  // C§12 : un libellé « [texte masqué : N car.] » recopié (mémoire, contexte) serait saisi
+  // ou écrit tel quel par l'agent — le texte d'origine est inconnu ici : plan refusé.
+  const invalid =
+    findMaskedPlaceholder(steps) ?? findInvalidStep(steps) ?? findPathOutsideAllowed(steps, allowedDirs);
   if (invalid) {
     await logEvent(userId, "Agent", `Plan rejeté (incomplet ou hors whitelist) : ${invalid}`, "warning");
     return {
@@ -244,13 +248,27 @@ async function allowedDirsForTarget(userId: string, targetKeyId: string | null |
   return getUserAllowedDirs(userId); // tâche héritée (antérieure au ciblage)
 }
 
-async function recordEvaluation(taskId: string, userId: string, evaluation: Record<string, unknown>, status: string) {
-  await pool.query(
+async function writeEvaluation(
+  db: Queryable,
+  taskId: string,
+  userId: string,
+  evaluation: Record<string, unknown>,
+  status: string,
+) {
+  await db.query(
     `UPDATE agent_tasks
         SET result = COALESCE(result, '{}'::jsonb) || jsonb_build_object('evaluation', $1::jsonb, 'evaluation_status', $2::text)
       WHERE id = $3 AND user_id = $4`,
     [JSON.stringify(evaluation), status, taskId, userId],
   );
+}
+
+async function recordEvaluation(taskId: string, userId: string, evaluation: Record<string, unknown>, status: string) {
+  await writeEvaluation(pool, taskId, userId, evaluation, status);
+  await insertEvaluationEvent(taskId, userId, evaluation, status);
+}
+
+async function insertEvaluationEvent(taskId: string, userId: string, evaluation: Record<string, unknown>, status: string) {
   // Évènement de timeline : l'UI n'affiche « Correction proposée » que si corrective_task_id est présent.
   await pool
     .query(
@@ -284,11 +302,13 @@ export async function maybeEvaluateGoalTask(
   opts: { screenshots?: string[] } = {},
 ): Promise<EvaluationOutcome> {
   const { rows } = await pool.query(
-    `SELECT payload, result, status, control, target_agent_key_id FROM agent_tasks WHERE id = $1 AND user_id = $2`,
+    `SELECT payload, result, status, control, target_agent_key_id, claimed_by_key_id FROM agent_tasks WHERE id = $1 AND user_id = $2`,
     [taskId, userId],
   );
   if (rows.length === 0) return { skipped: "gone" };
-  const task = rows[0] as EvaluableTask & { target_agent_key_id?: string | null };
+  const task = rows[0] as EvaluableTask & { target_agent_key_id?: string | null; claimed_by_key_id?: string | null };
+  // PC de la correction (§7) : celui ciblé, à défaut celui qui a EXÉCUTÉ la tâche évaluée.
+  const correctionKeyId = task.target_agent_key_id ?? task.claimed_by_key_id ?? null;
   const skip = evaluationSkipReason(task);
   if (skip) return { skipped: skip };
   const meta = task.payload!.goal_meta!;
@@ -334,7 +354,9 @@ export async function maybeEvaluateGoalTask(
   }
 
   if (llmVerdict === "success") {
-    await writeMemory(userId, "solution", meta.goal, `Plan réussi : ${JSON.stringify(maskedSteps)}`, {
+    // Plan relu plus tard par le planificateur : textes saisis OMIS (ni secret, ni libellé
+    // « [texte masqué…] » qu'il pourrait recopier dans une étape — C§12).
+    await writeMemory(userId, "solution", meta.goal, `Plan réussi (textes saisis omis) : ${JSON.stringify(omitTypedText(maskedSteps))}`, {
       taskId,
       source: "evaluator",
     });
@@ -346,9 +368,16 @@ export async function maybeEvaluateGoalTask(
   const correctives = Array.isArray(evaluation.corrective_steps) ? evaluation.corrective_steps : [];
   if (llmVerdict === "retry" && meta.attempt < meta.max_attempts && correctives.length > 0) {
     const checked = clampAndValidatePlanSteps(correctives.map((s) => compactStep(s as unknown as Record<string, unknown>)));
-    const steps = checked.ok ? checked.value : [];
-    const dirs = checked.ok ? await allowedDirsForTarget(userId, task.target_agent_key_id) : [];
-    const invalid = checked.ok ? (findInvalidStep(steps) ?? findPathOutsideAllowed(steps, dirs)) : checked.error;
+    // C§12 : le LLM n'a vu que des libellés masqués ; un libellé recopié est restauré depuis
+    // la tâche évaluée (même type, même champ, même longueur) ou la correction est refusée.
+    const restored = checked.ok ? restoreMaskedParams(checked.value, plannedSteps) : null;
+    const steps = restored?.ok ? restored.value : [];
+    const dirs = restored?.ok ? await allowedDirsForTarget(userId, correctionKeyId) : [];
+    const invalid = !checked.ok
+      ? checked.error
+      : !restored!.ok
+        ? restored!.error
+        : (findInvalidStep(steps) ?? findPathOutsideAllowed(steps, dirs));
     if (invalid) {
       await writeMemory(userId, "error", meta.goal, `Plan correctif refusé : ${invalid}`, { taskId, source: "evaluator" });
       await recordEvaluation(
@@ -360,25 +389,29 @@ export async function maybeEvaluateGoalTask(
       await logEvent(userId, "Agent", `Correction abandonnée (plan invalide) : ${invalid}`, "error");
       return { verdict: "abort", action_taken: "correction_invalid" };
     }
-    const correctiveId = await createGoalTask(
-      userId,
-      steps,
-      {
-        ...meta,
-        attempt: meta.attempt + 1,
-        parent_task_id: taskId,
-        root_task_id: meta.root_task_id ?? taskId,
-        awaiting_approval: true,
-        correction_reason: evaluation.reason,
-      },
-      task.target_agent_key_id ?? null,
-    );
-    await recordEvaluation(
-      taskId,
-      userId,
-      { ...base, verdict: "retry", action_taken: "correction_awaiting_approval", corrective_task_id: correctiveId },
-      "done",
-    );
+    // Correction ET évaluation dans UNE transaction (T17) : jamais de correction orpheline
+    // (créée alors que l'évaluation de sa tâche parente reste « running » puis « interrompue »).
+    const evaluationStatus = "done";
+    const { correctiveId, written } = await withTransaction(async (client) => {
+      const id = await createGoalTask(
+        userId,
+        steps,
+        {
+          ...meta,
+          attempt: meta.attempt + 1,
+          parent_task_id: taskId,
+          root_task_id: meta.root_task_id ?? taskId,
+          awaiting_approval: true,
+          correction_reason: evaluation.reason,
+        },
+        correctionKeyId,
+        client,
+      );
+      const ev = { ...base, verdict: "retry", action_taken: "correction_awaiting_approval", corrective_task_id: id };
+      await writeEvaluation(client, taskId, userId, ev, evaluationStatus);
+      return { correctiveId: id, written: ev };
+    });
+    await insertEvaluationEvent(taskId, userId, written, evaluationStatus);
     await logEvent(
       userId,
       "Agent",

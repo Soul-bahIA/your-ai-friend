@@ -26,6 +26,14 @@ export const TOKEN_CACHE_TTL_MS = 15_000;
 // Cache des JWT déjà vérifiés (clé = SHA-256 du jeton, jamais le jeton en clair).
 const tokenCache = new TtlCache<AuthUser>(5_000, TOKEN_CACHE_TTL_MS);
 
+// Jetons déconnectés (S26) : refusés par CETTE instance sans consulter Supabase ni les remettre
+// en cache, jusqu'à leur expiration (exp du JWT, bornée à REVOKED_MAX_TTL_MS, au moins
+// TOKEN_CACHE_TTL_MS). Ferme la fenêtre entre POST /api/auth/logout et supabase.auth.signOut()
+// où une requête (poll du cockpit, rejeu) re-vérifiait le jeton, encore valide chez Supabase,
+// et le remettait en cache 15 s.
+export const REVOKED_MAX_TTL_MS = 60 * 60 * 1000;
+const revokedTokens = new TtlCache<true>(10_000, TOKEN_CACHE_TTL_MS);
+
 export function tokenHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
@@ -41,9 +49,22 @@ export function cachedUserForToken(token: string): AuthUser | undefined {
   return token ? tokenCache.get(tokenHash(token)) : undefined;
 }
 
-/** Oublie un jeton du cache (déconnexion) : le prochain usage repasse par Supabase. */
+/**
+ * Déconnexion : oublie le jeton du cache ET le marque révoqué sur cette instance — tout usage
+ * ultérieur est refusé (401) sans appel à Supabase, même avant supabase.auth.signOut().
+ */
 export function forgetToken(token: string): void {
-  if (token) tokenCache.delete(tokenHash(token));
+  if (!token) return;
+  const key = tokenHash(token);
+  tokenCache.delete(key);
+  const exp = jwtExpiry(token);
+  const untilExp = exp ? exp * 1000 - Date.now() : 0;
+  revokedTokens.set(key, true, Math.min(REVOKED_MAX_TTL_MS, Math.max(TOKEN_CACHE_TTL_MS, untilExp)));
+}
+
+/** Jeton déconnecté sur cette instance (S26). */
+export function isTokenRevoked(token: string): boolean {
+  return !!token && revokedTokens.get(tokenHash(token)) === true;
 }
 
 /** exp (secondes epoch) lu dans la charge utile du JWT, sans vérification (sert à borner le cache). */
@@ -64,8 +85,10 @@ export type VerifyResult = { ok: true; user: AuthUser } | { ok: false; reason: "
  * frontend ne déconnecte pas l'utilisateur sur une panne réseau.
  */
 export async function verifySupabaseToken(token: string): Promise<VerifyResult> {
-  if (!config.supabaseUrl || !config.supabaseAnonKey) return { ok: false, reason: "unavailable" };
   const key = tokenHash(token);
+  // Déconnecté : refusé avant toute consultation du cache ou de Supabase (S26).
+  if (revokedTokens.get(key)) return { ok: false, reason: "invalid" };
+  if (!config.supabaseUrl || !config.supabaseAnonKey) return { ok: false, reason: "unavailable" };
   const cached = tokenCache.get(key);
   if (cached) return { ok: true, user: cached };
 
@@ -85,6 +108,8 @@ export async function verifySupabaseToken(token: string): Promise<VerifyResult> 
   if (!user?.id) return { ok: false, reason: "invalid" };
 
   const authUser = { id: user.id, email: user.email };
+  // Déconnexion survenue PENDANT la vérification : ni acceptée ni remise en cache.
+  if (revokedTokens.get(key)) return { ok: false, reason: "invalid" };
   const exp = jwtExpiry(token);
   const ttl = exp ? Math.min(TOKEN_CACHE_TTL_MS, exp * 1000 - Date.now()) : TOKEN_CACHE_TTL_MS;
   tokenCache.set(key, authUser, ttl);

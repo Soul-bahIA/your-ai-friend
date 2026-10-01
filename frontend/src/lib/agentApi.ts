@@ -1,5 +1,5 @@
 // Appels HTTP de l'agent local (contrat LOT 1) : annulation, approbation des
-// corrections, capture d'écran, choix du PC cible, déconnexion côté serveur.
+// corrections, suppression, capture d'écran, choix du PC cible, déconnexion côté serveur.
 // Les fonctions de décodage sont pures et exportées pour les tests.
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { toImageDataUrl } from "@/lib/images";
@@ -108,6 +108,33 @@ export async function cancelAgentTask(taskId: string): Promise<TaskMutationRespo
 /** Approuve une correction proposée par l'évaluateur (awaiting_approval → false). */
 export async function approveAgentTask(taskId: string): Promise<TaskMutationResponse> {
   return (await apiFetch<TaskMutationResponse>(taskPath(taskId, "approve"), { method: "POST", json: {} })) ?? {};
+}
+
+/** Issue de DELETE /api/agent-tasks/:id. */
+export type DeleteTaskOutcome =
+  /** 204 : supprimée (capture en mémoire oubliée côté serveur). */
+  | { kind: "deleted" }
+  /** 404 : déjà supprimée ou introuvable — à retirer de la liste. */
+  | { kind: "gone" }
+  /** 409 : tâche encore active (à annuler d'abord) ; `status` = statut réel renvoyé par le serveur. */
+  | { kind: "active"; status: string | null };
+
+/**
+ * Supprime une tâche TERMINÉE via l'API (S9) : le serveur refuse (409) une tâche active,
+ * contrairement à l'ancienne écriture directe dans agent_tasks via Supabase (RLS sans garde).
+ */
+export async function deleteAgentTask(taskId: string): Promise<DeleteTaskOutcome> {
+  try {
+    await apiFetch(`/api/agent-tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+    return { kind: "deleted" };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return { kind: "gone" };
+    if (err instanceof ApiError && err.status === 409) {
+      const status = isRecord(err.body) && typeof err.body.status === "string" && err.body.status ? err.body.status : null;
+      return { kind: "active", status };
+    }
+    throw err;
+  }
 }
 
 /** Dernière capture d'une tâche (GET /:id/screenshot) en data URL, ou null (404 / invalide). */

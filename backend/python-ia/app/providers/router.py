@@ -11,16 +11,20 @@ LLM_MODEL_<RÔLE>="[fournisseur:]modèle" et LLM_EFFORT_<RÔLE>. Le profil ne s'
 que si le fournisseur retenu est celui du profil (défaut : anthropic).
 
 Repli multi-sauts : sur panne du fournisseur (429, 5xx, délai, connexion, clé ou
-crédits), on tente le suivant (LLM_FALLBACK_ORDER, au plus LLM_MAX_HOPS sauts). Un
-disjoncteur par fournisseur (LLM_CB_THRESHOLD échecs consécutifs → ouvert pendant
-LLM_CB_COOLDOWN_S) évite de marteler un fournisseur en panne. Pas de repli sur un
-override explicite (le choix de l'appelant est respecté).
+crédits), on tente le suivant (LLM_FALLBACK_ORDER, au plus LLM_MAX_HOPS appels
+RÉELLEMENT tentés : un fournisseur sauté car son disjoncteur est ouvert ne consomme
+pas de saut). Un disjoncteur par fournisseur (LLM_CB_THRESHOLD échecs consécutifs →
+ouvert pendant LLM_CB_COOLDOWN_S, puis UN seul appel d'essai) évite de marteler un
+fournisseur en panne. Pas de repli sur un override explicite (le choix de l'appelant
+est respecté).
 
 Vision : une requête portant des images n'est JAMAIS envoyée à un modèle dont la
 vision n'est pas déclarée (capabilities.py).
 
-Délais : chaque saut reçoit timeout = min(délai de la tâche, temps restant avant
-l'échéance x-deadline-ms) ; sans en-tête, un budget implicite par tâche (aligné sur
+Délais : chaque saut est coupé (asyncio.wait_for) au plus tard à
+min(délai de la tâche + marge SDK, temps restant avant l'échéance x-deadline-ms
+− DEADLINE_MARGIN_S) ; le SDK reçoit un délai un peu plus court pour échouer
+proprement avant la coupure. Sans en-tête, un budget implicite par tâche (aligné sur
 les délais de node) borne l'ensemble des sauts.
 
 Chaque appel est journalisé avec son usage (jetons entrée/sortie, raison d'arrêt) ;
@@ -32,6 +36,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -99,13 +104,23 @@ def _csv_env(name: str) -> list[str]:
     return [p.strip() for p in os.getenv(name, "").split(",") if p.strip()]
 
 
-MIN_HOP_S = 1.0          # en dessous, on ne lance pas de nouvel appel
-DEADLINE_MARGIN_S = 0.5  # temps laissé pour répondre à l'appelant
+MIN_HOP_S = 1.0             # en dessous, on ne lance pas de nouvel appel
+DEADLINE_MARGIN_S = 0.5     # temps laissé pour répondre à l'appelant (jamais consommé par un saut)
+SDK_TIMEOUT_GRACE_S = 0.25  # le délai du SDK expire un peu AVANT la coupure wait_for
+
+# Jeton renvoyé par acquire() quand le disjoncteur est fermé (appel normal, pas une sonde).
+_NOT_A_PROBE = object()
 
 
 class CircuitBreaker:
     """Disjoncteur simple par fournisseur : fermé → ouvert après `threshold` échecs
-    consécutifs → semi-ouvert après `cooldown_s` (un essai) → fermé au premier succès."""
+    consécutifs → semi-ouvert après `cooldown_s` → fermé au premier succès.
+
+    Semi-ouvert : UN SEUL appel d'essai (sonde) passe ; les autres appelants traitent
+    le fournisseur comme ouvert tant que la sonde n'a pas abouti (succès → fermé,
+    échec → rouvert). Une sonde terminée sans verdict (erreur non imputable au
+    fournisseur, requête annulée) est rendue par release() ; par sûreté, une sonde qui
+    n'aboutit jamais expire après `cooldown_s` (au plus une sonde par période)."""
 
     def __init__(self, threshold: int = 3, cooldown_s: float = 30.0,
                  clock: Callable[[], float] = time.monotonic):
@@ -114,35 +129,73 @@ class CircuitBreaker:
         self._clock = clock
         self._failures: dict[str, int] = {}
         self._opened_at: dict[str, float] = {}
+        self._probes: dict[str, tuple[object, float]] = {}  # pid -> (jeton, début)
+        self._lock = threading.Lock()  # l'orchestrateur est partagé (threads compris)
 
-    def state(self, pid: str) -> str:
+    def _state(self, pid: str) -> str:
         opened = self._opened_at.get(pid)
         if opened is None:
             return "closed"
         return "half_open" if self._clock() - opened >= self.cooldown_s else "open"
 
+    def state(self, pid: str) -> str:
+        with self._lock:
+            return self._state(pid)
+
+    def acquire(self, pid: str) -> object | None:
+        """Autorise un appel : None si refusé (ouvert, ou sonde déjà en cours), sinon un
+        jeton à rendre via release() si l'appel se termine sans verdict."""
+        with self._lock:
+            state = self._state(pid)
+            if state == "closed":
+                return _NOT_A_PROBE
+            if state == "open":
+                return None
+            probe = self._probes.get(pid)
+            if probe is not None and self._clock() - probe[1] < self.cooldown_s:
+                return None
+            token = object()
+            self._probes[pid] = (token, self._clock())
+            return token
+
     def allow(self, pid: str) -> bool:
-        return self.state(pid) != "open"
+        """Compatibilité : acquire() sans conserver le jeton (la sonde éventuelle est
+        close par success()/failure())."""
+        return self.acquire(pid) is not None
+
+    def release(self, pid: str, token: object) -> None:
+        """Rend la sonde détenue par `token` sans verdict : le prochain appelant sondera."""
+        with self._lock:
+            probe = self._probes.get(pid)
+            if probe is not None and probe[0] is token:
+                del self._probes[pid]
 
     def success(self, pid: str) -> None:
-        self._failures.pop(pid, None)
-        self._opened_at.pop(pid, None)
+        with self._lock:
+            self._failures.pop(pid, None)
+            self._opened_at.pop(pid, None)
+            self._probes.pop(pid, None)
 
     def failure(self, pid: str) -> None:
-        n = self._failures.get(pid, 0) + 1
-        self._failures[pid] = n
-        if n >= self.threshold:
-            if pid not in self._opened_at or self.state(pid) == "half_open":
-                logger.warning("Disjoncteur OUVERT pour le fournisseur %s (%d échecs)", pid, n)
-            self._opened_at[pid] = self._clock()
+        with self._lock:
+            self._probes.pop(pid, None)
+            n = self._failures.get(pid, 0) + 1
+            self._failures[pid] = n
+            if n >= self.threshold:
+                if pid not in self._opened_at or self._state(pid) == "half_open":
+                    logger.warning("Disjoncteur OUVERT pour le fournisseur %s (%d échecs)", pid, n)
+                self._opened_at[pid] = self._clock()
 
     def reset(self) -> None:
-        self._failures.clear()
-        self._opened_at.clear()
+        with self._lock:
+            self._failures.clear()
+            self._opened_at.clear()
+            self._probes.clear()
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
-        pids = set(self._failures) | set(self._opened_at)
-        return {p: {"state": self.state(p), "failures": self._failures.get(p, 0)} for p in sorted(pids)}
+        with self._lock:
+            pids = set(self._failures) | set(self._opened_at)
+            return {p: {"state": self._state(p), "failures": self._failures.get(p, 0)} for p in sorted(pids)}
 
 
 @dataclass
@@ -263,7 +316,18 @@ class Orchestrator:
             hops.append(Hop(prov, model, effort))
         if not hops:
             raise LLMError(503, "Aucun modèle d'IA compatible vision n'est configuré.", kind="no_vision")
-        return hops[: max(1, _env_int("LLM_MAX_HOPS", 3))]
+        # Pas de troncature ici : LLM_MAX_HOPS borne les appels TENTÉS (generate), pour
+        # qu'un fournisseur au disjoncteur ouvert ne consomme pas un saut.
+        return hops
+
+    @staticmethod
+    def _hop_timeouts(task_timeout: float, remaining: float) -> tuple[float, float]:
+        """(délai transmis au SDK, coupure wait_for) d'un saut. La coupure ne dépasse
+        jamais `remaining - DEADLINE_MARGIN_S` : la marge reste disponible pour répondre
+        à l'appelant ; le SDK expire un peu avant la coupure (erreur propre)."""
+        budget = remaining - DEADLINE_MARGIN_S
+        sdk_timeout = max(0.1, min(task_timeout, budget - SDK_TIMEOUT_GRACE_S))
+        return sdk_timeout, max(sdk_timeout, min(sdk_timeout + SDK_TIMEOUT_GRACE_S, budget))
 
     # ------------------------------------------------------------- execution
     async def generate(
@@ -280,14 +344,15 @@ class Orchestrator:
         started = time.monotonic()
         local_deadline = started + self._task_budget_s(task)
         task_timeout = self._task_timeout_s(task)
+        max_hops = max(1, _env_int("LLM_MAX_HOPS", 3))
+        attempts = 0
         tried: list[str] = []
         first_error: LLMError | None = None
 
         for hop in hops:
             pid = hop.provider.id
-            if not self.breaker.allow(pid):
-                logger.warning("Fournisseur %s ignoré : disjoncteur ouvert", pid)
-                continue
+            if attempts >= max_hops:
+                break
             remaining = request_context.remaining_s()
             if remaining is None:
                 remaining = local_deadline - time.monotonic()
@@ -295,24 +360,34 @@ class Orchestrator:
                 if first_error is not None:
                     logger.warning("Échéance atteinte après échec de %s", tried)
                 raise LLMError(504, "Délai de la requête dépassé avant la réponse de l'IA.", kind="deadline")
-            hop_timeout = max(0.1, min(task_timeout, remaining - DEADLINE_MARGIN_S))
+            token = self.breaker.acquire(pid)
+            if token is None:
+                logger.warning("Fournisseur %s ignoré : disjoncteur ouvert (ou essai déjà en cours)", pid)
+                continue
+            attempts += 1
+            sdk_timeout, hard_timeout = self._hop_timeouts(task_timeout, remaining)
 
             t0 = time.monotonic()
             try:
                 result = await asyncio.wait_for(
                     hop.provider.generate(
                         system, messages, max_tokens, json_schema, images,
-                        model=hop.model, timeout_s=hop_timeout, effort=hop.effort,
+                        model=hop.model, timeout_s=sdk_timeout, effort=hop.effort,
                     ),
-                    timeout=hop_timeout + DEADLINE_MARGIN_S,
+                    timeout=hard_timeout,
                 )
             except asyncio.TimeoutError:
                 err = LLMError(504, f"Le fournisseur {pid} n'a pas répondu à temps.", fallback=True, kind="timeout")
             except LLMError as e:
                 if not e.fallback:
+                    # Le fournisseur a répondu (requête rejetée…) : pas de verdict de panne.
+                    self.breaker.release(pid, token)
                     self._log_failure(task, hop, e, t0)
                     raise
                 err = e
+            except asyncio.CancelledError:
+                self.breaker.release(pid, token)  # requête abandonnée : sonde rendue
+                raise
             except Exception:  # noqa: BLE001 — bug/erreur inattendue d'un fournisseur
                 logger.exception("Erreur inattendue du fournisseur %s", pid)
                 err = LLMError(502, f"Erreur du fournisseur {pid}", fallback=True, kind="internal")

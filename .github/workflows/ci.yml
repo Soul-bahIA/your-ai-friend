@@ -152,13 +152,61 @@ jobs:
         run: |
           bash scripts/build_restore_sql.sh
           git diff --exit-code -- RESTAURATION_BASE.sql
+      - name: Droits soulbah_api ⊇ SQL de node-api (inventaire statique, T54)
+        run: python3 scripts/ci/check_api_grants.py
+      # --checks : schema_checks.sql, post_restore_checks.sql et api_role_checks.sql
+      # (rôle soulbah_api créé avec scripts/sql/soulbah_api_grants.sql, puis annulé).
       - name: Migrations ×2, comparaison de schéma, assertions
         env:
           PSQL: docker exec -i ${{ job.services.postgres.id }} psql -U postgres -d postgres
           PG_DUMP: docker exec ${{ job.services.postgres.id }} pg_dump -U postgres -d postgres
         run: bash scripts/ci/apply_migrations.sh --checks
 
-  # --- Compose : syntaxe et profils -----------------------------------------------
+  # --- Scripts d'exploitation : sauvegardes (S30, S19) -------------------------------
+  # Postgres 16 + client 16 du runner (pg_dump doit être ≥ serveur). Le rôle de test a un
+  # « + » dans son mot de passe (authentification scram réelle) ; le dump doit garder les
+  # droits (ACL de has_role).
+  scripts:
+    name: Scripts (sauvegardes bash + PowerShell)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Client PostgreSQL 16
+        run: |
+          command -v pg_dump >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q postgresql-client; }
+          pg_dump --version
+      - name: Migrations sur la base jetable + rôle de sauvegarde (mot de passe avec « + »)
+        run: |
+          PG_DUMP=none bash scripts/ci/apply_migrations.sh
+          psql -X -v ON_ERROR_STOP=1 -c "CREATE ROLE backup_user LOGIN SUPERUSER PASSWORD 'a+b9xQ'"
+      - name: backup_db.sh (décodage d'URL, refus du dump en clair, droits conservés)
+        env:
+          BACKUP_TEST_DATABASE_URL: postgresql://backup_user:a+b9xQ@127.0.0.1:5432/postgres?sslmode=disable
+        run: env -u PGPASSWORD bash scripts/ci/test_backup_db.sh
+      # backup_db.ps1 cible Windows : ici, refus du dump en clair seulement (l'intégration
+      # se lance sous Windows avec BACKUP_TEST_DATABASE_URL, voir l'en-tête du test).
+      - name: backup_db.ps1 (pwsh, refus du dump en clair)
+        run: pwsh -NoProfile -File scripts/ci/test_backup_db.ps1
+
+  # --- Compose : syntaxe, profils, variables transmises -----------------------------
   compose:
     name: docker compose (config)
     runs-on: ubuntu-latest
@@ -168,6 +216,53 @@ jobs:
         run: docker compose -f backend/docker-compose.yml config --quiet
       - name: Config avec le profil demo (rust-compute)
         run: docker compose -f backend/docker-compose.yml --profile demo config --quiet
+      - name: Variables documentées et lues → transmises aux services (T26)
+        run: |
+          docker compose -f backend/docker-compose.yml config --format json > "$RUNNER_TEMP/compose.json"
+          python3 scripts/ci/check_compose_env.py --compose-json "$RUNNER_TEMP/compose.json"
+
+  # --- Images Docker (T35) : construites réellement ---------------------------------
+  docker-build:
+    name: docker compose build (images)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build python-ia, node-api, console
+        run: docker compose -f backend/docker-compose.yml build
+      # Démo Rust gelée (T50, profil demo) : informatif tant que Cargo.lock n'est pas versionné.
+      - name: Build rust-compute (profil demo, non bloquant)
+        continue-on-error: true
+        run: docker compose -f backend/docker-compose.yml --profile demo build rust-compute
+
+  # --- Démo Rust : compilation (T35, T50), non bloquante ------------------------------
+  # Sans Cargo.lock versionné, le job en génère un, compile en --locked et le publie en
+  # artefact « rust-compute-Cargo.lock » : le récupérer et le committer (T50).
+  rust:
+    name: rust-compute (cargo check, non bloquant)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: backend/rust-compute
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Cargo.lock
+        run: |
+          if [ -f Cargo.lock ]; then
+            echo "Cargo.lock versionné : build reproductible."
+          else
+            cargo generate-lockfile
+            echo "::warning::backend/rust-compute/Cargo.lock absent (T50) : généré pour ce run, à committer (artefact rust-compute-Cargo.lock)."
+          fi
+      - run: cargo check --locked --all-targets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-compute-Cargo.lock
+          path: backend/rust-compute/Cargo.lock
+          if-no-files-found: ignore
 
   # --- Sécurité : dépendances de production + secrets ------------------------------
   security:

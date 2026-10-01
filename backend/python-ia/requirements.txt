@@ -6,15 +6,15 @@ fastapi==0.142.2
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 pydantic==2.13.5
-# output_config (format + effort) et timeout par requête : SDK récent ; 1.x non validé ici
-# (testé : 0.116.0 et 0.125.0).
-anthropic>=0.116.0,<1.0
+# output_config (format + effort) et timeout par requête : SDK récent ; 1.x non validé ici.
+# Épinglage EXACT (T34) : CI, Docker et poste de dev installent la version validée.
+anthropic==0.125.0
 
 # Production vidéo des formations (narration TTS + diapos + montage MP4)
 moviepy==1.0.3
 opencv-python-headless==4.14.0.94
 Pillow==12.3.0
-numpy>=1.26,<3
+numpy==2.4.6
 # Dépendance transitive de moviepy — épinglée sur une version corrigée (CVE-2024-47081).
 requests==2.34.2
 

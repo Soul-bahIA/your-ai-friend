@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from skills.base import PathCheck, Skill, SkillResult
+from skills.base import PathCheck, Skill, SkillResult, path_refusal_now
 from skills.filesystem import touches_git_dir
 from skills.safety import deny_reason
 
@@ -37,6 +37,10 @@ class MoveFileSkill(Skill):
             reason = deny_reason(p)
             if reason:
                 return SkillResult(ok=False, detail=f"chemin interdit ({reason}) : {p}")
+            # Whitelist du gate revérifiée au moment d'agir (liée par l'executor).
+            refusal = path_refusal_now(p)
+            if refusal:
+                return SkillResult(ok=False, detail=f"chemin refusé au moment d'agir : {refusal}")
         if not os.path.exists(src):
             return SkillResult(ok=False, detail=f"source introuvable : {src}")
 

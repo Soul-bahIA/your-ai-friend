@@ -20,9 +20,15 @@ export interface KbSnippet {
 const OPEN = "<donnees_non_fiables>";
 const CLOSE = "</donnees_non_fiables>";
 
-/** Neutralise toute balise qui fermerait/ouvrirait le bloc de données. */
-function neutralize(s: string): string {
-  return s.replace(/<\s*\/?\s*donnees_non_fiables\s*>/gi, "[balise retirée]");
+/**
+ * Neutralise toute balise qui fermerait/ouvrirait le bloc de données (C§10), y compris avec
+ * attributs (« </donnees_non_fiables foo=1> ») ou sans « > » final : la balise complète est
+ * remplacée, puis tout « <donnees_non_fiables » / « </donnees_non_fiables » résiduel.
+ */
+export function neutralize(s: string): string {
+  return s
+    .replace(/<\s*\/?\s*donnees_non_fiables\b[^<>]*>/gi, "[balise retirée]")
+    .replace(/<\s*\/?\s*donnees_non_fiables\b/gi, "[balise retirée]");
 }
 
 function clip(s: string, n: number): string {
@@ -40,7 +46,12 @@ export function buildKnowledgeBlock(
   const parts: string[] = [];
   let total = 0;
   for (const e of entries.slice(0, maxEntries)) {
-    const unverified = e.source === "llm_synthesis" ? " — synthèse automatique NON VÉRIFIÉE" : "";
+    const unverified =
+      e.source === "llm_synthesis"
+        ? " — synthèse automatique NON VÉRIFIÉE"
+        : typeof e.source === "string" && e.source.endsWith("_synthesis")
+          ? " — synthèse automatique de sources web, à vérifier"
+          : "";
     const tags = e.tags?.length ? ` [tags: ${e.tags.slice(0, 10).join(", ")}]` : "";
     const header = `[${parts.length + 1}] ${neutralize(e.title.slice(0, 200))} (${neutralize(String(e.category ?? "general").slice(0, 50))}${unverified})${neutralize(tags)}`;
     let body = clip(neutralize(e.content), maxEntry);

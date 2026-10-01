@@ -10,7 +10,7 @@ vi.mock("../src/services/research/webSearch.js", () => ({
 }));
 vi.mock("../src/clients/iaClient.js", () => ({ synthesizeKnowledge: vi.fn() }));
 
-const { ResearchService, cappedConfidence, isServableKnowledge, markSourcesVerified, LLM_ONLY_MAX_CONFIDENCE } = await import(
+const { ResearchService, cappedConfidence, isServableKnowledge, isVerifiedEntry, markSourcesVerified, LLM_ONLY_MAX_CONFIDENCE } = await import(
   "../src/services/research/index"
 );
 const { knowledgeService } = await import("../src/services/knowledge/index");
@@ -78,6 +78,41 @@ describe("ResearchService (T13)", () => {
     expect(r).toMatchObject({ source: "kb", verified: true });
     expect(r.entry.id).toBe("ok");
     expect(synthesizeKnowledge).not.toHaveBeenCalled();
+  });
+
+  it("synthèse web en cache : resservie depuis la KB mais JAMAIS comme vérifiée", async () => {
+    vi.mocked(knowledgeService.search).mockResolvedValue([
+      entry({ id: "ws", source: "web_synthesis", confidence: 0.8, sources: [{ url: "https://invented.example", verified: false }] }),
+    ] as never);
+    const r = await new ResearchService().research(U, "question");
+    expect(r).toMatchObject({ source: "kb", fromCache: true, verified: false });
+    expect(r.entry.id).toBe("ws");
+    // même avec toutes ses sources vérifiées : reste une synthèse de modèle
+    vi.mocked(knowledgeService.search).mockResolvedValue([
+      entry({ id: "ws2", source: "web_synthesis", confidence: 0.8, sources: [{ url: "https://a.org", verified: true }] }),
+    ] as never);
+    expect((await new ResearchService().research(U, "question")).verified).toBe(false);
+  });
+
+  it("connaissance non synthétique citant une source non vérifiée → verified=false", async () => {
+    vi.mocked(knowledgeService.search).mockResolvedValue([
+      entry({ id: "c", source: "chat", confidence: 0.9, sources: [{ url: "https://x.org", verified: false }] }),
+    ] as never);
+    expect(await new ResearchService().research(U, "question")).toMatchObject({ source: "kb", verified: false });
+    expect(isVerifiedEntry({ source: "chat", sources: [{ url: "https://x.org" }] })).toBe(true);
+    expect(isVerifiedEntry({ source: "llm_synthesis", sources: [] })).toBe(false);
+    expect(isVerifiedEntry({ source: null, sources: [] })).toBe(true);
+  });
+
+  it("synthèse web fraîche citant une URL jamais récupérée → verified=false", async () => {
+    vi.mocked(knowledgeService.search).mockResolvedValue([]);
+    vi.mocked(getWebSearchProvider).mockReturnValueOnce({
+      id: "tavily",
+      available: true,
+      search: vi.fn(async () => [{ title: "p", url: "https://autre.org/vraie", snippet: "s" }]),
+    } as never);
+    const r = await new ResearchService().research(U, "question"); // synthesis cite https://exemple.org/page
+    expect(r).toMatchObject({ source: "web+synthesis", webUsed: true, verified: false });
   });
 
   it("avec web : source web_synthesis, URL récupérées marquées vérifiées, confiance ≤ 0.8", async () => {

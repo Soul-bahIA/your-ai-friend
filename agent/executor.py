@@ -9,7 +9,7 @@ from typing import Any, Callable
 from permissions import PermissionGate
 from skills import REGISTRY, get_skill
 from skills import record_bg
-from skills.base import CancelToken, Skill, SkillResult, bind_token
+from skills.base import CancelToken, Skill, SkillResult, bind_path_refusal, bind_token
 
 log = logging.getLogger("soulbah.executor")
 
@@ -20,6 +20,7 @@ ControlFn = Callable[[], str]
 
 DEFAULT_STEP_TIMEOUT = 900.0
 _CONTROL_POLL_SECONDS = 3.0  # lecture de l'ordre stop pendant une étape longue
+_CONFIRM_CONTROL_POLL_SECONDS = 2.0  # lecture de l'ordre stop pendant une confirmation console
 _CANCEL_GRACE_SECONDS = 10.0  # délai laissé au skill pour s'arrêter proprement
 _PAUSE_POLL_SECONDS = 2.0  # lecture du contrôle pendant une pause (T39 : plus 1 GET/s)
 _PAUSE_NOTICE_SECONDS = 60.0  # rappel « toujours en pause » (garde aussi le heartbeat vivant)
@@ -58,12 +59,22 @@ class Executor:
         Retourne (résultat, interruption) où interruption ∈ {None, "timeout", "stop",
         "interrupt", "abort"}. Chaque étape a SON jeton d'annulation (enfant de celui
         de la tâche) : un skill bloqué qu'on abandonne (thread démon) garde un jeton
-        annulé et ne peut ni être relancé ni perturber l'étape ou la tâche suivante."""
+        annulé et ne peut ni être relancé ni perturber l'étape ou la tâche suivante.
+
+        Un ordre « stop » lu pendant l'étape l'INTERROMPT (jeton annulé, délai de
+        grâce, enregistrements finalisés) au lieu d'attendre sa fin : plus sûr pour
+        une commande ou un rendu de plusieurs minutes. L'étape est rapportée
+        « interrompue (arrêt demandé) » et la tâche finit en `cancelled`.
+
+        Le contrôle de chemins du gate (whitelist + deny-list) est lié au thread de
+        l'étape : les skills de fichiers le revérifient juste avant d'agir."""
         box: dict[str, SkillResult] = {}
         step_token = task_token.child()
+        path_refusal = getattr(self.gate, "path_refusal", None)
 
         def target() -> None:
             bind_token(step_token)
+            bind_path_refusal(path_refusal)
             try:
                 box["result"] = skill.run(step)
             except Exception as e:  # noqa: BLE001 - un skill ne doit jamais tuer l'agent
@@ -71,6 +82,7 @@ class Executor:
                 box["result"] = SkillResult(ok=False, detail=f"erreur interne du skill : {e}")
             finally:
                 bind_token(None)
+                bind_path_refusal(None)
 
         worker = threading.Thread(target=target, daemon=True, name=f"skill-{skill.name}")
         start = time.monotonic()
@@ -171,9 +183,15 @@ class Executor:
         cancelled, aborted, timed_out } + `empty_plan` (plan vide, T5) et
         `simulated` (dry-run, T10) quand c'est le cas.
 
+        Évènement terminal (cockpit, contrat §13) : `task_completed`,
+        `task_cancelled` ou `task_failed` (échec, refus, délai dépassé, plan vide ou
+        invalide). Rien sur abort (409/410) : la tâche n'est plus la nôtre.
+
         - `on_event` : timeline + captures (et évènements d'approbation du gate) ;
-        - `check_control` : pause/stop posés depuis l'app, lus entre les étapes et
-          pendant les étapes longues ; "gone" (410) = tâche supprimée ;
+        - `check_control` : pause/stop posés depuis l'app, lus entre les étapes,
+          pendant les étapes longues et pendant une confirmation console en attente
+          (un stop la refuse ; relu après la réponse, avant d'agir) ; "gone" (410)
+          = tâche supprimée ;
         - `abort` : posé par l'agent quand le backend indique (409/410) que la tâche
           n'est plus la nôtre — on s'arrête sans rien émettre ;
         - `cancel` : jeton de la tâche (Ctrl+C) — arrêt rapide, statut `cancelled`.
@@ -200,9 +218,11 @@ class Executor:
             return base
 
         if not isinstance(payload, dict):
+            emit("task_failed", "Payload invalide", {"index": 0, "timed_out": False})
             return _report(summary="payload invalide")
         steps = payload.get("steps") or []
         if not isinstance(steps, list):
+            emit("task_failed", "payload.steps invalide", {"index": 0, "timed_out": False})
             return _report(summary="payload.steps invalide")
         if not steps:
             # T5 : un plan vide n'est JAMAIS un succès (pas d'évaluation, pas de mémoire).
@@ -211,6 +231,9 @@ class Executor:
 
         goal_meta = payload.get("goal_meta")
         planned_by_server = isinstance(goal_meta, dict) and bool(goal_meta)
+        # S21 : posé par le serveur (non abaissable par le client) dès qu'une étape a
+        # un effet réel → ces étapes sont confirmées sur le PC quel que soit le mode.
+        server_requires_confirmation = payload.get("requires_confirmation") is True
 
         report: list[dict[str, Any]] = []
         all_ok = True
@@ -219,8 +242,39 @@ class Executor:
         timed_out = False
         interrupted_locally = False
 
+        # Ordre lu PENDANT une confirmation console (C§2/§13) : un « stop » cliqué
+        # dans l'app pendant que le PC attend une réponse refuse la confirmation ;
+        # l'action ne s'exécute pas, même si l'utilisateur l'approuve ensuite.
+        # Une lecture toutes les 2 s au plus (la console interroge en continu).
+        confirm_ctl: dict[str, Any] = {"stop": False, "gone": False, "next": 0.0}
+
+        def _read_control() -> str:
+            try:
+                return str(control())
+            except Exception:  # noqa: BLE001 - lecture impossible = pas d'ordre
+                log.debug("Lecture du contrôle impossible", exc_info=True)
+                return "error"
+
         def _stop_check() -> bool:
-            return token.is_cancelled() or abort.is_set()
+            if token.is_cancelled() or abort.is_set():
+                return True
+            if not (confirm_ctl["stop"] or confirm_ctl["gone"]):
+                now = time.monotonic()
+                if now >= confirm_ctl["next"]:
+                    confirm_ctl["next"] = now + _CONFIRM_CONTROL_POLL_SECONDS
+                    ctrl = _read_control()
+                    if ctrl == "stop":
+                        confirm_ctl["stop"] = True
+                    elif ctrl == "gone":
+                        confirm_ctl["gone"] = True
+            return bool(confirm_ctl["stop"] or confirm_ctl["gone"])
+
+        approvals = {"asked": 0}
+
+        def gate_emit(etype: str, message: str, data: dict) -> None:
+            if etype == "approval_required":
+                approvals["asked"] += 1
+            emit(etype, message, data)
 
         try:
             emit("task_started", f"Début — {len(steps)} étape(s)", {"total": len(steps)})
@@ -261,14 +315,39 @@ class Executor:
 
                 # Autorisation AVANT step_started (S22) : une confirmation en attente
                 # est signalée par approval_required / approval_result.
-                ctx = {"emit": emit, "step_index": i, "goal_meta": planned_by_server, "stop_check": _stop_check}
+                ctx = {"emit": gate_emit, "step_index": i, "goal_meta": planned_by_server,
+                       "requires_confirmation": server_requires_confirmation, "stop_check": _stop_check}
+                asked_before = approvals["asked"]
+                # Le contrôle vient d'être lu : prochaine lecture dans 2 s au plus tôt.
+                confirm_ctl["next"] = time.monotonic() + _CONFIRM_CONTROL_POLL_SECONDS
                 allowed, reason = self.gate.authorize(skill, step, ctx)
-                if abort.is_set():  # 409/410 reçu pendant la confirmation
+                if abort.is_set() or confirm_ctl["gone"]:  # 409/410 reçu pendant la confirmation
                     aborted = True
                     break
                 if token.is_cancelled():
                     interrupted_locally = stopped = True
                     break
+                if confirm_ctl["stop"]:  # « Arrêter » cliqué pendant la confirmation
+                    log.warning("Arrêt demandé depuis l'app pendant la confirmation de l'étape %d — "
+                                "action non exécutée", i)
+                    stopped = True
+                    break
+                if approvals["asked"] != asked_before:
+                    # La réponse a pu suivre un stop ou une pause demandés depuis l'app :
+                    # le contrôle est relu AVANT d'agir (une pause fait attendre).
+                    if allowed:
+                        ctrl = self._wait_while_paused(control, abort, token, emit, i)
+                    else:
+                        ctrl = _read_control()
+                    if abort.is_set() or ctrl == "gone":
+                        aborted = True
+                        break
+                    if token.is_cancelled():
+                        interrupted_locally = stopped = True
+                        break
+                    if ctrl == "stop":
+                        stopped = True
+                        break
                 if allowed:
                     # S28 : revalidation des chemins juste avant l'exécution.
                     recheck = self.gate.recheck(skill, step)
@@ -361,7 +440,9 @@ class Executor:
             emit("task_completed", summary, {})
         elif timed_out:
             summary = "arrêt : étape trop longue (délai dépassé)"
+            emit("task_failed", summary, {"index": len(report), "timed_out": True})
         else:
             summary = "arrêt sur étape en échec/refus"
+            emit("task_failed", summary, {"index": len(report), "timed_out": False})
         return _report(ok=all_ok, steps=report, summary=summary, stopped=stopped, cancelled=cancelled,
                        aborted=aborted, timed_out=timed_out)

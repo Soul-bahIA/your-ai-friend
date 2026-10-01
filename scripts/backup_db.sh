@@ -20,22 +20,46 @@
 # Schémas sauvegardés : BACKUP_SCHEMAS (défaut : "public auth").
 # Dossier de sortie    : BACKUP_DIR (défaut : backups/ à la racine du dépôt).
 #
-# Chiffrement (facultatif mais RECOMMANDÉ : le dump contient toutes les données) :
+# Chiffrement OBLIGATOIRE par défaut (S30 : le dump contient toutes les données, dont
+# les empreintes de mots de passe d'auth.users) — une des variables :
 #   BACKUP_AGE_RECIPIENT=age1…            → age  -r <clé publique>      (fichiers .age)
 #   BACKUP_GPG_RECIPIENT=<id ou e-mail>   → gpg --encrypt (clé publique) (fichiers .gpg)
 #   BACKUP_GPG_PASSPHRASE_FILE=<fichier>  → gpg --symmetric AES256, phrase lue dans le fichier
 # Après chiffrement réussi, les fichiers en clair sont supprimés
-# (BACKUP_KEEP_PLAINTEXT=1 pour les garder). Sans configuration : avertissement seulement.
+# (BACKUP_KEEP_PLAINTEXT=1 pour les garder). Sans aucune de ces variables, le script
+# REFUSE de s'exécuter (code 2), sauf BACKUP_ALLOW_PLAINTEXT=1 (dump en clair assumé,
+# par exemple pour une base jetable).
+#
+# Droits (S19) : les GRANT/REVOKE sont CONSERVÉS dans le dump (pas de --no-privileges) :
+# une restauration ne doit pas rendre has_role / is_admin à PUBLIC ou anon. Seule la
+# propriété des objets est omise (--no-owner). Restauration : README.md « Sauvegardes ».
 #
 # Vérification TLS stricte (facultatif) : PGSSLMODE=verify-full PGSSLROOTCERT=<CA Supabase>.
 #
 # Usage (git-bash / Linux / macOS, depuis n'importe où) :
-#   bash scripts/backup_db.sh
-#   BACKUP_SCHEMAS="public" bash scripts/backup_db.sh
-#   BACKUP_AGE_RECIPIENT="age1…" bash scripts/backup_db.sh
+#   BACKUP_GPG_PASSPHRASE_FILE=~/.soulbah/backup_passphrase.txt bash scripts/backup_db.sh
+#   BACKUP_AGE_RECIPIENT="age1…" BACKUP_SCHEMAS="public" bash scripts/backup_db.sh
+#   BACKUP_ALLOW_PLAINTEXT=1 bash scripts/backup_db.sh          # en clair, explicitement
 #
 # Prérequis : pg_dump dans le PATH, version >= à celle du serveur
 # (Windows : C:\Program Files\PostgreSQL\<version>\bin).
+#
+# Tests : scripts/ci/test_backup_db.sh (source ce fichier pour tester les fonctions).
+
+# Décodage « pourcent » de l'URL (RFC 3986). Le « + » n'est PAS un espace dans
+# userinfo / chemin (seulement dans un formulaire HTML) : libpq et node-api le gardent
+# tel quel, on fait de même. Les antislashs littéraux sont préservés (printf %b).
+urldecode() {
+  local s="${1//\\/\\\\}"
+  printf '%b' "${s//%/\\x}"
+}
+
+# Échappement d'un champ du fichier pgpass (« \ » et « : »).
+pgpass_escape() { local s="${1//\\/\\\\}"; printf '%s' "${s//:/\\:}"; }
+
+# Sourcé (tests) : seules les fonctions ci-dessus sont définies.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
 set -euo pipefail
 umask 077
 
@@ -43,6 +67,27 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT/backend/.env"
 OUT_DIR="${BACKUP_DIR:-$ROOT/backups}"
 SCHEMAS="${BACKUP_SCHEMAS:-public auth}"
+
+# --- Chiffrement : décidé AVANT toute lecture de secret ou connexion (échec rapide) ----
+ENCRYPT=""
+if [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]; then
+  command -v age >/dev/null 2>&1 || { echo "Erreur : BACKUP_AGE_RECIPIENT défini mais 'age' introuvable." >&2; exit 1; }
+  ENCRYPT="age"
+elif [[ -n "${BACKUP_GPG_RECIPIENT:-}" || -n "${BACKUP_GPG_PASSPHRASE_FILE:-}" ]]; then
+  command -v gpg >/dev/null 2>&1 || { echo "Erreur : chiffrement gpg demandé mais 'gpg' introuvable." >&2; exit 1; }
+  if [[ -z "${BACKUP_GPG_RECIPIENT:-}" && ! -r "${BACKUP_GPG_PASSPHRASE_FILE}" ]]; then
+    echo "Erreur : BACKUP_GPG_PASSPHRASE_FILE illisible : ${BACKUP_GPG_PASSPHRASE_FILE}" >&2; exit 1
+  fi
+  ENCRYPT="gpg"
+elif [[ "${BACKUP_ALLOW_PLAINTEXT:-0}" != "1" ]]; then
+  {
+    echo "REFUS : aucun chiffrement configuré (S30) — le dump contiendrait toutes les données en clair,"
+    echo "        y compris les empreintes de mots de passe (schéma auth)."
+    echo "        Définir BACKUP_AGE_RECIPIENT, BACKUP_GPG_RECIPIENT ou BACKUP_GPG_PASSPHRASE_FILE,"
+    echo "        ou BACKUP_ALLOW_PLAINTEXT=1 pour assumer explicitement un dump en clair."
+  } >&2
+  exit 2
+fi
 
 DB_URL="${BACKUP_DATABASE_URL:-}"
 if [[ -z "$DB_URL" ]]; then
@@ -61,8 +106,6 @@ if [[ -z "$DB_URL" ]]; then
 fi
 
 # --- Décomposition de l'URL postgres[ql]://user:pass@host:port/db?params -------------
-urldecode() { local s="${1//+/ }"; printf '%b' "${s//%/\\x}"; }
-
 case "$DB_URL" in
   postgres://*|postgresql://*) ;;
   *) echo "Erreur : DATABASE_URL doit commencer par postgres:// ou postgresql://" >&2; exit 1 ;;
@@ -114,7 +157,6 @@ cleanup() {
 }
 trap cleanup EXIT
 if [[ -n "$db_pass" ]]; then
-  pgpass_escape() { local s="${1//\\/\\\\}"; printf '%s' "${s//:/\\:}"; }
   printf '%s:%s:%s:%s:%s\n' \
     "$(pgpass_escape "$PGHOST")" "$PGPORT" '*' "$(pgpass_escape "$PGUSER")" \
     "$(pgpass_escape "$(urldecode "$db_pass")")" > "$TMP_DIR/pgpass"
@@ -130,19 +172,6 @@ if ! command -v pg_dump >/dev/null 2>&1; then
   done
 fi
 command -v pg_dump >/dev/null 2>&1 || { echo "Erreur : pg_dump introuvable (installez les outils client PostgreSQL)." >&2; exit 1; }
-
-# --- Chiffrement : vérifié AVANT le dump (échec rapide) -------------------------------
-ENCRYPT=""
-if [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]; then
-  command -v age >/dev/null 2>&1 || { echo "Erreur : BACKUP_AGE_RECIPIENT défini mais 'age' introuvable." >&2; exit 1; }
-  ENCRYPT="age"
-elif [[ -n "${BACKUP_GPG_RECIPIENT:-}" || -n "${BACKUP_GPG_PASSPHRASE_FILE:-}" ]]; then
-  command -v gpg >/dev/null 2>&1 || { echo "Erreur : chiffrement gpg demandé mais 'gpg' introuvable." >&2; exit 1; }
-  if [[ -z "${BACKUP_GPG_RECIPIENT:-}" && ! -r "${BACKUP_GPG_PASSPHRASE_FILE}" ]]; then
-    echo "Erreur : BACKUP_GPG_PASSPHRASE_FILE illisible : ${BACKUP_GPG_PASSPHRASE_FILE}" >&2; exit 1
-  fi
-  ENCRYPT="gpg"
-fi
 
 encrypt_file() {
   local f="$1"
@@ -168,11 +197,12 @@ for s in $SCHEMAS; do SCHEMA_ARGS+=(--schema="$s"); done
 
 echo "pg_dump $(pg_dump --version | awk '{print $NF}') — $PGUSER@$PGHOST:$PGPORT/$PGDATABASE (sslmode=$PGSSLMODE) — schémas : $SCHEMAS"
 
+# Droits conservés (pas de --no-privileges) : voir l'en-tête (S19).
 echo "→ $BASE.dump (format custom)"
-pg_dump --format=custom --no-owner --no-privileges "${SCHEMA_ARGS[@]}" --file="$BASE.dump"
+pg_dump --format=custom --no-owner "${SCHEMA_ARGS[@]}" --file="$BASE.dump"
 
 echo "→ $BASE.sql (format texte)"
-pg_dump --format=plain --no-owner --no-privileges "${SCHEMA_ARGS[@]}" --file="$BASE.sql"
+pg_dump --format=plain --no-owner "${SCHEMA_ARGS[@]}" --file="$BASE.sql"
 
 if [[ -n "$ENCRYPT" ]]; then
   for f in "$BASE.dump" "$BASE.sql"; do
@@ -183,7 +213,6 @@ if [[ -n "$ENCRYPT" ]]; then
   ls -lh "$BASE".*
 else
   ls -lh "$BASE.dump" "$BASE.sql"
-  echo "ATTENTION : sauvegarde NON chiffrée (toutes les données en clair)." >&2
-  echo "            Définir BACKUP_AGE_RECIPIENT, BACKUP_GPG_RECIPIENT ou BACKUP_GPG_PASSPHRASE_FILE." >&2
+  echo "ATTENTION : sauvegarde NON chiffrée (BACKUP_ALLOW_PLAINTEXT=1) : toutes les données en clair." >&2
 fi
 echo "Sauvegarde terminée."

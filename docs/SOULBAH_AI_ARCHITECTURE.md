@@ -19,8 +19,8 @@ pause.
 ```
  Navigateur : app web frontend/ (Vite + React, :8080)
    │ REST + JWT Supabase (/api/*)        ▲ Realtime : agent_tasks, agent_events, formations, system_logs
-   │ + accès PostgREST direct : chat_*, knowledge_base, formations, applications, system_logs,
-   │   DELETE agent_tasks (bornés par la RLS)
+   │ + accès PostgREST direct : chat_*, formations, applications, system_logs, profiles
+   │   (bornés par la RLS) ; lecture seule de knowledge_base, agent_tasks, agent_keys
    ▼
  backend/node-api  Fastify 5 / TypeScript  :3000 (HOST=127.0.0.1 par défaut)
    │ file agent_tasks · objectif → plan → évaluation · mémoire · KB · chat SSE · clés agent
@@ -112,29 +112,43 @@ simulation. Il ne réclame aucune tâche au serveur, et son résultat porte `sim
 | Exposition réseau | node-api écoute par défaut sur `127.0.0.1` (`HOST`) hors Docker. Dans `backend/docker-compose.yml`, tous les ports publiés sont liés à `127.0.0.1`, et python-ia et rust-compute ne sont pas publiés. |
 | Python | Un venv par composant (`agent/.venv`, `backend/python-ia/.venv`), créé par `scripts/setup_venvs.ps1` ou `.sh` (T34). |
 | Workspace de l'agent | `SOULBAH_ALLOWED_DIRS` vaut par défaut `%USERPROFILE%\SoulbahWorkspace`, créé au besoin (contrat §14). L'agent refuse de démarrer si un dossier autorisé contient l'agent ou le dépôt. La deny-list est permanente : code et config de l'agent, `*.env`, `.ssh`, clés privées, `.git/hooks`, `git --separate-git-dir`/`--template`. |
-| Clé agent | Hachée (SHA-256) en base, affichée une seule fois et révocable depuis la page *Sécurité*. Elle est créée par `POST /api/agent-keys` ; le navigateur ne peut que la lire ou la supprimer (RLS, LOT 1). |
+| Clé agent | Hachée (SHA-256) en base, affichée une seule fois et révocable depuis la page *Sécurité*. Elle est créée par `POST /api/agent-keys` et révoquée par `DELETE /api/agent-keys/:id` (qui annule d'abord les tâches de ce PC) ; le navigateur ne peut que la lire (RLS, LOT 1). **Pas d'expiration** en V1 : reportée au LOT 4 (`agent_keys.expires_at`, audit §12 « agents ») — S20 partiel. |
 
 ## 5. Données
 
-- **Supabase Postgres**, schéma dans `supabase/migrations/` (18 migrations).
+- **Supabase Postgres**, schéma dans `supabase/migrations/` (19 migrations).
   - Règles (audit §12) : migrations additives et idempotentes depuis `20260703000000` ;
     contraintes `NOT VALID` puis `VALIDATE` tentée.
   - Interdits : modifier le CHECK de statut d'`agent_tasks`, ajouter une FK sur
     `agent_events.task_id`, supprimer `modules_status` (dépréciée, T48).
-- **Migration LOT 1** (`20261002000000_lot1_fixes.sql`) :
-  - ciblage d'un PC : FK `agent_keys` `ON DELETE SET NULL` et index de poll ;
-  - trigger de bail (T45) ;
-  - `has_role` retiré à anon, nouvelle fonction `is_admin()` (S19) ;
-  - `agent_keys` en lecture et suppression seules côté client, INSERT qui vérifient la
-    propriété de la ligne parente (S20) ;
-  - CHECK `status`/`level` sur `agent_memory`.
+- **Migrations LOT 1** :
+  - `20261001090000_lot1_fixes.sql` (anciennement `20261002000000`, renommée avant tout
+    `db push` pour ne pas être datée du lendemain) :
+    - ciblage d'un PC : FK `agent_keys` `ON DELETE SET NULL` et index de poll ;
+    - trigger de bail (T45) ;
+    - `has_role` retiré à anon, nouvelle fonction `is_admin()` (S19) ;
+    - `agent_keys` en lecture et suppression seules côté client, INSERT qui vérifient la
+      propriété de la ligne parente (S20) ;
+    - CHECK `status`/`level` sur `agent_memory`.
+  - `20261001100000_lot1_verif.sql` (suite de la vérification) :
+    - la révocation d'une clé (`ON DELETE SET NULL`) ne prolonge plus le bail d'une tâche ;
+    - `agent_memory` : statut par défaut `proposed`, client en lecture + suppression
+      (S11), index trigramme `pg_trgm` sur `goal` (T11) ;
+    - vagues G2/G3 : plus de DELETE client sur `agent_tasks`, `knowledge_base` en lecture
+      seule pour le client (contrat §11) ; `agent_keys` en lecture seule ;
+    - vague G4 : `has_role` n'est plus exécutable par `authenticated`.
 - **RLS** : chaque table est filtrée par `user_id`. **Limite actuelle (S4)** : node-api se
   connecte en `postgres` et contourne donc la RLS. Il applique lui-même le filtrage par
   utilisateur dans chaque requête.
 - **Restauration** : `RESTAURATION_BASE.sql` concatène les migrations et sert pour un projet
   **neuf** uniquement. Sur le projet existant, utiliser `supabase db push`.
 - **Sauvegardes** : `scripts/backup_db.ps1` / `.sh`. Le mot de passe passe par un fichier
-  pgpass temporaire, et le chiffrement gpg/age est facultatif (S30).
+  pgpass temporaire ; le chiffrement gpg/age est obligatoire, sauf
+  `BACKUP_ALLOW_PLAINTEXT=1` (S30) ; les droits (GRANT/REVOKE) sont conservés dans le dump
+  (S19). Après restauration : `scripts/sql/post_restore_checks.sql`.
+- **Rôle `soulbah_api`** (S4) : droits dans `scripts/sql/soulbah_api_grants.sql`, vérifiés
+  contre le SQL de node-api (`scripts/ci/check_api_grants.py`) et sur une vraie base
+  (`scripts/ci/api_role_checks.sql`).
 - **pgvector** : absent du PG18 local. Le DDL vectoriel est remplacé par un stub en local
   (`scripts/ci/apply_migrations.sh --stub-vector`) et vérifié pour de vrai dans le job CI
   `db`, dont l'image `pgvector/pgvector` doit être épinglée sur la version de Supabase.
@@ -150,9 +164,15 @@ simulation. Il ne réclame aucune tâche au serveur, et son résultat porte `sim
 | `node-api` | `tsc`, vitest, `npm run build`. |
 | `python-ia` | Python 3.11/3.12 : venv, compileall, pytest. |
 | `agent` | `windows-latest` : venv, pytest `agent/tests` avec `SOULBAH_NO_DOTENV=1`. |
-| `db` | `pgvector/pgvector` + `scripts/ci/auth_stub.sql` : migrations appliquées deux fois, schéma identique après rejeu, assertions `scripts/ci/schema_checks.sql` (FK, trigger, policies, droits), `RESTAURATION_BASE.sql` à jour. |
-| `compose` | `docker compose config`, avec et sans le profil `demo`. |
+| `db` | `pgvector/pgvector` + `scripts/ci/auth_stub.sql` : migrations appliquées deux fois, schéma identique après rejeu, assertions `scripts/ci/schema_checks.sql` (FK, trigger, policies, droits, index), `scripts/sql/post_restore_checks.sql`, rôle `soulbah_api` (statique + `api_role_checks.sql`), `RESTAURATION_BASE.sql` à jour. |
+| `scripts` | Postgres 16 : `scripts/ci/test_backup_db.sh` (URL avec « + », refus du dump en clair, droits conservés) et `test_backup_db.ps1` sous pwsh. |
+| `compose` | `docker compose config`, avec et sans le profil `demo` ; variables documentées transmises aux services (`scripts/ci/check_compose_env.py`). |
+| `docker-build` | `docker compose build` (python-ia, node-api, console) ; rust-compute non bloquant. |
+| `rust` | `cargo check --locked` de rust-compute, non bloquant (Cargo.lock généré en artefact tant qu'il n'est pas versionné, T50). |
 | `security` | `npm audit --omit=dev` (frontend, node-api), `pip-audit` (bloquant en prod, non bloquant en dev), gitleaks sur tout l'historique. |
+
+`.github/workflows/codeql.yml` : CodeQL (`javascript-typescript`, `python`, requêtes
+`security-extended`) à chaque push sur `main`, sur les PR et chaque lundi.
 
 Plancher de non-régression (contrat §15) : agent 156, python-ia 55, node-api 38, front 48 tests.
 

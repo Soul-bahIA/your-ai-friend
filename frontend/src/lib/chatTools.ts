@@ -23,7 +23,10 @@ export interface ProposedAction {
 
 export interface ActionField {
   label: string;
+  /** Valeur INTÉGRALE (jamais tronquée) : c'est exactement ce qui sera exécuté (S12). */
   value: string;
+  /** Texte long ou multiligne : affiché dans une zone défilante plutôt qu'en ligne. */
+  long: boolean;
 }
 
 export interface ActionDescription {
@@ -83,37 +86,73 @@ export function proposeToolCalls(
   return out;
 }
 
-const text = (v: unknown, max = 400) => {
-  const s = typeof v === "string" ? v.trim() : "";
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+/**
+ * Arguments réellement lus par le serveur pour chaque outil (node-api services/chatActions.ts).
+ * Seuls ceux-ci sont envoyés à l'exécution, et chacun est affiché EN ENTIER dans la carte :
+ * l'utilisateur confirme exactement ce qui sera exécuté (S12).
+ */
+export const EXECUTED_ARGS: Record<KnownChatTool, readonly string[]> = {
+  create_formation: ["topic", "details"],
+  create_application: ["appName", "appDesc"],
+  save_knowledge: ["title", "content", "category", "tags"],
 };
 
-/** Détails affichés dans la carte de confirmation. */
+/** Au-delà, un champ est affiché dans une zone défilante (jamais tronqué). */
+export const LONG_FIELD_CHARS = 160;
+
+/** Arguments transmis à l'exécution : uniquement ceux affichés dans la carte de confirmation. */
+export function executedArguments(name: string, args: Record<string, unknown>): Record<string, unknown> {
+  if (!isKnownChatTool(name)) return {};
+  const out: Record<string, unknown> = {};
+  for (const key of EXECUTED_ARGS[name]) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) out[key] = args[key];
+  }
+  return out;
+}
+
+const ARG_LABELS: Record<string, string> = {
+  topic: "Sujet",
+  details: "Détails",
+  appName: "Nom",
+  appDesc: "Description",
+  title: "Titre",
+  content: "Contenu",
+  category: "Catégorie",
+  tags: "Tags",
+};
+
+const TITLES: Record<KnownChatTool, string> = {
+  create_formation: "Créer une formation",
+  create_application: "Créer une application",
+  save_knowledge: "Enregistrer dans la base de connaissances",
+};
+
+/**
+ * Texte affiché pour un argument : la valeur complète, rien d'omis. Le serveur ne garde que les
+ * textes (rognés de leurs espaces de bord, puis bornés en longueur) : la carte en montre au moins autant.
+ */
+function displayValue(key: string, v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  // Le serveur ne garde que les tags textuels : on les liste tous, sans troncature.
+  if (key === "tags" && Array.isArray(v)) return v.filter((t): t is string => typeof t === "string").join(", ");
+  return "";
+}
+
+/** Détails affichés dans la carte de confirmation : chaque argument exécuté, en entier (S12). */
 export function describeAction(name: string, args: Record<string, unknown>): ActionDescription {
   const fields: ActionField[] = [];
-  const push = (label: string, v: unknown, max?: number) => {
-    const value = text(v, max);
-    if (value) fields.push({ label, value });
+  const push = (label: string, value: string) => {
+    if (!value.trim()) return;
+    fields.push({ label, value, long: value.length > LONG_FIELD_CHARS || value.includes("\n") });
   };
-  switch (name) {
-    case "create_formation":
-      push("Sujet", args.topic);
-      push("Détails", args.details);
-      return { title: "Créer une formation", fields };
-    case "create_application":
-      push("Nom", args.appName);
-      push("Description", args.appDesc);
-      return { title: "Créer une application", fields };
-    case "save_knowledge":
-      push("Titre", args.title);
-      push("Contenu", args.content, 600);
-      push("Catégorie", args.category);
-      if (Array.isArray(args.tags)) push("Tags", args.tags.filter((t) => typeof t === "string").join(", "));
-      return { title: "Enregistrer dans la base de connaissances", fields };
-    default:
-      push("Arguments", JSON.stringify(args), 600);
-      return { title: `Action « ${name} »`, fields };
+  if (!isKnownChatTool(name)) {
+    // Action inconnue (jamais exécutable) : arguments bruts, en entier.
+    push("Arguments", JSON.stringify(args, null, 2) ?? "");
+    return { title: `Action « ${name} »`, fields };
   }
+  const executed = executedArguments(name, args);
+  for (const key of EXECUTED_ARGS[name]) push(ARG_LABELS[key] ?? key, displayValue(key, executed[key]));
+  return { title: TITLES[name], fields };
 }
 
 export type ActionEvent =
@@ -144,6 +183,7 @@ export function transitionAction(action: ProposedAction, event: ActionEvent): Pr
 /**
  * Corps de POST /api/chat pour exécuter une action CONFIRMÉE par l'utilisateur.
  * Lève une erreur si l'action n'a pas été confirmée (statut `executing`).
+ * N'envoie que les arguments affichés en entier dans la carte (executedArguments, S12).
  */
 export function buildConfirmedActionBody(action: ProposedAction) {
   if (action.status !== "executing" || action.invalid) {
@@ -151,7 +191,7 @@ export function buildConfirmedActionBody(action: ProposedAction) {
   }
   return {
     messages: [],
-    action: { name: action.name, arguments: action.args, confirmed: true },
+    action: { name: action.name, arguments: executedArguments(action.name, action.args), confirmed: true },
     confirmed: true,
   };
 }

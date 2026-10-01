@@ -21,7 +21,7 @@ let dbRetryTimer: NodeJS.Timeout | undefined;
 let maintenanceTimer: NodeJS.Timeout | undefined;
 let reaperTimer: NodeJS.Timeout | undefined;
 
-/** Colonnes ajoutées par supabase/migrations/20261002000000_lot1_fixes.sql (ciblage d'un PC). */
+/** Colonnes ajoutées par supabase/migrations/20261001090000_lot1_fixes.sql (ciblage d'un PC). */
 const LOT1_COLUMNS = ["target_agent_key_id", "claimed_by_key_id"];
 
 async function checkSchema(): Promise<void> {
@@ -35,7 +35,7 @@ async function checkSchema(): Promise<void> {
   if (missing.length > 0) {
     app.log.error(
       { missing },
-      "schéma agent_tasks incomplet : appliquez supabase/migrations/20261002000000_lot1_fixes.sql (poll/claim/création échoueront)",
+      "schéma agent_tasks incomplet : appliquez supabase/migrations/20261001090000_lot1_fixes.sql (poll/claim/création échoueront)",
     );
   }
 }

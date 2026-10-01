@@ -3,13 +3,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDb } from "./helpers/fakeDb";
 
-vi.mock("../src/db.js", async () => (await import("./helpers/fakeDb")).dbMock);
+// withTransaction instrumenté : bornes BEGIN/COMMIT/ROLLBACK relevées dans fakeDb.calls (T17).
+vi.mock("../src/db.js", async () => {
+  const { dbMock, fakeDb: db } = await import("./helpers/fakeDb");
+  return {
+    ...dbMock,
+    withTransaction: async <R>(fn: (c: { query: typeof db.query; release: () => void }) => Promise<R>): Promise<R> => {
+      db.calls.push({ sql: "BEGIN", values: [] });
+      try {
+        const r = await dbMock.withTransaction(fn);
+        db.calls.push({ sql: "COMMIT", values: [] });
+        return r;
+      } catch (e) {
+        db.calls.push({ sql: "ROLLBACK", values: [] });
+        throw e;
+      }
+    },
+  };
+});
 vi.mock("../src/clients/iaClient.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   evaluateGoal: vi.fn(),
+  planGoal: vi.fn(),
 }));
 
-const { maybeEvaluateGoalTask, evaluationSkipReason } = await import("../src/routes/agentGoal");
+const { maybeEvaluateGoalTask, evaluationSkipReason, planAndQueueGoal } = await import("../src/routes/agentGoal");
 const iaClient = await import("../src/clients/iaClient");
 const evaluate = vi.mocked(iaClient.evaluateGoal);
 
@@ -159,5 +177,96 @@ describe("maybeEvaluateGoalTask", () => {
     expect(out.action_taken).toBe("evaluation_failed");
     const w = fakeDb.find(/jsonb_build_object\('evaluation', \$1::jsonb/)[0];
     expect(w.values[1]).toBe("error");
+  });
+});
+
+describe("correction : PC, transaction, texte masqué (C§7, T17, C§12)", () => {
+  const K2 = "44444444-4444-4444-8444-444444444444";
+  const idx = (re: RegExp) => fakeDb.calls.findIndex((c) => re.test(c.sql));
+
+  it("tâche sans cible : la correction vise le PC qui l'a EXÉCUTÉE (claimed_by_key_id) et ses dossiers", async () => {
+    setupTask(task({ status: "failed", target_agent_key_id: null, claimed_by_key_id: K2 }));
+    fakeDb.on(/SELECT id, label, allowed_dirs FROM agent_keys WHERE id = \$1/, (_sql, values) =>
+      values[0] === K2 ? { rows: [{ id: K2, label: null, allowed_dirs: ["D:\\Atelier"] }] } : { rows: [] },
+    );
+    evaluate.mockResolvedValue({
+      verdict: "retry",
+      reason: "r",
+      corrective_steps: [{ type: "write_file", path: "D:\\Atelier\\r.txt", content: "x" }],
+    });
+    const out = await maybeEvaluateGoalTask(T, U);
+    expect(out.action_taken).toBe("correction_awaiting_approval");
+    expect(fakeDb.find(/INSERT INTO agent_tasks/)[0].values[3]).toBe(K2);
+    expect(fakeDb.find(/FROM agent_keys WHERE user_id = \$1/)).toHaveLength(0); // jamais l'union de tous les PC
+  });
+
+  it("correction et écriture de l'évaluation dans UNE transaction ; échec → ROLLBACK (pas de correction orpheline)", async () => {
+    setupTask(task({ status: "failed" }));
+    evaluate.mockResolvedValue({ verdict: "retry", reason: "r", corrective_steps: [{ type: "wait", seconds: 1 }] });
+    await maybeEvaluateGoalTask(T, U);
+    const [b, ins, upd, c] = [idx(/^BEGIN$/), idx(/INSERT INTO agent_tasks/), idx(/jsonb_build_object\('evaluation', \$1::jsonb/), idx(/^COMMIT$/)];
+    expect(b).toBeGreaterThanOrEqual(0);
+    expect(b < ins && ins < upd && upd < c).toBe(true);
+    expect(idx(/VALUES \(\$1, \$2, 'evaluation'/)).toBeGreaterThan(c); // évènement best-effort après COMMIT
+
+    fakeDb.reset();
+    setupTask(task({ status: "failed" }));
+    fakeDb.on(/jsonb_build_object\('evaluation', \$1::jsonb/, () => {
+      throw new Error("panne DB");
+    });
+    await expect(maybeEvaluateGoalTask(T, U)).rejects.toThrow("panne DB");
+    expect(idx(/^ROLLBACK$/)).toBeGreaterThan(idx(/INSERT INTO agent_tasks/));
+    expect(idx(/^COMMIT$/)).toBe(-1);
+  });
+
+  it("libellé « [texte masqué : N car.] » recopié par le LLM : RESTAURÉ depuis la tâche évaluée", async () => {
+    setupTask(task({ status: "failed" })); // étape planifiée : type_text « mot de passe secret » (19 car.)
+    evaluate.mockResolvedValue({
+      verdict: "retry",
+      reason: "mauvaise fenêtre",
+      corrective_steps: [{ type: "type_text", text: "[texte masqué : 19 car.]", window_title: "Bloc-notes" }],
+    });
+    const out = await maybeEvaluateGoalTask(T, U);
+    expect(out.action_taken).toBe("correction_awaiting_approval");
+    const payload = JSON.parse(fakeDb.find(/INSERT INTO agent_tasks/)[0].values[2] as string);
+    expect(payload.steps[0]).toMatchObject({ type: "type_text", text: "mot de passe secret" });
+  });
+
+  it("libellé recopié sans texte d'origine identifiable (longueur, type, ou inclus dans un texte) → correction refusée", async () => {
+    for (const text of ["[texte masqué : 7 car.]", "Bonjour [texte masqué : 19 car.]"]) {
+      fakeDb.reset();
+      setupTask(task({ status: "failed" }));
+      evaluate.mockResolvedValue({ verdict: "retry", reason: "r", corrective_steps: [{ type: "type_text", text }] });
+      const out = await maybeEvaluateGoalTask(T, U);
+      expect(out).toEqual({ verdict: "abort", action_taken: "correction_invalid" });
+      expect(fakeDb.find(/INSERT INTO agent_tasks/)).toHaveLength(0);
+      expect(String(evaluationWrite()?.correction_error)).toContain("texte masqué");
+    }
+  });
+
+  it("mémoire « solution » : textes saisis OMIS (ni secret, ni libellé de masquage à recopier)", async () => {
+    setupTask(task());
+    evaluate.mockResolvedValue({ verdict: "success", reason: "fait", corrective_steps: [] });
+    await maybeEvaluateGoalTask(T, U);
+    const content = String(fakeDb.find(/INSERT INTO agent_memory/)[0].values[3]);
+    expect(content).not.toContain("mot de passe secret");
+    expect(content).not.toContain("texte masqué");
+    expect(content).toContain('"type":"type_text"');
+  });
+
+  it("planification : un plan recopiant un libellé de masquage est refusé (422), aucune tâche créée", async () => {
+    fakeDb.on(/SELECT id, label, allowed_dirs FROM agent_keys WHERE user_id = \$1/, {
+      rows: [{ id: K, label: "PC", allowed_dirs: ["C:\\SoulbahWorkspace"] }],
+    });
+    vi.mocked(iaClient.planGoal).mockResolvedValue({
+      feasible: true,
+      understanding: "u",
+      reason: "",
+      steps: [{ type: "type_text", text: "[texte masqué : 12 car.]" }],
+    } as never);
+    const out = await planAndQueueGoal(U, "écrire le rapport");
+    expect(out).toMatchObject({ ok: false, status: 422 });
+    expect(String((out as { reason?: string }).reason)).toContain("texte masqué");
+    expect(fakeDb.find(/INSERT INTO agent_tasks/)).toHaveLength(0);
   });
 });

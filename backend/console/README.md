@@ -22,6 +22,25 @@
 - Formulaire d'analyse de texte → `POST /api/analyze` (Node → Python IA → Rust → Postgres).
 - Affichage du résultat (label, confiance, statistiques calculées par Rust).
 - Barre de santé temps réel (`GET /health/deep`) : état de l'API, de Postgres et du service IA.
+  Hors `SOULBAH_ENV=dev`, cette route exige un JWT : sans session, la barre affiche
+  « Connexion requise » (et se met à jour dès la connexion). « API injoignable » signifie
+  qu'aucune réponse n'a été lue : backend arrêté **ou requête bloquée par CORS** (voir ci-dessous).
+
+## CORS : autoriser l'origine de la console (obligatoire)
+
+La console tourne sur **http://localhost:5173** ; le navigateur n'accepte les réponses de
+`node-api` que si cette origine figure dans `CORS_ORIGINS` du backend. Ni la valeur par défaut de
+`node-api` (CORS_ORIGINS vide → `localhost:8080` / `127.0.0.1:8080`, l'application web) ni la ligne
+`CORS_ORIGINS` de `backend/.env.example` n'incluent le port 5173 : ajoutez-le dans `backend/.env`,
+**à côté** des origines de l'application web :
+
+```
+CORS_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173
+```
+
+Sans cela, les appels authentifiés (en-tête `Authorization` → requête préliminaire CORS) sont
+bloqués et la barre de santé affiche « API injoignable ». Le repli de `docker-compose.yml` inclut
+`http://localhost:5173`, mais il est ignoré dès que `backend/.env` définit `CORS_ORIGINS`.
 
 ## Démarrage (dev)
 
@@ -43,13 +62,15 @@ Ouvre http://localhost:5173. Le backend (`cd backend && docker compose up`) doit
 | `VITE_SUPABASE_KEY` | — | Clé publique (anon) Supabase |
 | `VITE_DEV_HOST` | `localhost` | Hôte du serveur de dev (`0.0.0.0` pour l'exposer au réseau) |
 
-> Vite fige les variables `VITE_*` **au build**. En Docker, elles sont passées via l'`ARG VITE_API_URL` du Dockerfile.
+> Vite fige les variables `VITE_*` **au build**. En Docker, elles sont passées via les `ARG`
+> `VITE_API_URL`, `VITE_SUPABASE_URL` et `VITE_SUPABASE_KEY` du Dockerfile.
 
 ## Build de production
 
 ```bash
 npm run build      # typecheck + bundle statique dans dist/
 npm run preview    # sert dist/ localement pour vérifier
+npm test           # tests unitaires (node --test, sans dépendance ; Node ≥ 22.6)
 ```
 
 ## Docker
@@ -57,9 +78,15 @@ npm run preview    # sert dist/ localement pour vérifier
 Image incluse (build Vite + service nginx statique) :
 
 ```bash
-docker build --build-arg VITE_API_URL=http://localhost:3000 -t soulbah-console .
-docker run -p 5173:80 soulbah-console
+docker build --build-arg VITE_API_URL=http://localhost:3000 \
+  --build-arg VITE_SUPABASE_URL=https://<ref>.supabase.co \
+  --build-arg VITE_SUPABASE_KEY=<clé publique anon> \
+  -t soulbah-console .
+docker run -p 127.0.0.1:5173:80 soulbah-console
 ```
+
+Sans `VITE_SUPABASE_URL` / `VITE_SUPABASE_KEY` au build, la connexion e-mail / mot de passe est
+indisponible (seul le collage d'un jeton reste possible).
 
 Ou via le `docker-compose.yml` du backend (service `console` déjà intégré) :
 
@@ -67,6 +94,10 @@ Ou via le `docker-compose.yml` du backend (service `console` déjà intégré) :
 cd ../backend
 docker compose up --build      # lance backend + console d'un coup
 ```
+
+> Le service `console` du `docker-compose.yml` ne transmet aujourd'hui que `VITE_API_URL` :
+> dans cette configuration, utilisez le collage d'un jeton, ou construisez l'image vous-même
+> avec les `--build-arg` ci-dessus. Pensez aussi à `CORS_ORIGINS` (section CORS).
 
 ## Structure
 
@@ -79,11 +110,13 @@ backend/console/
 │   ├── App.tsx
 │   ├── index.css
 │   ├── api/client.ts          # client HTTP typé (analyze, deepHealth)
+│   ├── api/health.ts          # décodage /health/deep + message de la barre (pur)
 │   ├── api/auth.ts            # session : connexion Supabase ou jeton collé
 │   └── components/
 │       ├── AuthPanel.tsx
 │       ├── HealthBar.tsx
 │       └── ResultCard.tsx
+├── test/health.test.ts        # npm test
 └── Dockerfile
 ```
 

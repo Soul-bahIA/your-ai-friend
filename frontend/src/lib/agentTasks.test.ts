@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   applyApproveResponse,
   applyCancelResponse,
+  applyDeleteOutcome,
   applyTaskChange,
+  approvalStepView,
   canCancelTask,
   canDeleteTask,
   describeStep,
   evaluationView,
+  isSensitiveStep,
+  stepFullDetail,
   findCorrection,
   isAwaitingApproval,
   normalizeTaskRow,
@@ -130,6 +134,67 @@ describe("evaluationView (T17)", () => {
       "destructive",
     );
     expect(evaluationView(task(), [])).toBeNull();
+  });
+
+  it("non évaluable (action_taken 'none') : neutre, pas « Abandonné »", () => {
+    const view = evaluationView(
+      evaluated({ verdict: "not_evaluable", action_taken: "none", reason: "rien d'exécuté" }),
+      [],
+    );
+    expect(view).toEqual({ text: "Non évaluable — rien d'exécuté", tone: "muted" });
+    expect(evaluationView(evaluated({ action_taken: "none" }), [])).toEqual({ text: "Non évaluable", tone: "muted" });
+    expect(evaluationView(evaluated({ verdict: "not_evaluable" }), [])?.tone).toBe("muted");
+  });
+});
+
+describe("suppression via l'API (S9)", () => {
+  const list = [task({ id: "a", status: "completed" }), task({ id: "b", status: "failed" })];
+
+  it("supprimée (204) ou introuvable (404) → retirée de la liste", () => {
+    expect(applyDeleteOutcome(list, "a", { kind: "deleted" }).map((t) => t.id)).toEqual(["b"]);
+    expect(applyDeleteOutcome(list, "b", { kind: "gone" }).map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("active (409) → conservée avec le statut réel du serveur", () => {
+    const out = applyDeleteOutcome(list, "a", { kind: "active", status: "in_progress" });
+    expect(out.map((t) => [t.id, t.status])).toEqual([
+      ["a", "in_progress"],
+      ["b", "failed"],
+    ]);
+    expect(applyDeleteOutcome(list, "a", { kind: "active", status: null })).toBe(list);
+  });
+});
+
+describe("carte d'approbation d'une correction (S10)", () => {
+  it("le résumé normal reste tronqué, la version complète ne l'est jamais", () => {
+    const args = ["commit", "-am", `${"x".repeat(90)} TAIL_HIDDEN`];
+    const step = { type: "run_command", program: "git", args };
+    expect(describeStep(step)).not.toContain("TAIL_HIDDEN");
+    expect(describeStep(step, { full: true })).toBe(`Commande : git ${args.join(" ")}`);
+    const typed = { type: "type_text", text: `${"y".repeat(70)}FIN` };
+    expect(describeStep(typed, { full: true })).toBe(`Taper : « ${typed.text} »`);
+  });
+
+  it("affiche le contenu d'un write_file (absent du résumé) et marque les étapes sensibles", () => {
+    const step = { type: "write_file", path: "C:/Users/me/SoulbahWorkspace/run.bat", content: "del /s /q C:\\Users\\me\\Documents" };
+    expect(describeStep(step)).not.toContain("del /s /q");
+    const view = approvalStepView(step);
+    expect(view.summary).toBe("Écrire le fichier : C:/Users/me/SoulbahWorkspace/run.bat");
+    expect(view.detail).toContain("del /s /q C:\\\\Users\\\\me\\\\Documents");
+    expect(JSON.parse(view.detail)).toEqual(step);
+    expect(view.sensitive).toBe(true);
+    expect(approvalStepView({ type: "wait", seconds: 1 }).sensitive).toBe(false);
+  });
+
+  it("stepFullDetail n'omet aucun champ, isSensitiveStep suit la liste du serveur", () => {
+    const step = { type: "custom_tool", payload: { nested: "z".repeat(500) } };
+    expect(JSON.parse(stepFullDetail(step))).toEqual(step);
+    expect(stepFullDetail(undefined)).toBe("undefined");
+    for (const type of ["run_command", "write_file", "move_file", "type_text", "hotkey", "phone_type"]) {
+      expect(isSensitiveStep({ type })).toBe(true);
+    }
+    expect(isSensitiveStep({ type: "click" })).toBe(false);
+    expect(isSensitiveStep(null)).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ complexité) : on décrit la forme JSON dans le prompt, puis on parse et on filt
 from __future__ import annotations
 
 import json
+import re
 
 from .llm import text_generate_json, vision_generate_json
 from .parsing import parse_bool
@@ -123,7 +124,8 @@ _EVAL_SYSTEM = (
     "(nouveau plan complet corrigeant la cause : autre nom d'app, delai plus long, etc.).\n"
     "- abort   : echec non corrigeable (permission refusee, dependance manquante) — "
     "corrective_steps vide.\n"
-    "Une etape SIMULEE (detail « [dry-run] ») ne prouve rien : ce n'est jamais une "
+    "Une etape SIMULEE (champ simulated=true, detail « [simulation] … » ou, ancien "
+    "format, « [dry-run] … ») ne prouve rien : ce n'est jamais une "
     "preuve de succes. Les textes saisis sont masques (« [texte masque : N car.] ») : "
     "verifie le resultat sur les captures, pas sur le texte saisi.\n\n"
     + _EVAL_SHAPE
@@ -168,16 +170,29 @@ def _is_binary_key(key) -> bool:
 
 
 # Contrat LOT 1 §12 : les textes saisis (type_text/phone_type `text`, write_file
-# `content`, contenus lus…) ne partent JAMAIS en clair vers le LLM évaluateur.
+# `content`, contenus lus…) ne partent JAMAIS en clair vers le LLM évaluateur, quel
+# que soit leur type (un code PIN numérique ou une liste ne fait pas exception).
 _MASKED_KEYS = {"text", "content"}
-_MASK_PREFIX = "[texte masqué"
-_DRY_RUN_MARK = "[dry-run]"
+# Libellé EXACT posé par l'agent / node (même expression que node redact.ts
+# ALREADY_MASKED) : une chaîne qui ne fait que COMMENCER par ce libellé est masquée.
+_ALREADY_MASKED = re.compile(r"\[texte masqué : [0-9]+ car\.\]")
+# Marqueurs de détail d'une étape simulée : agent LOT 1 « [simulation] … », ancien
+# agent « [dry-run] … ».
+_SIMULATED_MARKS = ("[simulation]", "[dry-run]")
 
 
-def _mask_text(value: str) -> str:
-    if value.startswith(_MASK_PREFIX):
-        return value  # déjà masqué par l'agent
-    return f"[texte masqué : {len(value)} car.]"
+def _mask_text(value) -> str:
+    """Libellé « [texte masqué : N car.] » pour toute valeur non nulle (comme l'agent,
+    agent/skills/base.py mask_text) ; un libellé déjà exact est conservé tel quel."""
+    if isinstance(value, str):
+        if _ALREADY_MASKED.fullmatch(value):
+            return value
+        n = len(value)
+    elif isinstance(value, (list, tuple)):
+        n = len("".join(str(v) for v in value))
+    else:
+        n = len(str(value))
+    return f"[texte masqué : {n} car.]"
 
 
 def _scrub(value, depth: int = 0, mask: bool = False):
@@ -192,7 +207,7 @@ def _scrub(value, depth: int = 0, mask: bool = False):
         for k, v in value.items():
             if _is_binary_key(k):
                 continue
-            if mask and str(k).lower() in _MASKED_KEYS and isinstance(v, str):
+            if mask and str(k).lower() in _MASKED_KEYS and v is not None:
                 out[k] = _mask_text(v)
             else:
                 out[k] = _scrub(v, depth + 1, mask)
@@ -221,11 +236,22 @@ def _executed_entries(result: dict) -> list | None:
     return None
 
 
+def _is_simulated_entry(entry) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    if parse_bool(entry.get("simulated"), False):
+        return True
+    detail = entry.get("detail")
+    return isinstance(detail, str) and detail.lstrip().startswith(_SIMULATED_MARKS)
+
+
 def not_evaluable_reason(steps, result) -> str | None:
     """Raison pour laquelle une exécution n'est PAS évaluable (T10), ou None.
 
     Un run simulé (dry-run), un plan vide, une tâche annulée ou un rapport sans
     aucune étape exécutée ne prouvent rien : jamais « success », jamais de mémoire.
+    Simulé = `result.simulated`, OU une entrée `simulated` vraie, OU un détail
+    « [simulation] … » (agent LOT 1) / « [dry-run] … » (ancien agent).
     """
     result = result if isinstance(result, dict) else {}
     if parse_bool(result.get("simulated"), False):
@@ -238,8 +264,7 @@ def not_evaluable_reason(steps, result) -> str | None:
     if entries is not None:
         if not entries:
             return "Aucune étape exécutée."
-        details = [str(e.get("detail", "")) for e in entries if isinstance(e, dict)]
-        if any(d.lstrip().startswith(_DRY_RUN_MARK) for d in details):
+        if any(_is_simulated_entry(e) for e in entries):
             return "Exécution simulée (dry-run) : aucune preuve d'exécution réelle."
     return None
 

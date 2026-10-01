@@ -73,10 +73,13 @@ INSERT INTO auth.users (id, email) VALUES
 INSERT INTO public.agent_keys (id, user_id, key_hash, label) VALUES
   ('00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000a1', 'hash-k1', 'pc1'),
   ('00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-0000000000a1', 'hash-k2', 'pc2'),
-  ('00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000a2', 'hash-k3', 'pc-u2');
+  ('00000000-0000-4000-8000-0000000000b3', '00000000-0000-4000-8000-0000000000a2', 'hash-k3', 'pc-u2'),
+  ('00000000-0000-4000-8000-0000000000b4', '00000000-0000-4000-8000-0000000000a1', 'hash-k4', 'pc4');
 INSERT INTO public.agent_tasks (id, user_id, task_type, target_agent_key_id, claimed_by_key_id) VALUES
   ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000a1', 'goal',
-   '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b1');
+   '00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b1'),
+  ('00000000-0000-4000-8000-0000000000c2', '00000000-0000-4000-8000-0000000000a1', 'goal',
+   '00000000-0000-4000-8000-0000000000b4', NULL);
 INSERT INTO public.chat_conversations (id, user_id) VALUES
   ('00000000-0000-4000-8000-0000000000d1', '00000000-0000-4000-8000-0000000000a1'),
   ('00000000-0000-4000-8000-0000000000d2', '00000000-0000-4000-8000-0000000000a2');
@@ -87,14 +90,42 @@ INSERT INTO public.user_schemas (id, user_id, table_name) VALUES
   ('00000000-0000-4000-8000-0000000000f1', '00000000-0000-4000-8000-0000000000a1', 'mine'),
   ('00000000-0000-4000-8000-0000000000f2', '00000000-0000-4000-8000-0000000000a2', 'theirs');
 
+-- Remet updated_at à une date fixe sans déclencher les triggers (superutilisateur) ;
+-- force_task fixe aussi le statut (tâche in_progress au bail échu).
+CREATE FUNCTION pg_temp.reset_updated_at(t uuid) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM set_config('session_replication_role', 'replica', true);
+  UPDATE public.agent_tasks SET updated_at = '2000-01-01 00:00:00+00' WHERE id = t;
+  PERFORM set_config('session_replication_role', 'origin', true);
+END $$;
+CREATE FUNCTION pg_temp.force_task(t uuid, st text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM set_config('session_replication_role', 'replica', true);
+  UPDATE public.agent_tasks SET status = st, updated_at = '2000-01-01 00:00:00+00' WHERE id = t;
+  PERFORM set_config('session_replication_role', 'origin', true);
+END $$;
+
 -- --- FK agent_tasks → agent_keys ON DELETE SET NULL (contrat §7) --------------------
-DELETE FROM public.agent_keys WHERE id = '00000000-0000-4000-8000-0000000000b1';
+-- Tâches in_progress au bail échu : la suppression de la clé (action référentielle
+-- SET NULL = UPDATE d'agent_tasks) ne doit PAS rafraîchir updated_at (lot1_verif §1).
+DO $$
+BEGIN
+  PERFORM pg_temp.force_task('00000000-0000-4000-8000-0000000000c1', 'in_progress');
+  PERFORM pg_temp.force_task('00000000-0000-4000-8000-0000000000c2', 'in_progress');
+END $$;
+DELETE FROM public.agent_keys WHERE id IN ('00000000-0000-4000-8000-0000000000b1',
+                                           '00000000-0000-4000-8000-0000000000b4');
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.agent_tasks
-              WHERE id = '00000000-0000-4000-8000-0000000000c1'
+              WHERE id IN ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000c2')
                 AND (target_agent_key_id IS NOT NULL OR claimed_by_key_id IS NOT NULL)) THEN
     RAISE EXCEPTION 'FK : la suppression de la clé n''a pas mis target/claimed à NULL';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.agent_tasks
+              WHERE id IN ('00000000-0000-4000-8000-0000000000c1', '00000000-0000-4000-8000-0000000000c2')
+                AND updated_at <> '2000-01-01 00:00:00+00') THEN
+    RAISE EXCEPTION 'T45/§7 : révoquer une clé a prolongé le bail d''une tâche in_progress (ON DELETE SET NULL)';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.agent_tasks WHERE id = '00000000-0000-4000-8000-0000000000c1') THEN
     RAISE EXCEPTION 'FK : la suppression de la clé a supprimé la tâche';
@@ -108,14 +139,6 @@ BEGIN
 END $$;
 
 -- --- Trigger updated_at (T45) ------------------------------------------------------
--- Remet updated_at à une date fixe sans déclencher les triggers (superutilisateur).
-CREATE FUNCTION pg_temp.reset_updated_at(t uuid) RETURNS void LANGUAGE plpgsql AS $$
-BEGIN
-  PERFORM set_config('session_replication_role', 'replica', true);
-  UPDATE public.agent_tasks SET updated_at = '2000-01-01 00:00:00+00' WHERE id = t;
-  PERFORM set_config('session_replication_role', 'origin', true);
-END $$;
-
 DO $$
 DECLARE
   t     uuid := '00000000-0000-4000-8000-0000000000c1';
@@ -155,6 +178,18 @@ BEGIN
   UPDATE public.agent_tasks SET claimed_by_key_id = '00000000-0000-4000-8000-0000000000b2' WHERE id = t;
   SELECT updated_at INTO ts FROM public.agent_tasks WHERE id = t;
   IF ts = epoch THEN RAISE EXCEPTION 'Régression : écrire claimed_by_key_id ne rafraîchit pas updated_at'; END IF;
+
+  -- Détacher une clé (passage à NULL, même avec updated_at = now()) n'est pas un signe de vie.
+  PERFORM pg_temp.reset_updated_at(t);
+  UPDATE public.agent_tasks SET claimed_by_key_id = NULL, updated_at = now() WHERE id = t;
+  SELECT updated_at INTO ts FROM public.agent_tasks WHERE id = t;
+  IF ts <> epoch THEN RAISE EXCEPTION 'T45/§7 : détacher claimed_by_key_id a prolongé le bail'; END IF;
+
+  -- Reaper requeue (statut + claimed_by NULL) : vrai changement → rafraîchi.
+  PERFORM pg_temp.force_task(t, 'in_progress');
+  UPDATE public.agent_tasks SET status = 'pending', claimed_by_key_id = NULL, updated_at = now() WHERE id = t;
+  SELECT updated_at INTO ts FROM public.agent_tasks WHERE id = t;
+  IF ts = epoch THEN RAISE EXCEPTION 'Régression : la remise en file ne rafraîchit plus updated_at'; END IF;
 END $$;
 
 -- --- agent_memory : CHECK status / level ----------------------------------------------
@@ -174,6 +209,40 @@ BEGIN
   END;
   INSERT INTO public.agent_memory (user_id, type, goal, content, level, status)
   VALUES ('00000000-0000-4000-8000-0000000000a1', 'practice', '(général)', 'c', 'optimization', 'proposed');
+END $$;
+
+-- --- agent_memory : statut par défaut 'proposed' (S11) et index trigramme (T11) ------
+DO $$
+DECLARE
+  st   text;
+  plan text := '';
+  r    record;
+BEGIN
+  INSERT INTO public.agent_memory (user_id, type, goal, content)
+  VALUES ('00000000-0000-4000-8000-0000000000a1', 'solution', 'ouvrir excel', 'c')
+  RETURNING status INTO st;
+  IF st IS DISTINCT FROM 'proposed' THEN
+    RAISE EXCEPTION 'S11 : status par défaut d''agent_memory = % (attendu proposed)', st;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes
+                  WHERE schemaname = 'public' AND indexname = 'idx_agent_memory_goal_gin_trgm'
+                    AND indexdef LIKE '%USING gin (goal %gin_trgm_ops)') THEN
+    RAISE EXCEPTION 'T11 : index trigramme (GIN gin_trgm_ops) absent sur agent_memory.goal';
+  END IF;
+  -- Forme réelle du filtre de getMemoryContext (node-api) ; parcours séquentiel et
+  -- index B-tree interdits : seul un index capable d'évaluer ILIKE reste possible.
+  PERFORM set_config('enable_seqscan', 'off', true);
+  PERFORM set_config('enable_indexscan', 'off', true);
+  FOR r IN EXECUTE $q$EXPLAIN SELECT id FROM public.agent_memory
+                      WHERE goal ILIKE ANY (ARRAY['%excel%', '%rapport%'])$q$ LOOP
+    plan := plan || r."QUERY PLAN" || chr(10);
+  END LOOP;
+  PERFORM set_config('enable_seqscan', 'on', true);
+  PERFORM set_config('enable_indexscan', 'on', true);
+  IF plan NOT LIKE '%idx_agent_memory_goal_gin_trgm%' THEN
+    RAISE EXCEPTION 'T11 : goal ILIKE ANY n''utilise pas l''index trigramme : %', plan;
+  END IF;
 END $$;
 
 -- --- RLS côté client : utilisateur u1 (rôle authenticated) --------------------------
@@ -231,14 +300,58 @@ BEGIN
   INSERT INTO public.user_table_data (user_id, schema_id, row_data)
   VALUES (auth.uid(), '00000000-0000-4000-8000-0000000000f1', '{}');
 
-  -- has_role reste appelable par authenticated (policy, vague G4 non faite) ; is_admin()
-  PERFORM public.has_role(auth.uid(), 'admin');
+  -- has_role n'est plus exécutable par authenticated (vague G4 : il révélait le statut
+  -- admin de n'importe quel utilisateur) ; is_admin() ne répond que pour l'appelant.
+  BEGIN
+    PERFORM public.has_role('00000000-0000-4000-8000-0000000000a2', 'admin');
+    RAISE EXCEPTION 'S19/G4 : authenticated peut encore appeler has_role';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
   IF public.is_admin() THEN RAISE EXCEPTION 'is_admin() vrai pour un non-admin'; END IF;
 
-  -- Révocation : suppression de sa propre clé autorisée
+  -- Révocation : uniquement via DELETE /api/agent-keys/:id (annule d'abord les tâches
+  -- du PC) ; un DELETE direct les laissait non ciblées (lot1_verif §5).
   DELETE FROM public.agent_keys WHERE id = '00000000-0000-4000-8000-0000000000b2';
   GET DIAGNOSTICS n = ROW_COUNT;
-  IF n <> 1 THEN RAISE EXCEPTION 'S20 : le client ne peut plus supprimer sa clé'; END IF;
+  IF n <> 0 THEN RAISE EXCEPTION 'S20 : le client peut encore supprimer une clé (contourne la révocation de l''API)'; END IF;
+
+  -- agent_memory (S11, contrat §9) : lecture et suppression seulement.
+  SELECT count(*) INTO n FROM public.agent_memory;
+  IF n < 1 THEN RAISE EXCEPTION 'S11 : le client ne lit plus sa mémoire'; END IF;
+  BEGIN
+    INSERT INTO public.agent_memory (user_id, type, goal, content, status, metadata)
+    VALUES (auth.uid(), 'solution', 'g', 'c', 'validated', jsonb_build_object('validated_by', auth.uid()));
+    RAISE EXCEPTION 'S11 : le client peut insérer une mémoire « validated » (validated_by forgé)';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  UPDATE public.agent_memory SET status = 'validated' WHERE user_id = auth.uid();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 0 THEN RAISE EXCEPTION 'S11 : le client peut valider une mémoire sans passer par l''API'; END IF;
+  DELETE FROM public.agent_memory WHERE user_id = auth.uid() AND goal = 'ouvrir excel';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN RAISE EXCEPTION 'S11 : le client ne peut plus supprimer sa mémoire (% ligne(s))', n; END IF;
+
+  -- knowledge_base (G3, contrat §11) : lecture seule ; écritures via /api/knowledge.
+  SELECT count(*) INTO n FROM public.knowledge_base;
+  IF n <> 1 THEN RAISE EXCEPTION 'G3 : knowledge_base visibles = % (attendu 1)', n; END IF;
+  BEGIN
+    INSERT INTO public.knowledge_base (user_id, title, content) VALUES (auth.uid(), 'direct', 'sans hash');
+    RAISE EXCEPTION 'G3 : le client peut encore créer une entrée de connaissance directement';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  UPDATE public.knowledge_base SET content = 'modifié' WHERE user_id = auth.uid();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 0 THEN RAISE EXCEPTION 'G3 : le client peut encore modifier knowledge_base directement'; END IF;
+  DELETE FROM public.knowledge_base WHERE user_id = auth.uid();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 0 THEN RAISE EXCEPTION 'G3 : le client peut encore supprimer dans knowledge_base directement'; END IF;
+
+  -- agent_tasks (G2, S9) : lecture (et Realtime) seulement ; suppression via l'API.
+  SELECT count(*) INTO n FROM public.agent_tasks;
+  IF n < 1 THEN RAISE EXCEPTION 'G2 : le client ne lit plus ses tâches'; END IF;
+  DELETE FROM public.agent_tasks WHERE user_id = auth.uid();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 0 THEN RAISE EXCEPTION 'G2/S9 : le client peut encore supprimer une tâche directement'; END IF;
 END $$;
 RESET ROLE;
 

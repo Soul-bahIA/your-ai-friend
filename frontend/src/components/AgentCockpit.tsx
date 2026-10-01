@@ -3,7 +3,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { cancelAgentTask, fetchTaskScreenshot } from "@/lib/agentApi";
-import { cockpitReducer, eventText, initialCockpitState, type AgentEvent } from "@/lib/agentEvents";
+import {
+  cockpitReducer,
+  eventText,
+  initialCockpitState,
+  type AgentEvent,
+  type PendingApproval,
+} from "@/lib/agentEvents";
 import { toast } from "sonner";
 import {
   Play, Pause, Square, Monitor, CheckCircle2, XCircle, Loader2,
@@ -27,26 +33,41 @@ const typeMeta: Record<string, { icon: LucideIcon; color: string; label: string 
   info: { icon: Circle, color: "text-muted-foreground", label: "Info" },
 };
 
+/** Autres tâches en cours (autres PC) dont on recharge les confirmations au démarrage. */
+const MAX_PARALLEL_TASKS = 5;
+
+const approvalText = (a: PendingApproval) =>
+  [a.stepIndex !== null ? `Étape ${a.stepIndex + 1}` : "", a.action].filter(Boolean).join(" · ") +
+  (a.summary ? ` — ${a.summary}` : "");
+
 const AgentCockpit = () => {
   const { user } = useAuth();
   const userId = user?.id;
   const [state, dispatch] = useReducer(cockpitReducer, initialCockpitState);
-  const { events, liveImage, taskId, running, pendingApproval, screenshotRequest } = state;
+  const { events, liveImage, taskId, running, pendingApproval, otherApprovals, screenshotRequest } = state;
   const [busy, setBusy] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Reprise après rafraîchissement : recharge la tâche en cours et sa timeline.
+  // Reprise après rafraîchissement : recharge la tâche en cours et sa timeline, puis les
+  // confirmations attendues sur les autres PC (tâches exécutées en parallèle, §7/§13).
   useEffect(() => {
     if (!userId) return;
     let ignore = false;
+    const eventsOf = async (id: string) =>
+      (await apiFetch<{ events?: AgentEvent[] }>(`/api/agent-tasks/${encodeURIComponent(id)}/events`))?.events ?? [];
     (async () => {
       try {
         const d = await apiFetch<{ tasks?: { id: string }[] }>("/api/agent-tasks?status=in_progress");
-        const task = d?.tasks?.[0];
+        const [task, ...others] = d?.tasks ?? [];
         if (!task || ignore) return;
-        const ed = await apiFetch<{ events?: AgentEvent[] }>(`/api/agent-tasks/${task.id}/events`);
+        const history = await eventsOf(task.id);
         if (ignore) return;
-        dispatch({ type: "hydrate", taskId: task.id, events: ed?.events ?? [] });
+        dispatch({ type: "hydrate", taskId: task.id, events: history });
+        for (const other of others.slice(0, MAX_PARALLEL_TASKS)) {
+          const otherHistory = await eventsOf(other.id);
+          if (ignore) return;
+          dispatch({ type: "approvals", taskId: other.id, events: otherHistory });
+        }
       } catch (err) {
         // Pas de tâche en cours ou backend injoignable : cockpit au repos.
         console.warn("[Cockpit] Reprise impossible :", errorMessage(err));
@@ -148,14 +169,27 @@ const AgentCockpit = () => {
           <Loader2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 animate-spin text-warning" />
           <div className="min-w-0 text-xs">
             <p className="font-medium text-warning">En attente de confirmation sur le PC</p>
-            <p className="text-muted-foreground break-words">
-              {pendingApproval.stepIndex !== null && `Étape ${pendingApproval.stepIndex + 1}`}
-              {pendingApproval.action && ` · ${pendingApproval.action}`}
-              {pendingApproval.summary && ` — ${pendingApproval.summary}`}
-            </p>
+            <p className="text-muted-foreground break-words">{approvalText(pendingApproval)}</p>
           </div>
         </div>
       )}
+      {/* Confirmations attendues pour d'autres tâches (autre PC, exécution en parallèle) */}
+      {otherApprovals.map((a) => (
+        <div
+          key={a.taskId}
+          className="flex items-start gap-2 border-b border-warning/30 bg-warning/5 px-4 py-2"
+          role="status"
+          aria-live="polite"
+        >
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
+          <div className="min-w-0 text-xs">
+            <p className="font-medium text-warning">
+              En attente de confirmation sur le PC — autre tâche ({a.taskId.slice(0, 8)})
+            </p>
+            <p className="text-muted-foreground break-words">{approvalText(a)}</p>
+          </div>
+        </div>
+      ))}
 
       <div className="grid grid-cols-1 md:grid-cols-2">
         {/* Écran live */}

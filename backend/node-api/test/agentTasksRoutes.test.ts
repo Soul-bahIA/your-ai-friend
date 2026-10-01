@@ -286,3 +286,143 @@ describe("POST /api/agent-tasks : ciblage et S21", () => {
     expect(ins.values[4]).toBe(K);
   });
 });
+
+describe("captures bornées (C§8 / T37) et image_b64 imbriqués (T20)", () => {
+  const T2 = "66666666-6666-4666-8666-666666666666";
+  const touch = () => fakeDb.on(/UPDATE agent_tasks SET updated_at = now\(\)/, { rows: [{ id: T2 }] });
+
+  it("image non base64 ou > 2 Mo → 400, rien inséré, rien retenu en mémoire", async () => {
+    touch();
+    for (const image_b64 of ["pas du base64 !", "A".repeat(2 * 1024 * 1024 + 4), 42]) {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/agent-tasks/event",
+        headers: agent,
+        payload: { task_id: T2, type: "screenshot", attempt: 0, data: { image_b64 } },
+      });
+      expect(r.statusCode).toBe(400);
+    }
+    expect(fakeDb.find(/INSERT INTO agent_events/)).toHaveLength(0);
+    const shot = await app.inject({ method: "GET", url: `/api/agent-tasks/${T2}/screenshot`, headers: user });
+    expect(shot.statusCode).toBe(404);
+  });
+
+  it("corps /event > 3 Mo → 413 (avant toute requête SQL)", async () => {
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/agent-tasks/event",
+      headers: agent,
+      payload: { task_id: T2, type: "screenshot", attempt: 0, data: { image_b64: "A".repeat(3 * 1024 * 1024 + 8) } },
+    });
+    expect(r.statusCode).toBe(413);
+    expect(fakeDb.calls).toHaveLength(0);
+  });
+
+  it("image_b64 imbriqué : jamais inséré en base (donc jamais diffusé par Realtime)", async () => {
+    touch();
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/agent-tasks/event",
+      headers: agent,
+      payload: { task_id: T2, type: "screenshot", attempt: 0, data: { image_b64: "QUJD", media_type: "image/png", nested: { image_b64: "SECRET" } } },
+    });
+    expect(r.statusCode).toBe(200);
+    const stored = fakeDb.find(/INSERT INTO agent_events/)[0].values[4] as string;
+    expect(stored).not.toContain("SECRET");
+    expect(stored).not.toContain("image_b64");
+    expect(JSON.parse(stored)).toEqual({ media_type: "image/png", nested: { image_omitted: true }, has_image: true, source: "agent" });
+  });
+
+  it("GET /:id/events : image_b64 imbriqué des lignes héritées retiré aussi", async () => {
+    fakeDb.on(/FROM agent_events/, { rows: [{ id: "e1", type: "x", message: null, data: { a: { image_b64: "OLD" } } }] });
+    const r = await app.inject({ method: "GET", url: `/api/agent-tasks/${T2}/events`, headers: user });
+    expect(JSON.stringify(r.json())).not.toContain("OLD");
+    expect(r.json().events[0].data).toEqual({ a: { image_omitted: true } });
+  });
+});
+
+describe("POST /api/agent-tasks/:id/cancel?scope=goal (T18)", () => {
+  const ROOT = "55555555-5555-4555-8555-555555555555";
+  const C1 = "77777777-7777-4777-8777-777777777777";
+
+  it("annule toute la chaîne de l'objectif (même root_task_id) : pending → cancelled, en cours → stop", async () => {
+    fakeDb.on(/SELECT id, status, payload #>> '\{goal_meta,root_task_id\}'/, { rows: [{ id: T, status: "completed", root_task_id: ROOT }] });
+    fakeDb.on(/OR \(payload #>> '\{goal_meta,root_task_id\}'\) = \$3::text/, {
+      rows: [
+        { id: C1, status: "cancelled", control: "none" },
+        { id: K2, status: "in_progress", control: "stop" },
+      ],
+    });
+    const r = await app.inject({ method: "POST", url: `/api/agent-tasks/${T}/cancel?scope=goal`, headers: user });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ success: true, scope: "goal", root_task_id: ROOT, cancelled: [C1], stopping: [K2] });
+    const upd = fakeDb.find(/= \$3::text/)[0];
+    expect(upd.values).toEqual([ROOT, U, ROOT]);
+    const ev = fakeDb.find(/INSERT INTO agent_events/);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].values[0]).toBe(C1);
+  });
+
+  it("tâche hors objectif : sa propre id sert de racine ; rien d'actif → 409 ; inconnue → 404 ; scope invalide → 400", async () => {
+    fakeDb.on(/SELECT id, status, payload #>> '\{goal_meta,root_task_id\}'/, { rows: [{ id: T, status: "completed", root_task_id: null }] });
+    const r = await app.inject({ method: "POST", url: `/api/agent-tasks/${T}/cancel?scope=goal`, headers: user });
+    expect(r.statusCode).toBe(409);
+    expect(fakeDb.find(/= \$3::text/)[0].values).toEqual([T, U, T]);
+    fakeDb.reset();
+    expect((await app.inject({ method: "POST", url: `/api/agent-tasks/${T}/cancel?scope=goal`, headers: user })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: `/api/agent-tasks/${T}/cancel?scope=tout`, headers: user })).statusCode).toBe(400);
+  });
+});
+
+describe("DELETE /api/agent-keys/:id (T16 / contrat §7)", () => {
+  const P1 = "77777777-7777-4777-8777-777777777777";
+  const R1 = "66666666-6666-4666-8666-666666666666";
+
+  it("dans UNE transaction, AVANT le DELETE : tâches ciblant le PC annulées, exécution en cours annulée + stop", async () => {
+    fakeDb.on(/FROM agent_keys WHERE id = \$1 AND user_id = \$2 FOR UPDATE/, { rows: [{ id: K }] });
+    fakeDb.on(/status = 'pending' AND target_agent_key_id = \$1::uuid/, { rows: [{ id: P1 }] });
+    fakeDb.on(/status = 'in_progress'\s+AND \(claimed_by_key_id = \$1::uuid/, { rows: [{ id: R1 }] });
+    fakeDb.on(/DELETE FROM agent_keys/, { rowCount: 1 });
+    const r = await app.inject({ method: "DELETE", url: `/api/agent-keys/${K}`, headers: user });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ success: true, cancelled_task_ids: [P1, R1] });
+    const order = fakeDb.calls.map((c) => c.sql);
+    const iLock = order.findIndex((s) => /FOR UPDATE/.test(s));
+    const iPending = order.findIndex((s) => /status = 'pending' AND target_agent_key_id/.test(s));
+    const iRunning = order.findIndex((s) => /status = 'in_progress'\s+AND \(claimed_by_key_id/.test(s));
+    const iDelete = order.findIndex((s) => /DELETE FROM agent_keys/.test(s));
+    expect(iLock).toBeGreaterThanOrEqual(0);
+    expect(iLock < iPending && iPending < iRunning && iRunning < iDelete).toBe(true);
+    expect(order[iRunning]).toContain("control = 'stop'");
+    expect(order[iRunning]).toContain("SET status = 'cancelled'");
+    for (const i of [iPending, iRunning, iDelete]) expect(fakeDb.calls[i].values).toEqual([K, U]);
+  });
+
+  it("clé inconnue (ou d'un autre compte) → 404, aucune tâche touchée", async () => {
+    const r = await app.inject({ method: "DELETE", url: `/api/agent-keys/${K}`, headers: user });
+    expect(r.statusCode).toBe(404);
+    expect(fakeDb.find(/UPDATE agent_tasks|DELETE FROM agent_keys/)).toHaveLength(0);
+  });
+});
+
+describe("liste des agents (400) : PC sans libellé distinguables (contrat §7)", () => {
+  it("repli « PC <8 premiers caractères de l'id> », comme le front", async () => {
+    fakeDb.on(/SELECT id, label, allowed_dirs FROM agent_keys/, {
+      rows: [
+        { id: K, label: null, allowed_dirs: [] },
+        { id: K2, label: "  ", allowed_dirs: [] },
+      ],
+    });
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/agent-tasks",
+      headers: user,
+      payload: { task_type: "t", payload: { steps: [{ type: "wait" }] } },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().agents).toEqual([
+      { id: K, name: "PC 33333333" },
+      { id: K2, name: "PC 44444444" },
+    ]);
+  });
+});

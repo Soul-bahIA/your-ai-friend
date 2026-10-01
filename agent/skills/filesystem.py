@@ -1,8 +1,9 @@
 """Skill : organisation de fichiers — écrire, lire, lister, créer un dossier (sensible).
 
 Tous les chemins sont validés par le gate contre la liste blanche de dossiers ET
-la deny-list permanente (code de l'agent, .env, clés, .git…), puis revalidés
-juste avant l'exécution.
+la deny-list permanente (code de l'agent, .env, clés, .git…), revalidés par le
+gate juste avant l'exécution, puis une dernière fois par le skill lui-même
+(deny-list + whitelist du gate liée au thread de l'étape) juste avant d'agir.
   write_file : {"type": "write_file", "path": "...", "content": "..."}
   read_file  : {"type": "read_file", "path": "..."}
   list_dir   : {"type": "list_dir", "path": "..."}
@@ -17,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 
-from skills.base import PathCheck, Skill, SkillResult, mask_text
+from skills.base import PathCheck, Skill, SkillResult, mask_text, path_refusal_now
 from skills.safety import deny_reason, is_git_internal
 
 _MAX_READ = 8000
@@ -30,6 +31,20 @@ def touches_git_dir(path: str) -> bool:
     dépôt git nu / un `--separate-git-dir`. Y écrire permettrait de planter un
     hook (pre-commit…) exécuté ensuite par un `git commit` autorisé."""
     return is_git_internal(path)
+
+
+def _refusal(path: str, op: str) -> str | None:
+    """Contrôle au moment d'agir : deny-list permanente, dossier .git (écritures)
+    et whitelist du gate (liée au thread de l'étape par l'executor)."""
+    reason = deny_reason(path)
+    if reason:
+        return f"chemin interdit ({reason}) : {path}"
+    if op in _WRITE_OPS and touches_git_dir(path):
+        return f"écriture refusée dans un dossier .git : {path}"
+    refusal = path_refusal_now(path)
+    if refusal:
+        return f"chemin refusé au moment d'agir : {refusal}"
+    return None
 
 
 def content_details(content: str) -> str:
@@ -74,17 +89,19 @@ class FileOpsSkill(Skill):
         path = step.get("path")
         if not path or not isinstance(path, str):
             return SkillResult(ok=False, detail="champ 'path' manquant")
-        # Défense en profondeur : la deny-list est revérifiée au moment d'agir.
-        reason = deny_reason(path)
-        if reason:
-            return SkillResult(ok=False, detail=f"chemin interdit ({reason}) : {path}")
-        if t in _WRITE_OPS and touches_git_dir(path):
-            return SkillResult(ok=False, detail=f"écriture refusée dans un dossier .git : {path}")
+        # Défense en profondeur : deny-list ET whitelist revérifiées au moment d'agir.
+        refusal = _refusal(path, t)
+        if refusal:
+            return SkillResult(ok=False, detail=refusal)
 
         try:
             if t == "write_file":
                 os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
                 content = str(step.get("content", ""))
+                # Dernier contrôle juste avant open() (dossiers créés entre-temps).
+                refusal = _refusal(path, t)
+                if refusal:
+                    return SkillResult(ok=False, detail=refusal)
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 return SkillResult(ok=True, detail=f"{len(content)} caractères écrits dans {path}",

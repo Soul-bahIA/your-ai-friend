@@ -7,7 +7,10 @@
 #                  (comme `supabase db push`)
 #   3. passage 2 : rejeu des migrations >= REPLAY_FROM (défaut 20260703000000)
 #   4. comparaison des schémas (pg_dump --schema-only) après passage 1 et passage 2
-#   5. --checks : assertions scripts/ci/schema_checks.sql (exécutées puis annulées)
+#   5. --checks : assertions scripts/ci/schema_checks.sql (exécutées puis annulées),
+#                 contrôles post-restauration scripts/sql/post_restore_checks.sql (lecture
+#                 seule) et rôle soulbah_api (scripts/ci/api_role_checks.sql, avec les
+#                 droits de scripts/sql/soulbah_api_grants.sql ; annulé)
 #
 # Les 4 migrations de février 2026 (générées par Lovable : CREATE TYPE / TABLE / POLICY
 # sans garde) ne sont PAS rejouables et ne sont donc appliquées qu'une fois ; toutes
@@ -42,7 +45,7 @@ for arg in "$@"; do
   case "$arg" in
     --stub-vector) STUB_VECTOR=1 ;;
     --checks)      RUN_CHECKS=1 ;;
-    -h|--help)     sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "Option inconnue : $arg" >&2; exit 2 ;;
   esac
 done
@@ -137,6 +140,15 @@ fi
 if [[ "$RUN_CHECKS" == "1" ]]; then
   echo "== Assertions (scripts/ci/schema_checks.sql)"
   psql_run -f - < "$ROOT/scripts/ci/schema_checks.sql"
+  echo "== Contrôles post-restauration (scripts/sql/post_restore_checks.sql)"
+  psql_run -f - < "$ROOT/scripts/sql/post_restore_checks.sql"
+  echo "== Rôle soulbah_api (scripts/ci/api_role_checks.sql + scripts/sql/soulbah_api_grants.sql)"
+  # Le fichier de droits est inséré à la place du marqueur (psql lit l'entrée standard :
+  # pas de \i possible quand psql tourne dans un conteneur).
+  awk -v grants="$ROOT/scripts/sql/soulbah_api_grants.sql" '
+    /^-- @@SOULBAH_API_GRANTS@@\r?$/ { while ((getline line < grants) > 0) print line; next }
+    { print }
+  ' "$ROOT/scripts/ci/api_role_checks.sql" | psql_run -f -
 fi
 
 echo "OK : ${#MIGRATIONS[@]} migrations appliquées, $replayed rejouées sans erreur."

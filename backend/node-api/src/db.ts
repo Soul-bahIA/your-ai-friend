@@ -2,6 +2,7 @@ import fs from "node:fs";
 import pg from "pg";
 import { config } from "./config.js";
 import { logger } from "./lib/logger.js";
+import { stripDatabaseUrlSslParams } from "./lib/envChecks.js";
 
 const { Pool } = pg;
 
@@ -25,9 +26,22 @@ function buildSsl(): pg.PoolConfig["ssl"] {
   return { rejectUnauthorized: false };
 }
 
+/**
+ * pg laisse les paramètres TLS de la chaîne (sslmode, sslrootcert…) ÉCRASER l'option `ssl`
+ * (S13) : avec DATABASE_SSL=true + PG_SSL_CA, ils sont retirés pour que la vérification par
+ * la CA fasse foi. Hors dev/test, leur présence empêche de toute façon le démarrage.
+ */
+export function effectiveDatabaseUrl(
+  url = config.databaseUrl,
+  databaseSsl = config.databaseSsl,
+  pgSslCa = config.pgSslCa,
+): string {
+  return databaseSsl && pgSslCa ? stripDatabaseUrlSslParams(url) : url;
+}
+
 // Pool de connexions PostgreSQL partagé par toute l'application.
 export const pool = new Pool({
-  connectionString: config.databaseUrl,
+  connectionString: effectiveDatabaseUrl(),
   ssl: buildSsl(),
   max: 10,
   connectionTimeoutMillis: 5_000, // DB injoignable → échec rapide (pas de requête pendue)

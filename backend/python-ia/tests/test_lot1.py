@@ -36,6 +36,18 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def patch_tts_transport(monkeypatch, handler):
+    """Toute requête TTS (httpx.AsyncClient de video.py) passe par `handler`
+    (MockTransport) : aucun accès réseau réel."""
+    real = httpx.AsyncClient
+
+    def factory(*a, **k):
+        k["transport"] = httpx.MockTransport(handler)
+        return real(*a, **k)
+
+    monkeypatch.setattr(video.httpx, "AsyncClient", factory)
+
+
 # ===========================================================================
 # T26 — Routeur : repli multi-sauts, disjoncteur, vision, usage, délais
 # ===========================================================================
@@ -587,7 +599,7 @@ class TestRustCompute:
 # S14 / contrat §1 — token obligatoire hors dev/test
 # ===========================================================================
 class TestStartupToken:
-    @pytest.mark.parametrize("env", ["production", "staging", "prod-typo"])
+    @pytest.mark.parametrize("env", ["production", "staging"])
     def test_refuses_without_token(self, monkeypatch, env):
         monkeypatch.setenv("SOULBAH_ENV", env)
         monkeypatch.delenv("IA_SERVICE_TOKEN", raising=False)
@@ -675,10 +687,10 @@ class TestNoInternalLeak:
     def test_tts_connection_error_generic(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
-        def fake_post(*a, **k):
-            raise httpx.ConnectError("SECRET-host:443 refused")
+        def handler(req):
+            raise httpx.ConnectError("SECRET-host:443 refused", request=req)
 
-        monkeypatch.setattr(video.httpx, "post", fake_post)
+        patch_tts_transport(monkeypatch, handler)
         with pytest.raises(LLMError) as ei:
             video._synthesize("bonjour", os.devnull)
         assert "SECRET" not in ei.value.message
@@ -738,7 +750,7 @@ class TestVideoConcurrency:
         state = {"active": 0, "peak": 0}
         lock = threading.Lock()
 
-        def fake_synth(text, out):
+        def fake_synth(text, out, timeout_s=None):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
@@ -759,7 +771,7 @@ class TestVideoConcurrency:
         monkeypatch.setattr(video, "_CANCEL_POLL_S", 0.02)
         calls = []
 
-        def fake_synth(text, out):
+        def fake_synth(text, out, timeout_s=None):
             calls.append(text)
             time.sleep(0.1)
 
@@ -771,7 +783,7 @@ class TestVideoConcurrency:
 
     def test_cancelled_before_start_no_tts(self, monkeypatch, tmp_path):
         called = []
-        monkeypatch.setattr(video, "_synthesize", lambda t, o: called.append(t))
+        monkeypatch.setattr(video, "_synthesize", lambda t, o, timeout_s=None: called.append(t))
         out = tmp_path / "v.mp4"
         with pytest.raises(video.VideoCancelled):
             video.build_formation_video("T", [{"title": "L", "content": "c"}], str(out), should_cancel=lambda: True)

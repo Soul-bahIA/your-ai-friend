@@ -21,6 +21,9 @@ from .capabilities import capabilities_for
 logger = logging.getLogger("python-ia.llm")
 
 DEFAULT_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "100"))
+# Même plancher que pour Claude : un modèle de raisonnement (o-series, gpt-5) consomme
+# sa limite de sortie en jetons de raisonnement avant de répondre.
+THINKING_MIN_MAX_TOKENS = int(os.getenv("LLM_THINKING_MIN_MAX_TOKENS", "16000"))
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -75,10 +78,12 @@ class OpenAICompatProvider(LLMProvider):
             )
         chat_messages.extend(msgs)
 
+        limit = max(max_tokens, THINKING_MIN_MAX_TOKENS) if caps.thinking else max_tokens
         payload: dict[str, Any] = {
             "model": use_model,
             "messages": chat_messages,
-            "max_tokens": max(1, min(max_tokens, caps.max_output_tokens)),
+            # `max_tokens` ou `max_completion_tokens` (modèles de raisonnement OpenAI).
+            caps.max_tokens_param: max(1, min(limit, caps.max_output_tokens)),
         }
         if json_schema is not None:
             payload["response_format"] = {"type": "json_object"}

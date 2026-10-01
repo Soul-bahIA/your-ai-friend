@@ -5,6 +5,7 @@ import {
   buildAgentTaskUpdate,
   buildApprove,
   buildCancel,
+  buildGoalCancel,
   buildPollQuery,
   buildReaperQueries,
   buildTaskTouch,
@@ -80,6 +81,31 @@ describe("reaper global (T19)", () => {
     expect(q.requeue.sql).toContain("claimed_by_key_id = NULL");
     expect(q.requeue.sql).toContain("requeue_count < $2");
     expect(q.abandon.sql).toContain("requeue_count >= $2");
-    expect(q.requeue.values).toEqual([180, 3]);
+    expect(q.requeue.values).toEqual([180, 3, []]);
+  });
+
+  it("requeue : control remis à none, pause conservée ou imposée si une étape à effet réel a déjà été lancée ; jamais un stop", () => {
+    const q = buildReaperQueries(180, 3, ["run_command", "write_file"]);
+    expect(q.requeue.values).toEqual([180, 3, ["run_command", "write_file"]]);
+    expect(q.requeue.sql).toMatch(/control = CASE WHEN t\.control = 'pause' OR EXISTS \(/);
+    expect(q.requeue.sql).toContain("THEN 'pause' ELSE 'none' END");
+    expect(q.requeue.sql).toContain("e.type IN ('step_started', 'step_done', 'step_failed')");
+    expect(q.requeue.sql).toContain("= ANY($3::text[])");
+    // index non entier : jamais de cast en erreur (CASE garde l'ordre d'évaluation)
+    expect(q.requeue.sql).toContain("CASE WHEN (e.data ->> 'index') ~ '^[0-9]{1,4}$'");
+    expect(q.requeue.sql).toContain("control IS DISTINCT FROM 'stop'");
+    expect(q.requeue.sql).toMatch(/RETURNING t\.id, t\.user_id, t\.requeue_count, t\.control,\s+EXISTS/);
+    expect(q.abandon.sql).toContain("control IS DISTINCT FROM 'stop'");
+  });
+});
+
+describe("annulation d'un objectif entier (T18)", () => {
+  it("toutes les tâches actives de même root_task_id (et la racine), pour l'utilisateur seulement", () => {
+    const q = buildGoalCancel(T, U);
+    expect(q.sql).toContain("WHEN status = 'pending' THEN 'cancelled'");
+    expect(q.sql).toContain("WHEN status = 'in_progress' THEN 'stop'");
+    expect(q.sql).toContain("user_id = $2 AND status IN ('pending', 'in_progress')");
+    expect(q.sql).toContain("(id = $1::uuid OR (payload #>> '{goal_meta,root_task_id}') = $3::text)");
+    expect(q.values).toEqual([T, U, T]);
   });
 });

@@ -20,13 +20,14 @@ export async function agentKeyRoutes(app: FastifyInstance): Promise<void> {
     return { keys };
   });
 
-  // Révoquer une clé.
+  // Révoquer une clé : les tâches qui ciblaient ce PC (ou s'y exécutaient) sont annulées
+  // dans la même transaction (jamais reprises par un autre PC — T16).
   app.delete("/api/agent-keys/:id", { preHandler: requireUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
-    const ok = await revokeAgentKey(request.user!.id, id);
-    if (!ok) return reply.status(404).send({ error: "Clé introuvable" });
+    const out = await revokeAgentKey(request.user!.id, id);
+    if (!out.revoked) return reply.status(404).send({ error: "Clé introuvable" });
     forgetAgentKey(id);
-    return { success: true };
+    return { success: true, cancelled_task_ids: out.cancelled_task_ids };
   });
 }

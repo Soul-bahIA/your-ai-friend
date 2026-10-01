@@ -1,6 +1,7 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import AgentTasksPanel from "@/components/AgentTasksPanel";
 import AgentCockpit from "@/components/AgentCockpit";
+import AgentMemoryReview from "@/components/AgentMemoryReview";
 import { Monitor, Terminal, Lightbulb } from "lucide-react";
 
 const Automation = () => {
@@ -60,6 +61,9 @@ python soulbah_agent.py</pre>
         <AgentCockpit />
 
         <AgentTasksPanel />
+
+        {/* Leçons proposées par l'évaluateur / l'auto-amélioration : validation explicite (§9) */}
+        <AgentMemoryReview />
       </div>
     </DashboardLayout>
   );

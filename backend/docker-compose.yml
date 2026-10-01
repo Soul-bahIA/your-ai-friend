@@ -38,6 +38,37 @@ x-soulbah-env: &soulbah-env
   SOULBAH_ENV: ${SOULBAH_ENV:-dev}
   # Jeton partagé node-api → python-ia (en-tête x-ia-token). Même valeur des deux côtés.
   IA_SERVICE_TOKEN: ${IA_SERVICE_TOKEN:-}
+  # Fournisseurs qu'un client peut imposer (champ `provider`), lu par node-api ET python-ia :
+  # même valeur des deux côtés. Vide = aucune surcharge (tout `provider` fourni → 400).
+  LLM_ALLOWED_OVERRIDES: ${LLM_ALLOWED_OVERRIDES:-}
+
+# Routeur de modèles de python-ia (LOT 1, cf. .env.example). Vide = défaut du routeur ;
+# les valeurs numériques lues sans repli dans le code reçoivent leur défaut documenté
+# (une chaîne vide ferait échouer le démarrage).
+# Contrôle CI : scripts/ci/check_compose_env.py (toute variable documentée dans
+# .env.example et lue par un service doit lui être transmise ici).
+x-llm-router-env: &llm-router-env
+  LLM_MODEL_PLANNER: ${LLM_MODEL_PLANNER:-}
+  LLM_MODEL_EVALUATOR: ${LLM_MODEL_EVALUATOR:-}
+  LLM_MODEL_VISION: ${LLM_MODEL_VISION:-}
+  LLM_MODEL_CHEAP: ${LLM_MODEL_CHEAP:-}
+  LLM_EFFORT_PLANNER: ${LLM_EFFORT_PLANNER:-}
+  LLM_EFFORT_EVALUATOR: ${LLM_EFFORT_EVALUATOR:-}
+  LLM_EFFORT_VISION: ${LLM_EFFORT_VISION:-}
+  LLM_EFFORT_CHEAP: ${LLM_EFFORT_CHEAP:-}
+  LLM_EFFORT_DEFAULT: ${LLM_EFFORT_DEFAULT:-}
+  LLM_FALLBACK_ORDER: ${LLM_FALLBACK_ORDER:-}
+  LLM_MAX_HOPS: ${LLM_MAX_HOPS:-}
+  LLM_CB_THRESHOLD: ${LLM_CB_THRESHOLD:-}
+  LLM_CB_COOLDOWN_S: ${LLM_CB_COOLDOWN_S:-}
+  # JSON, p. ex. {"openai:gpt-4o": {"vision": true}} (corrige un faux positif/négatif vision).
+  LLM_CAPABILITIES: ${LLM_CAPABILITIES:-}
+  LLM_BUDGET_S: ${LLM_BUDGET_S:-}
+  LLM_LONG_BUDGET_S: ${LLM_LONG_BUDGET_S:-}
+  LLM_LONG_TIMEOUT_S: ${LLM_LONG_TIMEOUT_S:-}
+  LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-100}
+  LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-1}
+  LLM_THINKING_MIN_MAX_TOKENS: ${LLM_THINKING_MIN_MAX_TOKENS:-16000}
 
 services:
   postgres:
@@ -72,13 +103,15 @@ services:
     build: ./python-ia
     restart: unless-stopped
     environment:
-      <<: [*llm-env, *soulbah-env]
+      <<: [*llm-env, *soulbah-env, *llm-router-env]
       RUST_SERVICE_URL: http://rust-compute:8080
       LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-}
       LLM_ROUTING: ${LLM_ROUTING:-}
       TTS_MODEL: ${TTS_MODEL:-tts-1}
       TTS_VOICE: ${TTS_VOICE:-alloy}
       OPENAI_TTS_URL: ${OPENAI_TTS_URL:-https://api.openai.com/v1/audio/speech}
+      VIDEO_TTS_CONCURRENCY: ${VIDEO_TTS_CONCURRENCY:-3}
+      IA_MAX_BODY_BYTES: ${IA_MAX_BODY_BYTES:-41943040}
       # Volume média partagé : python-ia ÉCRIT (dossier possédé par l'utilisateur non-root
       # de l'image, uid 10001), node-api le monte en lecture seule et le sert sous /media/.
       MEDIA_DIR: /app/media
@@ -129,7 +162,12 @@ services:
       KNOWLEDGE_STORE_PROVIDER: ${KNOWLEDGE_STORE_PROVIDER:-supabase}
       # Agent local / maintenance / limitation de débit
       AGENT_TASK_STALE_SECONDS: ${AGENT_TASK_STALE_SECONDS:-180}
+      REAPER_INTERVAL_SECONDS: ${REAPER_INTERVAL_SECONDS:-60}
       STALE_GENERATION_MINUTES: ${STALE_GENERATION_MINUTES:-30}
+      # Volume média en lecture seule ici : la purge est ignorée côté node-api.
+      MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-30}
+      # Proxy de confiance (IP réelle pour la limitation de débit) ; vide = connexion directe.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       RATE_LIMIT_GLOBAL: ${RATE_LIMIT_GLOBAL:-300}
       RATE_LIMIT_AGENT: ${RATE_LIMIT_AGENT:-1200}
       RATE_LIMIT_EXPENSIVE: ${RATE_LIMIT_EXPENSIVE:-20}

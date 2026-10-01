@@ -15,18 +15,25 @@
 # dans un fichier pgpass temporaire (PGPASSFILE, dans %TEMP% de l'utilisateur),
 # supprime a la fin du script, meme en cas d'erreur.
 #
-# Chiffrement (facultatif mais RECOMMANDE : le dump contient toutes les donnees) :
+# Chiffrement OBLIGATOIRE par defaut (S30 : le dump contient toutes les donnees, dont les
+# empreintes de mots de passe d'auth.users) - une des variables :
 #   $env:BACKUP_AGE_RECIPIENT = 'age1...'          -> age -r <cle publique>       (.age)
 #   $env:BACKUP_GPG_RECIPIENT = '<id ou e-mail>'   -> gpg --encrypt (cle publique) (.gpg)
 #   $env:BACKUP_GPG_PASSPHRASE_FILE = '<fichier>'  -> gpg --symmetric AES256, phrase lue dans le fichier
 # gpg : celui du PATH, sinon celui de Git for Windows (C:\Program Files\Git\usr\bin\gpg.exe).
 # Apres chiffrement reussi, les fichiers en clair sont supprimes ($env:BACKUP_KEEP_PLAINTEXT='1'
-# pour les garder). Sans configuration : avertissement seulement.
+# pour les garder). Sans aucune de ces variables, le script REFUSE de s'executer (code 2),
+# sauf $env:BACKUP_ALLOW_PLAINTEXT='1' (dump en clair assume, par exemple base jetable).
+#
+# Droits (S19) : les GRANT/REVOKE sont CONSERVES dans le dump (pas de --no-privileges) : une
+# restauration ne doit pas rendre has_role / is_admin a PUBLIC ou anon. Seule la propriete
+# des objets est omise (--no-owner). Restauration : README.md, section Sauvegardes.
 #
 # Verification TLS stricte (facultatif) : $env:PGSSLMODE='verify-full'; $env:PGSSLROOTCERT='<CA Supabase>'.
 #
 # Usage :
 #   powershell -ExecutionPolicy Bypass -File scripts\backup_db.ps1
+# Tests : scripts\ci\test_backup_db.ps1
 
 $ErrorActionPreference = 'Stop'
 
@@ -34,6 +41,29 @@ $Root    = Split-Path -Parent $PSScriptRoot
 $EnvFile = Join-Path $Root 'backend\.env'
 $OutDir  = if ($env:BACKUP_DIR) { $env:BACKUP_DIR } else { Join-Path $Root 'backups' }
 $Schemas = if ($env:BACKUP_SCHEMAS) { $env:BACKUP_SCHEMAS } else { 'public auth' }
+
+# --- Chiffrement : decide AVANT toute lecture de secret ou connexion (echec rapide) -------
+$Encrypt = ''
+$Tool = $null
+if ($env:BACKUP_AGE_RECIPIENT) {
+    $Tool = (Get-Command age -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $Tool) { throw "BACKUP_AGE_RECIPIENT defini mais 'age' introuvable." }
+    $Encrypt = 'age'
+} elseif ($env:BACKUP_GPG_RECIPIENT -or $env:BACKUP_GPG_PASSPHRASE_FILE) {
+    $Tool = (Get-Command gpg -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    if (-not $Tool -and (Test-Path 'C:\Program Files\Git\usr\bin\gpg.exe')) { $Tool = 'C:\Program Files\Git\usr\bin\gpg.exe' }
+    if (-not $Tool) { throw "Chiffrement gpg demande mais 'gpg' introuvable." }
+    if (-not $env:BACKUP_GPG_RECIPIENT -and -not (Test-Path $env:BACKUP_GPG_PASSPHRASE_FILE)) {
+        throw "BACKUP_GPG_PASSPHRASE_FILE introuvable : $($env:BACKUP_GPG_PASSPHRASE_FILE)"
+    }
+    $Encrypt = 'gpg'
+} elseif ($env:BACKUP_ALLOW_PLAINTEXT -ne '1') {
+    [Console]::Error.WriteLine("REFUS : aucun chiffrement configure (S30) - le dump contiendrait toutes les donnees en clair,")
+    [Console]::Error.WriteLine("        y compris les empreintes de mots de passe (schema auth).")
+    [Console]::Error.WriteLine("        Definir BACKUP_AGE_RECIPIENT, BACKUP_GPG_RECIPIENT ou BACKUP_GPG_PASSPHRASE_FILE,")
+    [Console]::Error.WriteLine("        ou BACKUP_ALLOW_PLAINTEXT=1 pour assumer explicitement un dump en clair.")
+    exit 2
+}
 
 $DbUrl = $env:BACKUP_DATABASE_URL
 if (-not $DbUrl) {
@@ -79,23 +109,6 @@ if (-not $PgDump) {
 }
 if (-not $PgDump) { throw "pg_dump introuvable (installez les outils client PostgreSQL)." }
 
-# --- Chiffrement : verifie AVANT le dump (echec rapide) --------------------------------
-$Encrypt = ''
-$Tool = $null
-if ($env:BACKUP_AGE_RECIPIENT) {
-    $Tool = (Get-Command age -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-    if (-not $Tool) { throw "BACKUP_AGE_RECIPIENT defini mais 'age' introuvable." }
-    $Encrypt = 'age'
-} elseif ($env:BACKUP_GPG_RECIPIENT -or $env:BACKUP_GPG_PASSPHRASE_FILE) {
-    $Tool = (Get-Command gpg -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-    if (-not $Tool -and (Test-Path 'C:\Program Files\Git\usr\bin\gpg.exe')) { $Tool = 'C:\Program Files\Git\usr\bin\gpg.exe' }
-    if (-not $Tool) { throw "Chiffrement gpg demande mais 'gpg' introuvable." }
-    if (-not $env:BACKUP_GPG_RECIPIENT -and -not (Test-Path $env:BACKUP_GPG_PASSPHRASE_FILE)) {
-        throw "BACKUP_GPG_PASSPHRASE_FILE introuvable : $($env:BACKUP_GPG_PASSPHRASE_FILE)"
-    }
-    $Encrypt = 'gpg'
-}
-
 function Protect-BackupFile([string]$Path) {
     switch ($Encrypt) {
         'age' { & $Tool -r $env:BACKUP_AGE_RECIPIENT -o "$Path.age" $Path }
@@ -140,12 +153,13 @@ try {
 
     Write-Host "pg_dump : $PgDump - $DbUser@${DbHost}:$DbPort/$DbName (sslmode=$($env:PGSSLMODE)) - schemas : $Schemas"
 
+    # Droits conserves (pas de --no-privileges) : voir l'en-tete (S19).
     Write-Host "-> $Base.dump (format custom)"
-    & $PgDump --format=custom --no-owner --no-privileges @SchemaArgs "--file=$Base.dump"
+    & $PgDump --format=custom --no-owner @SchemaArgs "--file=$Base.dump"
     if ($LASTEXITCODE -ne 0) { throw "pg_dump (custom) a echoue (code $LASTEXITCODE)." }
 
     Write-Host "-> $Base.sql (format texte)"
-    & $PgDump --format=plain --no-owner --no-privileges @SchemaArgs "--file=$Base.sql"
+    & $PgDump --format=plain --no-owner @SchemaArgs "--file=$Base.sql"
     if ($LASTEXITCODE -ne 0) { throw "pg_dump (texte) a echoue (code $LASTEXITCODE)." }
 
     if ($Encrypt) {
@@ -157,7 +171,7 @@ try {
         Get-ChildItem "$Base.*" | Format-Table Name, Length
     } else {
         Get-Item "$Base.dump", "$Base.sql" | Format-Table Name, Length
-        Write-Warning "Sauvegarde NON chiffree (toutes les donnees en clair). Definir BACKUP_AGE_RECIPIENT, BACKUP_GPG_RECIPIENT ou BACKUP_GPG_PASSPHRASE_FILE."
+        Write-Warning "Sauvegarde NON chiffree (BACKUP_ALLOW_PLAINTEXT=1) : toutes les donnees en clair."
     }
     $Success = $true
     Write-Host "Sauvegarde terminee."

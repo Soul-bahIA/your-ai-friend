@@ -24,13 +24,20 @@ export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
 }
 
+/** Profondeur max parcourue par les nettoyages récursifs (au-delà : sous-arbre remplacé). */
+export const MAX_SANITIZE_DEPTH = 32;
+/** Remplace un sous-arbre trop imbriqué : jamais renvoyé tel quel (il n'a pas été nettoyé). */
+export const TOO_DEEP_PLACEHOLDER = "[contenu trop imbriqué retiré]";
+
 /**
  * Copie profonde d'une valeur JSON où toute clé `image_b64` est retirée (remplacée
  * par `image_omitted: true`). Sert à ne jamais renvoyer/transmettre des captures
  * base64 (plusieurs centaines de Ko chacune) dans des listes ou du texte de prompt.
+ * Au-delà de MAX_SANITIZE_DEPTH, le sous-arbre (non inspecté) est remplacé par
+ * TOO_DEEP_PLACEHOLDER au lieu d'être recopié tel quel.
  */
 export function stripImageB64<T>(value: T, depth = 0): T {
-  if (depth > 32) return value;
+  if (depth > MAX_SANITIZE_DEPTH) return (value !== null && typeof value === "object" ? TOO_DEEP_PLACEHOLDER : value) as T;
   if (Array.isArray(value)) return value.map((v) => stripImageB64(v, depth + 1)) as unknown as T;
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};

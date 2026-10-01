@@ -24,8 +24,9 @@ ALTER TABLE public.agent_keys ENABLE ROW LEVEL SECURITY;
 -- vient d'être créée, elle n'a aucune policy → la policy est créée). Seul un rejeu
 -- (CI : migrations ×2, restauration partielle) devient sûr.
 -- Garde volontairement « aucune policy sur la table » plutôt que DROP + CREATE :
--- 20261002000000_lot1_fixes.sql remplace cette policy FOR ALL par SELECT + DELETE ;
--- un rejeu de ce fichier ne doit pas rouvrir INSERT/UPDATE au client.
+-- 20261001090000_lot1_fixes.sql remplace cette policy FOR ALL par SELECT + DELETE, puis
+-- 20261001100000_lot1_verif.sql par SELECT seul ; un rejeu de ce fichier ne doit pas
+-- rouvrir d'écriture au client.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies

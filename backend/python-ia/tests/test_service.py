@@ -326,11 +326,14 @@ class TestProviderErrorMapping:
         from app import video
 
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        real_client = httpx.AsyncClient
 
-        def fake_post(*a, **k):
-            return httpx.Response(401, text='{"error":"Incorrect API key sk-abc"}')
+        def fake_client(*a, **k):  # aucun accès réseau : réponse 401 simulée
+            k["transport"] = httpx.MockTransport(
+                lambda req: httpx.Response(401, text='{"error":"Incorrect API key sk-abc"}'))
+            return real_client(*a, **k)
 
-        monkeypatch.setattr(video.httpx, "post", fake_post)
+        monkeypatch.setattr(video.httpx, "AsyncClient", fake_client)
         with pytest.raises(LLMError) as ei:
             video._synthesize("bonjour", os.devnull)
         assert ei.value.status == 502
@@ -347,7 +350,7 @@ class TestProviderErrorMapping:
             created.append(d)
             return d
 
-        def fail_tts(text, out):
+        def fail_tts(text, out, timeout_s=None):
             raise LLMError(502, "TTS down")
 
         monkeypatch.setattr(video.tempfile, "mkdtemp", tracking_mkdtemp)

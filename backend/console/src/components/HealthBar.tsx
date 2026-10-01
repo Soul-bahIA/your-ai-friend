@@ -1,58 +1,41 @@
 import { useEffect, useState } from "react";
-import { deepHealth, type HealthResponse } from "../api/client";
+import { deepHealth, type HealthProbe } from "../api/client";
+import { onSessionChange } from "../api/auth";
+import { healthView } from "../api/health";
 
 export function HealthBar() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [probe, setProbe] = useState<HealthProbe | null>(null);
 
   useEffect(() => {
     let active = true;
 
     const check = async () => {
-      try {
-        const h = await deepHealth();
-        if (active) {
-          setHealth(h);
-          setFailed(false);
-        }
-      } catch {
-        if (active) setFailed(true);
-      }
+      const result = await deepHealth();
+      if (active) setProbe(result);
     };
 
     check();
     const id = setInterval(check, 10_000);
+    // Hors dev, /health/deep exige un JWT : on revérifie dès la connexion / déconnexion.
+    const unsubscribe = onSessionChange(() => {
+      check();
+    });
     return () => {
       active = false;
       clearInterval(id);
+      unsubscribe();
     };
   }, []);
 
-  if (failed) {
-    return (
-      <div className="health health--down">
-        <span className="dot dot--down" /> API injoignable — le backend est-il démarré ?
-      </div>
-    );
-  }
-
-  if (!health) {
-    return (
-      <div className="health">
-        <span className="dot dot--warn" /> Vérification des services…
-      </div>
-    );
-  }
-
-  const entries = Object.entries(health.checks ?? {});
+  const view = healthView(probe, window.location.origin);
 
   return (
-    <div className="health">
-      <span className={`dot dot--${health.status === "ok" ? "ok" : "warn"}`} />
-      <span>API {health.status}</span>
-      {entries.map(([name, state]) => (
+    <div className={`health${view.tone === "down" ? " health--down" : ""}`} role="status" aria-live="polite">
+      <span className={`dot dot--${view.tone}`} />
+      <span>{view.message}</span>
+      {view.checks.map(([name, tone]) => (
         <span key={name} className="chip">
-          <span className={`dot dot--${state === "ok" ? "ok" : "down"}`} />
+          <span className={`dot dot--${tone}`} />
           {name}
         </span>
       ))}

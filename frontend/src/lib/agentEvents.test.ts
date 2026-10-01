@@ -147,6 +147,54 @@ describe("confirmations sur le PC (contrat §13)", () => {
   });
 });
 
+describe("confirmations d'une autre tâche / d'un autre PC (§7 + §13)", () => {
+  const required = (taskId: string, step_index = 1) =>
+    ev("approval_required", { task_id: taskId, data: { step_index, action: "run_command", summary: "npm test" } });
+
+  it("approval_required d'une tâche non suivie est affiché sans quitter la timeline", () => {
+    const s = run([ev("task_started", { task_id: "A" }), ev("step_started", { task_id: "A" }), required("B")]);
+    expect(s.taskId).toBe("A");
+    expect(s.events).toHaveLength(2);
+    expect(s.pendingApproval).toBeNull();
+    expect(s.otherApprovals).toEqual([{ taskId: "B", stepIndex: 1, action: "run_command", summary: "npm test" }]);
+  });
+
+  it("approval_result ou la fin de l'autre tâche retire l'attente", () => {
+    const waiting = run([ev("task_started", { task_id: "A" }), required("B")]);
+    expect(run([ev("approval_result", { task_id: "B", data: { approved: true } })], waiting).otherApprovals).toEqual([]);
+    expect(run([ev("task_cancelled", { task_id: "B" })], waiting).otherApprovals).toEqual([]);
+    // Un évènement ordinaire de l'autre tâche ne change rien (même objet d'état).
+    expect(run([ev("step_done", { task_id: "B" })], waiting)).toBe(waiting);
+  });
+
+  it("le démarrage d'une autre tâche conserve l'attente de la tâche suivie jusque-là", () => {
+    const s = run([ev("task_started", { task_id: "A" }), required("A", 3), ev("task_started", { task_id: "B" })]);
+    expect(s.taskId).toBe("B");
+    expect(s.pendingApproval).toBeNull();
+    expect(s.otherApprovals).toEqual([{ taskId: "A", stepIndex: 3, action: "run_command", summary: "npm test" }]);
+  });
+
+  it("en basculant sur l'autre tâche, son attente devient celle de la tâche suivie", () => {
+    const s = run([ev("task_started", { task_id: "A" }), required("B"), ev("task_completed", { task_id: "A" })]);
+    expect(s.running).toBe(false);
+    const switched = run([ev("step_started", { task_id: "B" })], s);
+    expect(switched.taskId).toBe("B");
+    expect(switched.pendingApproval).toEqual({ stepIndex: 1, action: "run_command", summary: "npm test" });
+    expect(switched.otherApprovals).toEqual([]);
+  });
+
+  it("reprise : l'historique d'une autre tâche en cours restitue sa confirmation", () => {
+    const followed = cockpitReducer(initialCockpitState, { type: "hydrate", taskId: "A", events: [ev("task_started", { task_id: "A" })] });
+    const history = [ev("task_started", { task_id: "B" }), required("B", 0)];
+    const s = cockpitReducer(followed, { type: "approvals", taskId: "B", events: history });
+    expect(s.otherApprovals.map((a) => [a.taskId, a.stepIndex])).toEqual([["B", 0]]);
+    const answered = [...history, ev("approval_result", { task_id: "B", data: { approved: false } })];
+    expect(cockpitReducer(s, { type: "approvals", taskId: "B", events: answered }).otherApprovals).toEqual([]);
+    // La tâche suivie n'est pas traitée comme « autre ».
+    expect(cockpitReducer(followed, { type: "approvals", taskId: "A", events: history })).toBe(followed);
+  });
+});
+
 describe("eventText", () => {
   it("décrit l'évaluation sans annoncer de correction inexistante", () => {
     expect(eventText(ev("evaluation", { data: { action_taken: "correction_awaiting_approval", corrective_task_id: "c" } }))).toBe(
@@ -157,5 +205,16 @@ describe("eventText", () => {
     );
     expect(eventText(ev("approval_result", { data: { approved: false } }))).toBe("Action refusée sur le PC");
     expect(eventText(ev("step_done", { message: "OK" }))).toBe("OK");
+  });
+
+  it("non évaluable (action_taken 'none') : texte lisible, pas « not_evaluable » brut (T17)", () => {
+    const evaluation = ev("evaluation", {
+      message: "Évaluation : not_evaluable",
+      data: { verdict: "not_evaluable", action_taken: "none", corrective_task_id: null },
+    });
+    expect(eventText(evaluation)).toBe("Évaluation : tâche non évaluable (ni correction, ni mémoire)");
+    expect(eventText(ev("evaluation", { message: "Évaluation : not_evaluable", data: { verdict: "not_evaluable" } }))).toBe(
+      "Évaluation : tâche non évaluable (ni correction, ni mémoire)",
+    );
   });
 });

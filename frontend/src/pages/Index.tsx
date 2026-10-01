@@ -63,21 +63,27 @@ const Index = () => {
     backend: health.backend,
     deep: health.deep,
     supabase: supabaseState,
+    deepPending: health.deepPending,
   });
   const postgres = health.backend === "down" ? "down" : deepCheck(health.deep, "postgres");
   const pythonIa = health.backend === "down" ? "down" : deepCheck(health.deep, "python_ia");
   const backendModuleState: ServiceState = health.backend;
+  // /health/deep a répondu sans état exploitable (ex. 401 hors dev) : dépendances non vérifiées (T31).
+  const deepUnverified = health.backend === "ok" && !health.deepPending && !health.deep;
+  const depModule = (s: ServiceState): ModuleStatus => (s === "unknown" && deepUnverified ? "idle" : stateToModule(s));
+  const depLabel = (s: ServiceState, okLabel?: string) =>
+    s === "unknown" && deepUnverified ? "Non vérifié" : stateLabel(s, okLabel);
 
   const modules: ModuleDef[] = [
-    { icon: Brain, title: "IA Centrale", description: "Orchestration et prise de décision autonome", status: stateToModule(pythonIa), stats: `Service IA : ${stateLabel(pythonIa, "Prêt")}` },
-    { icon: Search, title: "Recherche Internet", description: "Analyse et extraction de connaissances", status: stateToModule(pythonIa), stats: stateLabel(pythonIa, "Prêt") },
+    { icon: Brain, title: "IA Centrale", description: "Orchestration et prise de décision autonome", status: depModule(pythonIa), stats: `Service IA : ${depLabel(pythonIa, "Prêt")}` },
+    { icon: Search, title: "Recherche Internet", description: "Analyse et extraction de connaissances", status: depModule(pythonIa), stats: depLabel(pythonIa, "Prêt") },
     { icon: GraduationCap, title: "Génération de Cours", description: "Création automatique de formations structurées", status: stateToModule(backendModuleState), stats: stateLabel(backendModuleState, "Disponible") },
     { icon: AppWindow, title: "Génération d'Apps", description: "Création d'applications complètes", status: stateToModule(backendModuleState), stats: stateLabel(backendModuleState, "Disponible") },
     { icon: Monitor, title: "Automatisation PC", description: "Contrôle et exécution sur le système", status: "idle", stats: "Nécessite l'agent local" },
     { icon: Video, title: "Capture Vidéo", description: "Enregistrement automatique des sessions", status: "idle", stats: "Nécessite l'agent local" },
     { icon: Film, title: "Montage Automatique", description: "Post-production intelligente", status: "idle", stats: "En attente" },
     { icon: RefreshCw, title: "Auto-Optimisation", description: "Amélioration continue des performances", status: "idle", stats: "En attente" },
-    { icon: Database, title: "Base de Données", description: "PostgreSQL — stockage du backend", status: stateToModule(postgres), stats: `PostgreSQL : ${stateLabel(postgres)}` },
+    { icon: Database, title: "Base de Données", description: "PostgreSQL — stockage du backend", status: depModule(postgres), stats: `PostgreSQL : ${depLabel(postgres)}` },
     { icon: Shield, title: "Sécurité", description: "Monitoring et protection", status: "idle", stats: "Détection de menaces : non disponible" },
     { icon: Cloud, title: "Cloud Hybride", description: "Synchronisation locale et cloud (Supabase)", status: stateToModule(supabaseState), stats: `Supabase : ${stateLabel(supabaseState)}` },
     { icon: Zap, title: "Microservices", description: "Services haute performance", status: "idle", stats: "Non déployé" },
@@ -90,7 +96,9 @@ const Index = () => {
         ? "Plateforme IA autonome — vérification des services…"
         : overall === "offline"
           ? "Plateforme IA autonome — services injoignables"
-          : "Plateforme IA autonome — certains services ne répondent pas";
+          : deepUnverified && supabaseState === "ok"
+            ? "Plateforme IA autonome — état de la base et du service IA non vérifié"
+            : "Plateforme IA autonome — certains services ne répondent pas";
 
   const statValue = (n: number | undefined) => (stats.isError ? "—" : stats.isPending ? "…" : String(n ?? 0));
 

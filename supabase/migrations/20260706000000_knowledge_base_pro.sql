@@ -57,7 +57,7 @@ ALTER TABLE public.knowledge_versions ENABLE ROW LEVEL SECURITY;
 -- sans changer le schéma obtenu : sur une base neuve la table n'a aucune policy → les
 -- policies sont créées à l'identique ; déjà appliquée → `supabase db push` ne rejoue
 -- pas ce fichier ; rejeu (CI ×2) → no-op. Garde « aucune policy sur la table » plutôt
--- que DROP + CREATE : 20261002000000_lot1_fixes.sql resserre la policy d'INSERT et un
+-- que DROP + CREATE : 20261001090000_lot1_fixes.sql resserre la policy d'INSERT et un
 -- rejeu de ce fichier ne doit pas la rouvrir.
 DO $$
 BEGIN

@@ -496,12 +496,24 @@ const AiChat = () => {
                 </div>
                 {desc.fields.length > 0 && (
                   <dl className="space-y-1">
-                    {desc.fields.map((f) => (
-                      <div key={f.label} className="text-[11px]">
-                        <dt className="inline font-medium text-foreground">{f.label} : </dt>
-                        <dd className="inline text-muted-foreground whitespace-pre-wrap break-words">{f.value}</dd>
-                      </div>
-                    ))}
+                    {/* Valeurs intégrales : rien n'est tronqué, c'est exactement ce qui sera exécuté (S12) */}
+                    {desc.fields.map((f) =>
+                      f.long ? (
+                        <div key={f.label} className="text-[11px]">
+                          <dt className="font-medium text-foreground">
+                            {f.label} ({f.value.length} caractères, en entier) :
+                          </dt>
+                          <dd className="mt-0.5 max-h-48 overflow-y-auto rounded border border-border bg-background/60 p-2 text-muted-foreground whitespace-pre-wrap break-words">
+                            {f.value}
+                          </dd>
+                        </div>
+                      ) : (
+                        <div key={f.label} className="text-[11px]">
+                          <dt className="inline font-medium text-foreground">{f.label} : </dt>
+                          <dd className="inline text-muted-foreground whitespace-pre-wrap break-words">{f.value}</dd>
+                        </div>
+                      ),
+                    )}
                   </dl>
                 )}
                 {action.invalid ? (

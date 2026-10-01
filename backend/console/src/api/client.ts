@@ -1,5 +1,8 @@
 // Client HTTP typé vers l'API Node (node-api).
 import { authHeaders } from "./auth";
+import { probeFromResponse, type HealthProbe } from "./health";
+
+export type { HealthProbe, HealthResponse } from "./health";
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 
@@ -17,11 +20,6 @@ export interface AnalyzeResponse {
   label: string;
   score: number;
   compute: ComputeResult;
-}
-
-export interface HealthResponse {
-  status: string;
-  checks?: Record<string, string>;
 }
 
 /** Erreur HTTP de l'API (le statut permet de distinguer un 401). */
@@ -53,9 +51,17 @@ export async function analyze(text: string): Promise<AnalyzeResponse> {
   return (await res.json()) as AnalyzeResponse;
 }
 
-/** État de santé de l'API et de ses dépendances (Postgres, service IA). */
-export async function deepHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${API_URL}/health/deep`, { headers: authHeaders() });
-  if (!res.ok) throw new Error(`Erreur ${res.status}`);
-  return (await res.json()) as HealthResponse;
+/**
+ * État de santé de l'API et de ses dépendances (Postgres, service IA). Ne lève jamais :
+ * distingue « pas de réponse » (backend arrêté / CORS), un refus HTTP (401 hors dev) et un état lu.
+ */
+export async function deepHealth(): Promise<HealthProbe> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/health/deep`, { headers: authHeaders() });
+  } catch {
+    return { kind: "network" };
+  }
+  const body: unknown = await res.json().catch(() => null);
+  return probeFromResponse(res.status, body);
 }

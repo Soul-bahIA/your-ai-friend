@@ -9,12 +9,18 @@ T27 (partiel) :
 - annulation coopérative : `should_cancel()` (client déconnecté ou échéance
   x-deadline-ms dépassée, cf. main.py) est consulté par le thread appelant avant
   chaque phase et toutes les secondes pendant les TTS ; les TTS non démarrées sont
-  abandonnées (aucun nouvel appel payant). Limites documentées : une requête TTS déjà
-  partie va à son terme (≤ 120 s) et l'encodage MP4 (moviepy/ffmpeg) n'est pas
-  interruptible une fois lancé. Une vraie file de jobs annulables relève du LOT 14.
+  abandonnées (aucun nouvel appel payant).
+- échéance propagée aux TTS : chaque requête TTS a un délai TOTAL (garde
+  asyncio.wait_for, pas seulement les délais par phase d'httpx) de
+  min(120 s, temps restant avant x-deadline-ms − marge) ; une TTS qui ne peut plus
+  aboutir avant l'échéance n'est pas lancée (504). Les TTS en vol se terminent donc
+  avant l'échéance et le 504 n'arrive pas après elle.
+Limite documentée : l'encodage MP4 (moviepy/ffmpeg) n'est pas interruptible une fois
+lancé. Une vraie file de jobs annulables relève du LOT 14.
 """
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures as cf
 import logging
 import os
@@ -22,11 +28,13 @@ import shutil
 import tempfile
 import textwrap
 import threading
+import time
 import uuid
 from typing import Callable
 
 import httpx
 
+from . import request_context
 from .llm import LLMError
 from .providers.base import upstream_error
 
@@ -44,6 +52,9 @@ _MUTED = (150, 155, 170)
 _MAX_TTS_CHARS = 3500  # limite par requête TTS
 _ASSETS_FONTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
 _CANCEL_POLL_S = 1.0
+_TTS_TIMEOUT_S = 120.0       # délai TOTAL maximal d'une requête TTS
+_TTS_MIN_BUDGET_S = 1.0      # en dessous, on ne lance pas une TTS (elle ne peut aboutir)
+_TTS_DEADLINE_MARGIN_S = 0.5  # temps laissé pour répondre à l'appelant
 
 
 class VideoCancelled(Exception):
@@ -69,18 +80,42 @@ def _font(size: int):
     return ImageFont.load_default()
 
 
-def _synthesize(text: str, out_path: str) -> None:
-    """Narration -> fichier MP3 via OpenAI TTS."""
+def _tts_timeout(deadline_at: float | None) -> float:
+    """Délai total d'une TTS lancée MAINTENANT : min(120 s, temps restant avant
+    l'échéance − marge). LLMError 504 si ce budget ne permet plus d'aboutir."""
+    if deadline_at is None:
+        return _TTS_TIMEOUT_S
+    budget = deadline_at - time.monotonic() - _TTS_DEADLINE_MARGIN_S
+    if budget < _TTS_MIN_BUDGET_S:
+        raise LLMError(504, "Délai de la requête dépassé avant la fin de la narration audio.",
+                       kind="deadline")
+    return min(_TTS_TIMEOUT_S, budget)
+
+
+async def _post_tts(key: str, payload: dict, total_s: float) -> httpx.Response:
+    # httpx.Timeout borne chaque phase (connexion, écriture, lecture…) ; wait_for borne
+    # la DURÉE TOTALE (un serveur qui distille la réponse octet par octet est coupé).
+    async with httpx.AsyncClient(timeout=httpx.Timeout(total_s)) as client:
+        return await asyncio.wait_for(
+            client.post(OPENAI_TTS_URL, headers={"Authorization": f"Bearer {key}"}, json=payload),
+            timeout=total_s,
+        )
+
+
+def _synthesize(text: str, out_path: str, timeout_s: float | None = None) -> None:
+    """Narration -> fichier MP3 via OpenAI TTS (appel bloquant, depuis un thread du pool).
+
+    `timeout_s` : délai TOTAL de la requête (défaut et plafond : 120 s)."""
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise LLMError(500, "OPENAI_API_KEY non configurée (narration audio)")
+    total = _TTS_TIMEOUT_S if timeout_s is None else max(0.1, min(_TTS_TIMEOUT_S, float(timeout_s)))
+    payload = {"model": TTS_MODEL, "voice": TTS_VOICE, "input": text[:_MAX_TTS_CHARS]}
     try:
-        r = httpx.post(
-            OPENAI_TTS_URL,
-            headers={"Authorization": f"Bearer {key}"},
-            json={"model": TTS_MODEL, "voice": TTS_VOICE, "input": text[:_MAX_TTS_CHARS]},
-            timeout=120,
-        )
+        r = asyncio.run(_post_tts(key, payload, total))
+    except (TimeoutError, httpx.TimeoutException):
+        logger.warning("Service TTS : délai dépassé (%.1f s)", total)
+        raise LLMError(504, "Service TTS : délai dépassé", fallback=True, kind="timeout")
     except httpx.HTTPError as e:
         logger.warning("Service TTS injoignable : %s", e)
         raise LLMError(502, "Service TTS injoignable", fallback=True, kind="connection")
@@ -176,11 +211,15 @@ def _synthesize_all(slides: list[dict], tmpdir: str, should_cancel: Callable[[],
     chemins MP3 dans l'ordre des diapos. Annulation : voir docstring du module."""
     paths = [os.path.join(tmpdir, f"n{idx}.mp3") for idx in range(len(slides))]
     stop = threading.Event()
+    # Échéance de la requête, lue ICI (thread appelant : les ContextVar de la requête
+    # n'existent pas dans les threads du pool) puis figée en instant absolu.
+    remaining = request_context.remaining_s()
+    deadline_at = time.monotonic() + remaining if remaining is not None else None
 
     def job(idx: int) -> None:
         if stop.is_set():
             raise VideoCancelled()
-        _synthesize(slides[idx]["narration"], paths[idx])
+        _synthesize(slides[idx]["narration"], paths[idx], timeout_s=_tts_timeout(deadline_at))
 
     pool = cf.ThreadPoolExecutor(max_workers=_tts_concurrency(), thread_name_prefix="soulbah-tts")
     futures = [pool.submit(job, i) for i in range(len(slides))]
@@ -197,8 +236,9 @@ def _synthesize_all(slides: list[dict], tmpdir: str, should_cancel: Callable[[],
         return paths
     finally:
         stop.set()
-        # Les TTS non démarrées sont annulées ; celles déjà en vol (≤ délai TTS) sont
-        # attendues pour qu'aucun thread n'écrive encore dans tmpdir après le retour.
+        # Les TTS non démarrées sont annulées ; celles déjà en vol (délai total borné par
+        # l'échéance, cf. _tts_timeout) sont attendues pour qu'aucun thread n'écrive
+        # encore dans tmpdir après le retour.
         pool.shutdown(wait=True, cancel_futures=True)
 
 

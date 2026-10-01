@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable
 
 from skills.base import Skill
-from skills.safety import deny_reason, workspace_errors  # noqa: F401 - réexporté
+from skills.safety import canonical_path, deny_reason, workspace_errors  # noqa: F401 - réexporté
 
 log = logging.getLogger("soulbah.permissions")
 
@@ -23,6 +23,21 @@ INPUT_CONTROL_CATEGORIES = frozenset({"mouse", "keyboard", "window", "app_launch
 # mode (auto inclus) et même avec allow_input_control : exécution de commandes.
 ALWAYS_CONFIRM_CATEGORIES = frozenset({"shell"})
 
+# S21 : étapes « à effet réel » — miroir de SENSITIVE_STEP_TYPES côté serveur
+# (backend/node-api/src/lib/agentSteps.ts, à garder synchronisé). Le serveur pose
+# payload.requires_confirmation=true dès qu'une tâche en contient une (le client ne
+# peut pas l'abaisser) : ces étapes sont alors TOUJOURS confirmées sur le PC, même
+# en mode auto et même avec allow_input_control. Le drapeau n'ajoute que des
+# confirmations : il ne dispense jamais d'une vérification locale.
+SERVER_CONFIRM_STEP_TYPES = frozenset({
+    "run_command", "run_script", "shell",
+    "write_file", "move_file", "move",
+    "type_text", "type", "keyboard",
+    "hotkey", "press", "key",
+    "phone_tap", "phone_swipe", "phone_type", "phone_key", "phone_open_app",
+})
+SERVER_CONFIRM_REASON = "confirmation exigée par le serveur pour cette action à effet réel (requires_confirmation)"
+
 # Champs de chemin vérifiés (whitelist + deny-list) quelle que soit la catégorie.
 _PATH_KEYS = ("src", "dest", "path", "cwd", "output", "audio")
 
@@ -36,8 +51,9 @@ EmitFn = Callable[[str, str, dict], None]
 def normalize_dir(path: str) -> str:
     """normcase + realpath : comparaison insensible à la casse sous Windows et
     résolution des liens symboliques/jonctions (un lien dans un dossier autorisé
-    ne doit pas permettre de sortir de la whitelist)."""
-    return os.path.normcase(os.path.realpath(path))
+    ne doit pas permettre de sortir de la whitelist). Le préfixe long (`\\\\?\\`)
+    est retiré, comme pour la deny-list (skills.safety.canonical_path)."""
+    return canonical_path(path)
 
 
 def path_inside(path: str, normalized_dirs: list[str]) -> bool:
@@ -266,6 +282,7 @@ class PermissionGate:
 
         `context` (facultatif, fourni par l'executor) : `emit` (évènements
         d'approbation), `step_index`, `goal_meta` (tâche planifiée par le serveur),
+        `requires_confirmation` (payload.requires_confirmation posé par le serveur),
         `stop_check` (interrompt une confirmation en attente)."""
         ctx = context or {}
 
@@ -281,6 +298,20 @@ class PermissionGate:
         # 4. Commandes : confirmation interactive TOUJOURS exigée, même en mode auto.
         if skill.category in ALWAYS_CONFIRM_CATEGORIES:
             return self._confirm(skill, step, ctx)
+
+        # 4 bis. S21 : le serveur exige une confirmation pour les actions à effet réel
+        #        de cette tâche — ni le mode auto ni allow_input_control n'en dispensent.
+        if ctx.get("requires_confirmation") is True and \
+                str(step.get("type", "")).strip() in SERVER_CONFIRM_STEP_TYPES:
+            why = SERVER_CONFIRM_REASON
+            if skill.category in INPUT_CONTROL_CATEGORIES:
+                try:
+                    risk = skill.input_risk(step)
+                except Exception as e:  # noqa: BLE001
+                    risk = f"analyse du risque impossible : {e}"
+                if risk:
+                    why = f"{why} ; {risk}"
+            return self._confirm(skill, step, ctx, why=why)
 
         # 5. Actions non sensibles (wait, liste des téléphones) : autorisées directement
         if not skill.sensitive:

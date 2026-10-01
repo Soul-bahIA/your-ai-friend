@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 # Vérificateur de chemin fourni par le gate : True si le chemin est dans la whitelist.
 PathCheck = Callable[[str], bool]
+# Raison du refus d'un chemin (hors whitelist ou deny-list) ou None : PermissionGate.path_refusal.
+PathRefusal = Callable[[object], "str | None"]
 
 
 class CancelToken:
@@ -72,6 +74,27 @@ def current_token() -> CancelToken:
 def bind_token(token: CancelToken | None) -> None:
     """Associe `token` au thread courant (None = détache)."""
     _local.token = token
+
+
+def bind_path_refusal(check: PathRefusal | None) -> None:
+    """Associe au thread courant le contrôle de chemins du gate (whitelist +
+    deny-list), posé par l'executor dans le thread d'une étape (None = détache)."""
+    _local.path_refusal = check
+
+
+def path_refusal_now(path: object) -> str | None:
+    """Dernier contrôle d'un chemin juste avant d'agir (whitelist + deny-list du
+    gate) : un lien ou une jonction remplacé après la revalidation du gate ne doit
+    pas faire sortir de la liste blanche. Hors executor (appel direct d'un skill,
+    outil, test), aucun gate n'est lié : None — le gate reste la barrière principale
+    et les skills revérifient de toute façon la deny-list eux-mêmes."""
+    check = getattr(_local, "path_refusal", None)
+    if check is None:
+        return None
+    try:
+        return check(path)
+    except Exception as e:  # noqa: BLE001 - un contrôle qui plante = refus
+        return f"contrôle du chemin impossible : {e}"
 
 
 def sleep_or_cancel(seconds: float, step: float = 0.25, token: CancelToken | None = None) -> bool:

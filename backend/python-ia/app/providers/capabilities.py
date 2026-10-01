@@ -7,6 +7,8 @@ portant des images n'est jamais routée vers un modèle dont la vision n'est pas
 Surcharge sans code : LLM_CAPABILITIES (JSON), clés "fournisseur" ou
 "fournisseur:modèle" (la plus précise gagne), ex. :
   {"local": {"vision": true}, "openai:gpt-4o-mini": {"vision": true}}
+Une valeur invalide (ex. max_output_tokens non entier) est ignorée avec un
+avertissement : une surcharge mal saisie ne doit jamais faire échouer tous les appels.
 """
 from __future__ import annotations
 
@@ -29,12 +31,27 @@ _CLAUDE_EFFORT = re.compile(r"^claude-(opus-5|opus-4-[5-9]|sonnet-5|sonnet-4-6|f
 # Sortie 128K (sinon 64K pour les Claude 4.x récents, 8K par prudence au-delà).
 _CLAUDE_128K = re.compile(r"^claude-(opus-5|opus-4-[6-9]|sonnet-5|sonnet-4-6|fable|mythos)")
 _CLAUDE_64K = re.compile(r"^claude-(haiku-4-5|sonnet-4-5|opus-4-5|sonnet-4|opus-4)")
+# Claude 1 / 2 / Instant (retirés) : ni entrée image, ni sortie structurée.
+_CLAUDE_LEGACY = re.compile(r"^claude-(instant|[12](\.|-|$))")
 
-# Modèles OpenAI-compatibles dont la vision est connue.
+# Modèles OpenAI-compatibles dont la vision est connue (familles, par préfixe)...
 _OPENAI_COMPAT_VISION = re.compile(
     r"^(gpt-4o|gpt-4\.1|gpt-5|o3|o4|chatgpt-4o|gemini-|pixtral|grok-4|grok-2-vision|"
     r"qwen-vl|qwen2\.5-vl|qwen-omni|llava|llama3\.2-vision|.*-vl-|.*-vision)",
 )
+# ... SAUF les variantes de ces familles qui n'acceptent PAS d'image : o1-mini /
+# o3-mini (texte seul), modèles audio, temps réel, synthèse ou transcription vocale,
+# recherche, embeddings. Mieux vaut une vision non déclarée (réactivable via
+# LLM_CAPABILITIES) qu'une image envoyée à un modèle qui répond 400 (502 sans repli).
+_OPENAI_COMPAT_NO_VISION = re.compile(
+    r"^(o1-mini|o1-preview|o3-mini)|-(audio|realtime|tts|transcribe|search)(-|$)|embedding",
+)
+# Modèles de raisonnement OpenAI (o1, o3, o4-mini, gpt-5…) : `max_tokens` y est refusé
+# (400 -> 502 sans repli) au profit de `max_completion_tokens`, et les jetons de
+# raisonnement consomment cette limite (plancher appliqué par le fournisseur).
+_OPENAI_REASONING = re.compile(r"^(o\d|gpt-5)")
+
+TOKEN_PARAMS = ("max_tokens", "max_completion_tokens")
 
 
 def _builtin(family: str, model: str) -> ModelCapabilities:
@@ -42,6 +59,8 @@ def _builtin(family: str, model: str) -> ModelCapabilities:
     if family == "anthropic":
         if not m.startswith("claude-"):
             return ModelCapabilities()
+        if _CLAUDE_LEGACY.match(m):
+            return ModelCapabilities(max_output_tokens=4_096)
         if _CLAUDE_128K.match(m):
             max_out = 128_000
         elif _CLAUDE_64K.match(m):
@@ -56,12 +75,14 @@ def _builtin(family: str, model: str) -> ModelCapabilities:
             max_output_tokens=max_out,
         )
     # openai-compat / local : rien n'est supposé hors des modèles connus.
+    reasoning = bool(_OPENAI_REASONING.match(m))
     return ModelCapabilities(
-        vision=bool(_OPENAI_COMPAT_VISION.match(m)),
+        vision=bool(_OPENAI_COMPAT_VISION.match(m)) and not _OPENAI_COMPAT_NO_VISION.search(m),
         json_schema=False,  # json_object + consigne, pas de schéma natif garanti
-        thinking=False,
+        thinking=reasoning,
         effort=False,
         max_output_tokens=16_384,
+        max_tokens_param="max_completion_tokens" if reasoning else "max_tokens",
     )
 
 
@@ -72,12 +93,59 @@ def _overrides() -> dict[str, dict]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("LLM_CAPABILITIES n'est pas un JSON valide : ignoré")
+        _warn_once("LLM_CAPABILITIES n'est pas un JSON valide : ignoré")
         return {}
     return {str(k): v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
 
 
-_ALLOWED_FIELDS = {"vision", "json_schema", "thinking", "effort", "max_output_tokens"}
+_ALLOWED_FIELDS = {"vision", "json_schema", "thinking", "effort", "max_output_tokens", "max_tokens_param"}
+_warned: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    # capabilities_for est appelé à chaque requête : un seul avertissement par message.
+    if message not in _warned:
+        _warned.add(message)
+        logger.warning(message)
+
+
+def _positive_int(value) -> int | None:
+    """Entier strictement positif (int, float entier ou chaîne de chiffres), sinon None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        n = value
+    elif isinstance(value, float) and value.is_integer():
+        n = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        n = int(value.strip())
+    else:
+        return None
+    return n if n >= 1 else None
+
+
+def _clean_patch(key: str, patch: dict) -> dict:
+    """Champs valides d'une surcharge ; une valeur invalide est ignorée (avertissement)."""
+    clean: dict = {}
+    for k, v in patch.items():
+        if k not in _ALLOWED_FIELDS:
+            continue
+        if k == "max_output_tokens":
+            n = _positive_int(v)
+            if n is None:
+                _warn_once(f"LLM_CAPABILITIES[{key[:60]!r}].max_output_tokens invalide "
+                           f"({str(v)[:40]!r}, entier > 0 attendu) : ignoré")
+                continue
+            clean[k] = n
+        elif k == "max_tokens_param":
+            if v not in TOKEN_PARAMS:
+                _warn_once(f"LLM_CAPABILITIES[{key[:60]!r}].max_tokens_param invalide "
+                           f"({str(v)[:40]!r}, attendu : {' | '.join(TOKEN_PARAMS)}) : ignoré")
+                continue
+            clean[k] = v
+        else:
+            clean[k] = parse_bool(v, False)
+    return clean
 
 
 def capabilities_for(provider_id: str, family: str, model: str) -> ModelCapabilities:
@@ -87,10 +155,7 @@ def capabilities_for(provider_id: str, family: str, model: str) -> ModelCapabili
         patch = ov.get(key)
         if not patch:
             continue
-        clean = {}
-        for k, v in patch.items():
-            if k not in _ALLOWED_FIELDS:
-                continue
-            clean[k] = int(v) if k == "max_output_tokens" else parse_bool(v, False)
-        caps = replace(caps, **clean)
+        clean = _clean_patch(key, patch)
+        if clean:
+            caps = replace(caps, **clean)
     return caps

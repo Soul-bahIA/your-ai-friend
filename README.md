@@ -44,7 +44,8 @@ du texte, capturer l'écran, enregistrer des démonstrations…) sous son contr�
 
 ## Prérequis
 
-- **Node.js 20+** et npm
+- **Node.js 22.19+** et npm pour `backend/node-api` (`engines`) ; 20+ suffit pour `frontend/`
+  et la console de test
 - **Python 3.11+** (service IA et agent)
 - Un projet **Supabase** (Auth + Postgres ; l'extension `vector` est activée par les migrations)
 - Facultatif : **Docker + Docker Compose** (backend en conteneurs), **Rust** (démo rust-compute),
@@ -139,8 +140,8 @@ cp .env.example .env    # SOULBAH_AGENT_KEY : à générer dans l'app, page Séc
   `.git/hooks`.
 - **`--dry-run`** ne réclame aucune tâche au serveur : il simule un plan local et marque son
   résultat `simulated`.
-- **Lanceur Windows** : `agent/Lancer_Agent.bat` doit utiliser `agent\.venv` (T52, chantier
-  agent). En attendant, lancer avec le Python du venv comme ci-dessus.
+- **Lanceur Windows** : `agent/Lancer_Agent.bat` crée au besoin puis utilise `agent\.venv`
+  (jamais le Python global, T52).
 
 Détails : [`agent/README.md`](agent/README.md).
 
@@ -164,8 +165,11 @@ docker compose up --build
 Démarre `postgres` (Postgres local de démo), `python-ia` (interne), `node-api` et la console de
 test `console`. **Tous les ports publiés sont liés à `127.0.0.1`** : `5432` (postgres),
 `${NODE_API_PORT:-3000}` (node-api) et `${CONSOLE_PORT:-5173}` (console). Rien n'est joignable
-depuis le réseau local. `SOULBAH_ENV` (défaut `dev`) et `IA_SERVICE_TOKEN` sont transmis à
-node-api et à python-ia.
+depuis le réseau local. `SOULBAH_ENV` (défaut `dev`), `IA_SERVICE_TOKEN` et
+`LLM_ALLOWED_OVERRIDES` sont transmis à node-api et à python-ia, ainsi que les réglages du
+routeur de modèles (`LLM_MODEL_*`, `LLM_EFFORT_*`, `LLM_FALLBACK_ORDER`, `LLM_CAPABILITIES`…)
+à python-ia : toute variable documentée dans `backend/.env.example` et lue par un service lui
+est transmise (vérifié en CI par `scripts/ci/check_compose_env.py`).
 
 La démo Rust n'est lancée qu'à la demande : `docker compose --profile demo up --build`.
 L'app web principale se lance à part (`npm run dev` dans `frontend/`). Détails :
@@ -195,21 +199,35 @@ bash scripts/build_restore_sql.sh
 - migrations additives et idempotentes : `IF NOT EXISTS`, `DROP POLICY IF EXISTS` puis
   `CREATE`, contraintes `NOT VALID` puis `VALIDATE` tentée ;
 - jamais de modification du CHECK de statut d'`agent_tasks`, jamais de FK sur
-  `agent_events.task_id`, jamais de suppression de `modules_status`.
+  `agent_events.task_id`, jamais de suppression de `modules_status` ;
+- version (horodatage UTC du nom de fichier) jamais dans le futur : créer le fichier avec
+  `supabase migration new <nom>`. Une version postérieure à la date du jour ferait classer
+  avant elle toute migration créée ensuite, et `supabase db push` la refuserait.
 
 Toutes les migrations depuis `20260703000000` sont rejouables.
 
 **Valider les migrations en local** sur un Postgres **jetable** (sans pgvector : DDL
-vectoriel remplacé par un stub) :
+vectoriel remplacé par un stub ; `pg_trgm`, fourni avec PostgreSQL, est requis). Les outils
+PostgreSQL ne sont pas dans le `PATH` par défaut sous Windows ; dans git-bash :
 ```bash
-export PGHOST=127.0.0.1 PGPORT=55432 PGUSER=postgres PGDATABASE=soulbah_ci   # base jetable
-bash scripts/ci/apply_migrations.sh --stub-vector --checks
+export PATH="/c/Program Files/PostgreSQL/18/bin:$PATH"            # psql, pg_dump, initdb, pg_ctl
+# Une fois : cluster jetable hors du dépôt (port 55432, authentification « trust » locale)
+initdb -D ~/soulbah-pg-ci -U postgres -A trust -E UTF8 --locale=C
+pg_ctl -D ~/soulbah-pg-ci -o "-p 55432 -c listen_addresses=127.0.0.1" -l ~/soulbah-pg-ci.log start
+# À chaque validation : base neuve, migrations ×2, assertions
+export PGHOST=127.0.0.1 PGPORT=55432 PGUSER=postgres
+psql -d postgres -c "DROP DATABASE IF EXISTS soulbah_ci" -c "CREATE DATABASE soulbah_ci"
+PGDATABASE=soulbah_ci bash scripts/ci/apply_migrations.sh --stub-vector --checks
+pg_ctl -D ~/soulbah-pg-ci stop                                    # arrêter le cluster ensuite
 ```
 Le script :
 - installe le stub Supabase (`scripts/ci/auth_stub.sql`) ;
 - applique toutes les migrations, puis rejoue celles qui sont rejouables ;
 - vérifie que le schéma est identique après le rejeu ;
-- lance les assertions de `scripts/ci/schema_checks.sql`, dans une transaction annulée.
+- lance les assertions de `scripts/ci/schema_checks.sql` (transaction annulée), les
+  contrôles de `scripts/sql/post_restore_checks.sql` (lecture seule) et vérifie le rôle
+  `soulbah_api` avec `scripts/sql/soulbah_api_grants.sql` (`scripts/ci/api_role_checks.sql`,
+  annulé). Contrôle statique associé : `python scripts/ci/check_api_grants.py`.
 
 Il refuse de tourner sur une base Supabase réelle.
 
@@ -224,8 +242,10 @@ deux fichiers `soulbah_AAAAMMJJ_HHMM` dans `backups/` (ignoré par git, ou `BACK
 via `BACKUP_SCHEMAS`). Le mot de passe n'apparaît **jamais** sur la ligne de commande : il
 passe par un fichier pgpass temporaire, supprimé en fin de script.
 
-**Chiffrement**, recommandé car le dump contient toutes les données : définir l'une des
-variables ci-dessous. Les fichiers en clair sont alors supprimés après chiffrement.
+**Chiffrement obligatoire** (S30) : le dump contient toutes les données, dont les empreintes
+de mots de passe du schéma `auth`. Définir l'une des variables ci-dessous ; les fichiers en
+clair sont supprimés après chiffrement. Sans aucune, les scripts **refusent** de s'exécuter
+(code 2), sauf `BACKUP_ALLOW_PLAINTEXT=1` (dump en clair assumé, base jetable par exemple).
 
 | Variable | Outil | Fichiers produits |
 |---|---|---|
@@ -233,19 +253,40 @@ variables ci-dessous. Les fichiers en clair sont alors supprimés après chiffre
 | `BACKUP_GPG_RECIPIENT=<clé>` | `gpg` (clé publique) | `.gpg` |
 | `BACKUP_GPG_PASSPHRASE_FILE=<fichier hors dépôt>` | `gpg`, AES256 symétrique | `.gpg` |
 ```bash
-bash scripts/backup_db.sh                                        # git-bash / Linux / macOS
-powershell -ExecutionPolicy Bypass -File scripts\backup_db.ps1   # Windows PowerShell
+BACKUP_GPG_PASSPHRASE_FILE=~/.soulbah/backup_passphrase.txt bash scripts/backup_db.sh   # git-bash / Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts\backup_db.ps1   # Windows (variables $env:BACKUP_*)
 ```
 `pg_dump` doit être d'une version ≥ à celle du serveur (Windows : `C:\Program Files\PostgreSQL\<v>\bin`,
 détecté automatiquement). Le pooler Supabase en mode transaction (port 6543) est remplacé
 automatiquement par le mode session (5432), seul compatible avec `pg_dump`.
 
-Restauration d'une sauvegarde (exemple) :
+Les dumps **conservent les droits** (GRANT/REVOKE ; seule la propriété est omise,
+`--no-owner`) : restaurer avec `--no-privileges` rendrait `has_role` / `is_admin`
+exécutables par `PUBLIC` et `anon` (S19). Tests : `scripts/ci/test_backup_db.sh` et
+`scripts/ci/test_backup_db.ps1` (job CI `scripts`).
+
+**Restauration** (projet Supabase neuf, ou base dont on recharge les données) : le schéma,
+les droits et les policies viennent des migrations, les **données seules** de la sauvegarde.
 ```bash
-gpg -o soulbah.dump -d backups/soulbah_AAAAMMJJ_HHMM.dump.gpg     # si chiffrée (age : age -d -i clé.txt …)
-pg_restore --no-owner --no-privileges --dbname "$DATABASE_URL" soulbah.dump
-# ou : psql "$DATABASE_URL" -f soulbah.sql
+# 0. Déchiffrer (age : age -d -i clé.txt -o soulbah.dump …)
+gpg -o soulbah.dump -d backups/soulbah_AAAAMMJJ_HHMM.dump.gpg
+# 1. Schéma : `supabase db push` (ou RESTAURATION_BASE.sql dans l'éditeur SQL, projet NEUF)
+# 2. Données uniquement (public + auth), sans l'historique de migrations de GoTrue
+pg_restore -l soulbah.dump | grep -v ' auth schema_migrations ' > soulbah.toc
+pg_restore --data-only --use-list=soulbah.toc --file=donnees.sql soulbah.dump
+#    Une transaction ; triggers et FK suspendus le temps du chargement (sinon
+#    handle_new_user recrée des profils en double) ; domaines semés par les migrations remplacés.
+psql "$URL" --single-transaction -v ON_ERROR_STOP=1 \
+  -c "SET session_replication_role = replica" -c "DELETE FROM public.knowledge_domains" \
+  -f donnees.sql
+# 3. Contrôles (droits S19, RLS, policies) — obligatoire
+psql "$URL" -X -v ON_ERROR_STOP=1 -f scripts/sql/post_restore_checks.sql
 ```
+`$URL` : connexion `postgres` (pas `soulbah_api`). Supprimer `soulbah.dump`, `soulbah.toc`
+et `donnees.sql` (en clair) après usage. Une sauvegarde **antérieure au LOT 1** a été faite
+avec `--no-privileges` : la restaurer de cette façon (données seules) ; en cas de
+restauration complète, `post_restore_checks.sql` le signale et indique les migrations à
+rejouer.
 
 ---
 
@@ -259,7 +300,7 @@ cd backend/python-ia && .venv/Scripts/python -m pytest tests -q
 SOULBAH_NO_DOTENV=1 agent/.venv/Scripts/python -m pytest agent/tests -q   # n'utilise jamais agent/.env
 ```
 
-La CI GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) comprend 8 jobs :
+La CI GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) comprend 11 jobs :
 
 | Job | Contenu |
 |---|---|
@@ -268,9 +309,16 @@ La CI GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) co
 | `node-api` | Typage, tests, build. |
 | `python-ia` | Python 3.11 et 3.12, dans un venv. |
 | `agent` | Runner **windows-latest**. |
-| `db` | Image `pgvector/pgvector` : migrations ×2, comparaison de schéma, assertions de policies et de triggers, `RESTAURATION_BASE.sql` à jour. Image à épingler sur la version de Supabase. |
-| `compose` | `docker compose config`, avec et sans le profil `demo`. |
+| `db` | Image `pgvector/pgvector` : migrations ×2, comparaison de schéma, assertions de policies, de triggers et d'index, contrôles post-restauration, droits du rôle `soulbah_api` (statique + base réelle), `RESTAURATION_BASE.sql` à jour. Image à épingler sur la version de Supabase. |
+| `scripts` | Sauvegardes : décodage d'URL (« + »), refus du dump en clair, droits conservés (Postgres 16 réel) ; `backup_db.ps1` sous pwsh. |
+| `compose` | `docker compose config`, avec et sans le profil `demo` ; variables documentées dans `backend/.env.example` et lues par un service bien transmises (`scripts/ci/check_compose_env.py`). |
+| `docker-build` | `docker compose build` : images python-ia, node-api et console ; rust-compute (profil `demo`) non bloquant. |
+| `rust` | `cargo check --locked` de rust-compute, non bloquant ; publie un `Cargo.lock` en artefact tant qu'il n'est pas versionné (T50). |
 | `security` | `npm audit --omit=dev`, `pip-audit` (bloquant pour les dépendances de prod) et gitleaks sur tout l'historique. |
+
+CodeQL ([`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)) analyse le
+JavaScript/TypeScript et le Python à chaque push sur `main`, sur les PR et chaque lundi
+(sur un dépôt privé, l'envoi des résultats exige GitHub Advanced Security).
 
 Plancher de non-régression : agent 156, python-ia 55, node-api 38, front 48 tests.
 
@@ -289,12 +337,17 @@ Plancher de non-régression : agent 156, python-ia 55, node-api 38, front 48 tes
 - **Clé agent** :
   - générée depuis la page *Sécurité* (via `POST /api/agent-keys`), stockée côté serveur
     sous forme de hash SHA-256 uniquement, révocable à tout moment ;
-  - le navigateur ne peut que lire et supprimer ses clés (RLS) ;
+  - le navigateur ne peut que lire ses clés (RLS) ; la révocation passe par
+    `DELETE /api/agent-keys/:id`, qui annule d'abord les tâches de ce PC ;
+  - pas d'expiration en V1 (S20, reportée au LOT 4) : faire tourner les clés à la main ;
   - une clé ne donne accès qu'aux tâches de son propriétaire, et à celles qui lui sont
     ciblées.
 - **RLS** : chaque table est filtrée par `user_id`.
-  - Les tâches de l'agent ne peuvent être créées ou modifiées que via l'API Node (pas
-    d'INSERT/UPDATE direct depuis le navigateur).
+  - Les tâches de l'agent ne peuvent être créées, modifiées ou supprimées que via l'API
+    Node (le navigateur les lit, y compris en Realtime).
+  - Base de connaissances et mémoire de l'agent : écritures via l'API uniquement (hash,
+    version, embedding ; statut `proposed` → `validated` par une action explicite). Le
+    navigateur lit ces tables (et peut supprimer ses mémoires).
   - Les INSERT vérifient aussi la propriété de la ligne parente (conversation, entrée de
     connaissance, schéma).
   - **Limite actuelle** : node-api se connecte en `postgres` et contourne la RLS (il filtre

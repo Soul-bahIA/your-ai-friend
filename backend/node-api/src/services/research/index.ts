@@ -9,6 +9,9 @@
 // Sans clé web (T13) : la synthèse est une pure production du modèle. Elle est stockée
 // avec source 'llm_synthesis', une confiance plafonnée (LLM_ONLY_MAX_CONFIDENCE), des URL
 // marquées non vérifiées, et n'est JAMAIS resservie comme « kb ».
+// Avec web : la synthèse (source 'web_synthesis') reste une production du modèle — resservie
+// depuis la KB comme cache, mais TOUJOURS avec verified=false (T13), comme toute entrée dont
+// une source citée n'a pas été vérifiée.
 import { knowledgeService } from "../knowledge/index.js";
 import type { KnowledgeEntry, Source } from "../knowledge/index.js";
 import { synthesizeKnowledge } from "../../clients/iaClient.js";
@@ -35,7 +38,11 @@ export interface ResearchResult {
   fromCache: boolean;
   webUsed: boolean;
   webProvider: string;
-  /** false : synthèse du modèle seule (aucune source récupérée) — à vérifier. */
+  /**
+   * true seulement pour une connaissance qui n'est PAS une synthèse de modèle et ne cite
+   * aucune source non vérifiée, ou pour une synthèse web FRAÎCHE dont toutes les URL citées
+   * ont été effectivement récupérées. false : à vérifier par l'utilisateur.
+   */
   verified: boolean;
   entry: KnowledgeEntry; // la connaissance retenue (issue de la KB ou nouvellement synthétisée)
   related: KnowledgeEntry[];
@@ -45,6 +52,21 @@ export interface ResearchResult {
 /** Une entrée peut-elle être resservie comme connaissance (« kb ») ? Jamais une synthèse LLM seule. */
 export function isServableKnowledge(e: Pick<KnowledgeEntry, "source">): boolean {
   return e.source !== LLM_ONLY_SOURCE;
+}
+
+/** Entrée issue d'une synthèse de modèle (avec ou sans web) : jamais « vérifiée ». */
+export function isModelSynthesis(e: Pick<KnowledgeEntry, "source">): boolean {
+  return typeof e.source === "string" && e.source.endsWith("_synthesis");
+}
+
+/** Au moins une source citée marquée verified=false (URL jamais récupérée). */
+function hasUnverifiedSource(sources: readonly Source[] | null | undefined): boolean {
+  return Array.isArray(sources) && sources.some((s) => !!s && s.verified === false);
+}
+
+/** Une entrée de la KB peut-elle être présentée comme VÉRIFIÉE ? (T13) */
+export function isVerifiedEntry(e: Pick<KnowledgeEntry, "source" | "sources">): boolean {
+  return !isModelSynthesis(e) && !hasUnverifiedSource(e.sources);
 }
 
 const normUrl = (u: string) => u.trim().replace(/\/+$/, "").toLowerCase();
@@ -93,7 +115,7 @@ export class ResearchService {
         fromCache: true,
         webUsed: false,
         webProvider: "none",
-        verified: true,
+        verified: isVerifiedEntry(servable[0]),
         entry: servable[0],
         related: kbHits.filter((e) => e.id !== servable[0].id),
       };
@@ -118,13 +140,14 @@ export class ResearchService {
     });
 
     // 5) Mise en cache dans la KB comme FINDING (déduplication automatique).
+    const sources = markSourcesVerified(synthesis.sources, webResults);
     const { entry, deduped } = await knowledgeService.remember(userId, {
       title: synthesis.title || query,
       content: synthesis.content,
       summary: synthesis.summary,
       domain: synthesis.domain || opts.domain || "general",
       keywords: synthesis.keywords ?? [],
-      sources: markSourcesVerified(synthesis.sources, webResults),
+      sources,
       confidence: cappedConfidence(synthesis.confidence, webBacked),
       category: "recherche",
       source: webBacked ? WEB_SYNTHESIS_SOURCE : LLM_ONLY_SOURCE,
@@ -136,7 +159,8 @@ export class ResearchService {
       fromCache: false,
       webUsed: web.available && webBacked,
       webProvider: web.id,
-      verified: webBacked,
+      // Synthèse fraîche : appuyée sur des résultats web ET sans URL citée non récupérée.
+      verified: webBacked && !hasUnverifiedSource(sources),
       entry,
       related: kbHits,
       deduped,

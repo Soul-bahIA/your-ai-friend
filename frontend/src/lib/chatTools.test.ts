@@ -101,14 +101,44 @@ describe("carte de confirmation", () => {
     expect(describeAction("create_formation", { topic: "Python", details: "débutants" })).toEqual({
       title: "Créer une formation",
       fields: [
-        { label: "Sujet", value: "Python" },
-        { label: "Détails", value: "débutants" },
+        { label: "Sujet", value: "Python", long: false },
+        { label: "Détails", value: "débutants", long: false },
       ],
     });
     const kb = describeAction("save_knowledge", { title: "T", content: "x".repeat(700), tags: ["a", 1, "b"] });
-    expect(kb.fields.find((f) => f.label === "Contenu")?.value).toHaveLength(600);
+    // Contenu affiché EN ENTIER (zone défilante), plus de troncature à 600 caractères (S12).
+    expect(kb.fields.find((f) => f.label === "Contenu")).toEqual({ label: "Contenu", value: "x".repeat(700), long: true });
     expect(kb.fields.find((f) => f.label === "Tags")?.value).toBe("a, b");
     expect(describeAction("other", { a: 1 }).title).toBe("Action « other »");
+  });
+
+  it("montre tout ce qui sera exécuté : rien de caché après le 600e caractère (S12)", () => {
+    const content = `${"Note légitime. ".repeat(48)}hidden payload`;
+    expect(content.length).toBeGreaterThan(700);
+    const [proposed] = proposeToolCalls(
+      [call("save_knowledge", { title: "T", content, category: "c".repeat(450), tags: ["t".repeat(80)], extra: "ignoré" })],
+      "c",
+    );
+    const card = describeAction(proposed.name, proposed.args);
+    expect(card.fields.find((f) => f.label === "Contenu")?.value).toContain("hidden payload");
+
+    const body = buildConfirmedActionBody(transitionAction(proposed, { type: "confirm" }));
+    // Seuls les arguments affichés partent, et chacun figure en entier dans la carte.
+    expect(Object.keys(body.action.arguments).sort()).toEqual(["category", "content", "tags", "title"]);
+    const shown = card.fields.map((f) => f.value);
+    for (const [key, sent] of Object.entries(body.action.arguments)) {
+      const text = Array.isArray(sent) ? sent.join(", ") : String(sent);
+      expect(shown, key).toContain(text.trim());
+    }
+  });
+
+  it("formation / application : détails et description longs affichés en entier", () => {
+    const details = `${"d".repeat(450)}FIN`;
+    const formation = describeAction("create_formation", { topic: "Rust", details });
+    expect(formation.fields[1]).toEqual({ label: "Détails", value: details, long: true });
+    const appDesc = `ligne 1\nligne 2 ${"z".repeat(500)}`;
+    const app = describeAction("create_application", { appName: "CRM", appDesc });
+    expect(app.fields[1]).toEqual({ label: "Description", value: appDesc, long: true });
   });
 
   it("mentionne la proposition dans la réponse", () => {

@@ -28,7 +28,7 @@ Liste complète des routes : `README.md`.
 
 ## Prérequis base de données (LOT 1)
 
-Appliquer **`supabase/migrations/20261002000000_lot1_fixes.sql` AVANT de déployer ce node-api** :
+Appliquer **`supabase/migrations/20261001090000_lot1_fixes.sql` AVANT de déployer ce node-api** :
 `agent_tasks.target_agent_key_id` / `claimed_by_key_id` (FK `agent_keys` ON DELETE SET NULL), index
 de poll partiel, trigger qui ne prolonge plus le bail quand seul `control` change. Sans elle, poll,
 claim et création de tâches échouent (node-api journalise une erreur explicite au démarrage).
@@ -52,14 +52,27 @@ claim et création de tâches échouent (node-api journalise une erreur explicit
   final accepté** (garde `attempt`) et n'est **jamais évalué**.
 - **Annulation** : `POST /api/agent-tasks/:id/cancel` (JWT) — `pending` → `cancelled` ;
   `in_progress` → `control='stop'` ; l'agent finit l'étape courante puis envoie `status:"cancelled"`.
-- **Captures** : `image_b64` d'un évènement est retiré avant insertion (`data.has_image=true`) et gardé
-  en mémoire 10 min ; les captures du rapport final sont retirées de `result` (les 3 dernières sont
-  passées en mémoire à l'évaluation). `data.source` est forcé à `agent` pour les évènements de l'agent.
+- **Captures** : `image_b64` d'un évènement (niveau racine de `data`) doit être du **base64 strict
+  ≤ 2 Mo de texte** (sinon **400**) ; il est retiré avant insertion (`data.has_image=true`) et gardé en
+  mémoire 10 min. Tout `image_b64` **imbriqué** dans `data` est retiré (jamais stocké ni diffusé).
+  Mémoire bornée : 128 Mo au total, 24 Mo / 50 tâches par utilisateur (ses plus anciennes captures
+  sont évincées d'abord), expirées balayées chaque minute. Les captures du rapport final sont retirées
+  de `result` (les 3 dernières **valides** sont passées en mémoire à l'évaluation).
+  `data.source` est forcé à `agent` pour les évènements de l'agent.
 - `type: "heartbeat"` rafraîchit le signe de vie sans créer de ligne `agent_events`.
-- Corps : 15 Mo max pour `update`/`event` ; hors captures, `data` ≤ 64 Ko et `result` ≤ 1 Mo.
+- Corps : **3 Mo max pour `event`**, 15 Mo pour `update` (413 au-delà) ; hors captures, `data` ≤ 64 Ko
+  et `result` ≤ 1 Mo.
 - **Reaper global** (toutes les 60 s, une seule instance via verrou consultatif) : tâche
   `in_progress` muette depuis `AGENT_TASK_STALE_SECONDS` → `cancelled` si un stop était demandé, sinon
-  `pending` (`requeue_count+1`, `claimed_by_key_id` effacé) au plus 3 fois, puis `failed`.
+  `pending` (`requeue_count+1`, `claimed_by_key_id` effacé) au plus 3 fois, puis `failed`. À la remise
+  en file, `control` repart à `none`, sauf : pause demandée par l'utilisateur → conservée ; **étape à
+  effet réel déjà lancée** (`step_started|step_done|step_failed` d'une étape run_command, write_file,
+  move_file, type_text, hotkey, phone_*…) → **`pause`** : l'agent rejouant le plan depuis l'étape 0
+  (reprise à l'étape prévue au LOT 8), il attend un « Reprendre » explicite (ou une annulation).
+  L'évènement `task_requeued` porte `data.{requeue_count, control, side_effects}`.
+- **Révocation d'une clé** (`DELETE /api/agent-keys/:id`) : dans la même transaction, les tâches
+  `pending` ciblant ce PC (corrections en attente comprises) et les tâches `in_progress` qu'il exécutait
+  passent en `cancelled` (+ `control='stop'`) — jamais reprises ni finalisées par un autre PC.
 
 ## Changements d'API LOT 1 (pour le frontend)
 
@@ -68,6 +81,8 @@ claim et création de tâches échouent (node-api journalise une erreur explicit
 | `POST /api/agent/goal` | `{goal, agent_key_id?}` → `{success, task_id, understanding, steps, target_agent_key_id}`. Plusieurs clés sans `agent_key_id` → **400 `{error, agents:[{id,name}]}`** ; clé inconnue → 400 ; une seule clé → ciblée d'office. Le planner ne voit que les `allowed_dirs` de la clé ciblée ; tout chemin hors de ces dossiers → 422 (`reason`). |
 | `POST /api/agent-tasks` | `{task_type, payload:{steps,…}, priority?, agent_key_id?}` ; même règle de ciblage ; chemins (`src, dest, path, cwd, output, audio, clips[]`) absolus et dans les `allowed_dirs` de la clé ciblée, sinon 400. `payload.requires_confirmation=true` posé par le serveur dès qu'une étape agit réellement (run_command, write_file, move_file, type_text, hotkey, phone_*). |
 | `POST /api/agent-tasks/:id/cancel` | → `{success, status, control, task:{id,status,control}}` (statut APRÈS l'appel) ; terminée → 409 `{error,status}` ; absente → 404. Sert aussi à **rejeter** une correction. |
+| `POST /api/agent-tasks/:id/cancel?scope=goal` | annule **tout l'objectif** (tâches actives de même `goal_meta.root_task_id`, racine comprise) → `{success, scope:"goal", root_task_id, cancelled:[ids], stopping:[ids], tasks:[{id,status,control}]}` ; rien d'actif → 409 ; absente → 404 ; autre `scope` → 400. |
+| `DELETE /api/agent-keys/:id` | → `{success, cancelled_task_ids}` (tâches du PC annulées, voir ci-dessus) ; absente → 404. |
 | `POST /api/agent-tasks/:id/approve` | → `{success, task_id, status, task:{id,status,control,payload}}` (`payload.goal_meta.awaiting_approval=false`, `approved_at`) ; pas en attente → 409 ; absente → 404. |
 | `DELETE /api/agent-tasks/:id` | tâche terminée (`completed/failed/cancelled`) → **204** ; active → 409 (annuler d'abord) ; absente → 404. |
 | `POST /api/agent-tasks/:id/control` | `{control: pause|resume|stop}` ; même valeur → `{success, control, unchanged:true}` (aucune écriture, bail non prolongé) ; tâche terminée → 409. |
@@ -76,12 +91,12 @@ claim et création de tâches échouent (node-api journalise une erreur explicit
 | `GET /api/agent-tasks` | colonnes `target_agent_key_id`, `claimed_by_key_id` en plus. |
 | `GET /api/agent-keys` | `allowed_dirs` en plus (choix du PC). |
 | `POST /api/chat` (action) | `{action:{name,arguments}, confirmed:true}` — `confirmed:true` accepté au premier niveau **ou** dans `action`. Sans lui : 200 `{success:false, requires_confirmation:true, action}` et **rien n'est exécuté**. |
-| `POST /api/auth/logout` | Bearer requis → `{success:true}` : le JWT est oublié du cache (15 s sinon). |
+| `POST /api/auth/logout` | Bearer requis → `{success:true}` : le JWT est oublié du cache **et révoqué sur l'instance** (refusé 401 sans consulter Supabase jusqu'à son `exp`, ≤ 1 h) — même pour une requête arrivée avant `signOut`. Autre instance : 15 s max. |
 | `POST /api/formations/:id/demos` | **501** `{error, code:"demos_not_implemented"}` (plus de tâches sans étapes). |
 | `POST /api/orchestrator/route` | échec de planification dispatchée → 4xx relayé (400/422/429…) ou **502**, avec `success:false`. |
 | `provider` (research, generate/formation, orchestrator) | refusé (400) s'il n'est pas dans `LLM_ALLOWED_OVERRIDES`. |
 | `POST/PATCH /api/knowledge` | `confidence` ∈ [0,1] et types vérifiés → 400 sinon ; `content_hash` client ignoré, recalculé à chaque écriture. |
-| `POST /api/research` | `verified:false` et entrée `source:'llm_synthesis'`, `category:'recherche'`, confiance ≤ 0.3, `sources[].verified=false` quand aucune source web n'a été récupérée ; jamais resservie comme `kb`. |
+| `POST /api/research` | `verified:false` et entrée `source:'llm_synthesis'`, `category:'recherche'`, confiance ≤ 0.3, `sources[].verified=false` quand aucune source web n'a été récupérée ; jamais resservie comme `kb`. Une synthèse web (`web_synthesis`) resservie depuis la KB (`source:'kb'`) a **toujours** `verified:false`, comme toute entrée citant une source `verified:false` ; une synthèse web fraîche n'est `verified:true` que si toutes ses URL citées ont été récupérées. |
 | `GET /health/deep` | JWT exigé hors `SOULBAH_ENV=dev`. |
 
 ### Évaluation d'un objectif (`result.evaluation` + évènement `evaluation`)
@@ -107,8 +122,15 @@ l'évaluation a échoué) ; `retry` n'est écrit que si une correction a réelle
 | `evaluation_failed` | service IA indisponible / erreur : rien n'est décidé |
 
 Une correction porte `payload.goal_meta = {goal, attempt, max_attempts, parent_task_id, root_task_id,
-awaiting_approval:true, correction_reason}` et cible le même PC que la tâche évaluée. Le texte saisi
-(`text`, `content`) est masqué (`[texte masqué : N car.]`) avant tout envoi au LLM et dans la mémoire.
+awaiting_approval:true, correction_reason}` et cible le même PC que la tâche évaluée (sa cible, à
+défaut le PC qui l'a exécutée — `claimed_by_key_id`) ; elle est créée dans la **même transaction** que
+l'écriture de `result.evaluation`. Le texte saisi (`text`, `content`) est masqué
+(`[texte masqué : N car.]`) avant tout envoi au LLM. Un libellé de masquage recopié par le LLM dans une
+étape corrective est **restauré** depuis la tâche évaluée (même type, même champ, même longueur), sinon
+la correction est refusée (`correction_invalid`) ; un plan d'objectif qui en contient un est refusé
+(422). La mémoire « solution » omet les textes saisis (`Plan réussi (textes saisis omis) : …`).
+Les noms de PC renvoyés dans `agents:[{id,name}]` valent le libellé de la clé, sinon `PC <8 premiers
+caractères de l'id>` (comme le front).
 
 ### Mémoire
 

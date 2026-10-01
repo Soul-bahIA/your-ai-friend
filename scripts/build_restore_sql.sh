@@ -27,9 +27,11 @@ cat <<'HEADER'
 --     scripts/ci/apply_migrations.sh (job CI `db`).
 --   * Le script s'exécute dans UNE transaction : en cas d'erreur, rien n'est appliqué.
 --   * Prérequis Supabase : schéma auth, rôles authenticated/anon, publication
---     supabase_realtime et extension pgvector (disponible par défaut sur Supabase).
---   * Ne restaure QUE le schéma. Les données se restaurent depuis une sauvegarde
---     (scripts/backup_db.sh / scripts/backup_db.ps1 → pg_restore / psql).
+--     supabase_realtime, extensions pgvector et pg_trgm (disponibles sur Supabase).
+--   * Ne restaure QUE le schéma (droits et policies compris). Les données se
+--     restaurent ENSUITE depuis une sauvegarde (scripts/backup_db.sh / .ps1) :
+--     pg_restore --data-only, puis scripts/sql/post_restore_checks.sql
+--     (procédure : README.md, section « Sauvegardes »).
 --
 -- Régénération (git-bash) :
 --   bash scripts/build_restore_sql.sh

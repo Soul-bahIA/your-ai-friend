@@ -29,6 +29,10 @@ dist-ssr
 
 # Sauvegardes de la base (scripts/backup_db.*) — ne jamais versionner
 backups/
+# Restauration (README « Sauvegardes ») : dump déchiffré, liste et données en clair
+*.dump
+*.toc
+donnees.sql
 
 # Python : un venv par composant (scripts/setup_venvs.*), caches
 .venv/

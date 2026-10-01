@@ -9,6 +9,7 @@ import {
   buildAgentTaskUpdate,
   buildApprove,
   buildCancel,
+  buildGoalCancel,
   buildPollQuery,
   buildTaskTouch,
   isAgentTaskStatus,
@@ -23,11 +24,16 @@ import {
   forgetScreenshot,
   getScreenshot,
   rememberScreenshot,
+  screenshotB64Error,
 } from "../services/screenshots.js";
 
 // Les routes de l'agent reçoivent encore des captures d'écran base64 (retirées avant
-// toute écriture en base) : corps plus gros admis.
-const AGENT_BODY_LIMIT = 15 * 1024 * 1024;
+// toute écriture en base) : corps plus gros admis, mais bornés (C§8 / T37).
+//  - /event : UNE capture (≤ MAX_SCREENSHOT_B64_CHARS) + données (≤ 64 Ko) ;
+//  - /update : rapport final pouvant contenir plusieurs captures, jamais retenues en
+//    mémoire au-delà des 3 dernières VALIDES (passées à l'évaluation).
+const EVENT_BODY_LIMIT = 3 * 1024 * 1024;
+const UPDATE_BODY_LIMIT = 15 * 1024 * 1024;
 const agentRateLimit = { max: config.rateLimitAgent, timeWindow: "1 minute" };
 /** Données d'évènement (une fois la capture retirée) et rapport final : bornés. */
 const MAX_EVENT_DATA_BYTES = 64 * 1024;
@@ -58,6 +64,40 @@ async function guardFailure(reply: FastifyReply, taskId: string, userId: string,
     });
   }
   return reply.status(409).send({ error: `Tâche dans l'état « ${status} » : transition refusée`, status, requeue_count });
+}
+
+/** Annulation d'un objectif entier (T18) : toutes les tâches actives de même root_task_id. */
+async function cancelGoal(reply: FastifyReply, id: string, userId: string) {
+  const cur = await pool.query(
+    "SELECT id, status, payload #>> '{goal_meta,root_task_id}' AS root_task_id FROM agent_tasks WHERE id = $1 AND user_id = $2",
+    [id, userId],
+  );
+  if (cur.rows.length === 0) return reply.status(404).send({ error: "Tâche introuvable" });
+  const declared = cur.rows[0].root_task_id as string | null;
+  const root = isUuid(declared) ? declared : id;
+  const q = buildGoalCancel(root, userId);
+  const { rows } = await pool.query(q.sql, q.values);
+  const tasks = (rows as { id: string; status: string; control: string | null }[]).map((r) => ({
+    id: r.id,
+    status: r.status,
+    control: r.control ?? "none",
+  }));
+  if (tasks.length === 0) {
+    return reply.status(409).send({ error: "Aucune tâche active pour cet objectif", status: cur.rows[0].status, root_task_id: root });
+  }
+  for (const t of tasks) {
+    if (t.status === "cancelled") {
+      insertEventBestEffort(t.id, userId, "task_cancelled", "Objectif annulé par l'utilisateur", { scope: "goal", root_task_id: root });
+    }
+  }
+  return {
+    success: true,
+    scope: "goal",
+    root_task_id: root,
+    cancelled: tasks.filter((t) => t.status === "cancelled").map((t) => t.id),
+    stopping: tasks.filter((t) => t.status === "in_progress").map((t) => t.id),
+    tasks,
+  };
 }
 
 function insertEventBestEffort(taskId: string, userId: string, type: string, message: string, data: object = {}) {
@@ -107,7 +147,7 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   // --- Worker local : mise à jour du statut d'une tâche (claim / fin) ---
   app.post(
     "/api/agent-tasks/update",
-    { preHandler: requireAgentKey, bodyLimit: AGENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
+    { preHandler: requireAgentKey, bodyLimit: UPDATE_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
     async (request, reply) => {
       const userId = request.agentUserId!;
       const body = (request.body ?? {}) as {
@@ -173,7 +213,7 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   // --- Worker local : évènement d'exécution (timeline) / heartbeat ---
   app.post(
     "/api/agent-tasks/event",
-    { preHandler: requireAgentKey, bodyLimit: AGENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
+    { preHandler: requireAgentKey, bodyLimit: EVENT_BODY_LIMIT, config: { rateLimit: agentRateLimit } },
     async (request, reply) => {
       const userId = request.agentUserId!;
       const body = (request.body ?? {}) as {
@@ -202,13 +242,16 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
       // Heartbeat : simple signe de vie, pas de ligne d'évènement (évite de remplir la table).
       if (body.type === "heartbeat") return { success: true };
 
-      // Capture : gardée EN MÉMOIRE (GET /:id/screenshot), jamais insérée en base.
+      // Capture : validée (base64 strict, taille bornée), gardée EN MÉMOIRE (GET /:id/screenshot),
+      // jamais insérée en base ; tout image_b64 imbriqué est retiré des données stockées.
       const { data, image } = extractEventImage(body.data ?? {});
-      if (image) rememberScreenshot(body.task_id, userId, image.b64, image.mime);
+      const imageError = image ? screenshotB64Error(image.b64) : null;
+      if (imageError) return reply.status(400).send({ error: imageError });
       const stored = { ...data, source: "agent" }; // un agent ne peut pas se faire passer pour une formation
       if (Buffer.byteLength(JSON.stringify(stored), "utf8") > MAX_EVENT_DATA_BYTES) {
         return reply.status(400).send({ error: "data trop volumineux (64 Ko max hors capture)" });
       }
+      if (image) rememberScreenshot(body.task_id, userId, image.b64 as string, image.mime);
 
       await pool.query(
         `INSERT INTO agent_events (task_id, user_id, type, message, data)
@@ -270,10 +313,15 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
   // --- App web : annuler une tâche (contrat LOT 1 §2) ---
   //  pending → 'cancelled' immédiatement ; in_progress → control 'stop' (l'agent termine
   //  l'étape courante puis envoie un final 'cancelled'). Rejeter une correction = annuler.
+  //  ?scope=goal (T18) : annule TOUTE la chaîne de l'objectif (même root_task_id : tâche
+  //  initiale, corrections en attente d'approbation ou en file, exécution en cours → stop).
   app.post("/api/agent-tasks/:id/cancel", { preHandler: requireUser }, async (request, reply) => {
     const userId = request.user!.id;
     const { id } = request.params as { id: string };
     if (!isUuid(id)) return reply.status(400).send({ error: "id invalide" });
+    const scope = (request.query as { scope?: unknown }).scope ?? "task";
+    if (scope !== "task" && scope !== "goal") return reply.status(400).send({ error: "scope invalide (task|goal)" });
+    if (scope === "goal") return cancelGoal(reply, id, userId);
     const q = buildCancel(id, userId);
     const { rows } = await pool.query(q.sql, q.values);
     if (rows.length === 1) {
@@ -361,7 +409,8 @@ export async function agentTaskRoutes(app: FastifyInstance): Promise<void> {
         WHERE task_id = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 500`,
       [id, userId],
     );
-    return { events: rows };
+    // Lignes héritées : captures imbriquées retirées aussi (le SQL ne traite que la racine).
+    return { events: rows.map((r) => ({ ...r, data: stripImageB64(r.data) })) };
   });
 
   // --- App web : créer une tâche (JWT) — étapes validées strictement côté serveur ---

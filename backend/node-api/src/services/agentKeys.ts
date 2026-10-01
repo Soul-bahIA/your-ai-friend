@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
-import { pool } from "../db.js";
+import { pool, withTransaction } from "../db.js";
+import { buildRevokeKeyQueries } from "../lib/agentTaskSql.js";
 
 // Gestion des clés de l'agent local. On ne stocke que le hash SHA-256.
 // La clé en clair (préfixe "sbk_") n'existe qu'au moment de la génération.
@@ -31,13 +32,44 @@ export async function listAgentKeys(userId: string) {
   return rows;
 }
 
-/** Révoque (supprime) une clé de l'utilisateur. */
-export async function revokeAgentKey(userId: string, id: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    "DELETE FROM agent_keys WHERE id = $1 AND user_id = $2",
-    [id, userId],
-  );
-  return (rowCount ?? 0) > 0;
+export interface RevokeOutcome {
+  revoked: boolean;
+  /** Tâches annulées parce qu'elles ciblaient ce PC ou s'y exécutaient. */
+  cancelled_task_ids: string[];
+}
+
+/**
+ * Révoque (supprime) une clé de l'utilisateur — T16 / contrat §7. La FK
+ * agent_tasks.(target_agent_key_id|claimed_by_key_id) ON DELETE SET NULL ferait d'une tâche
+ * planifiée pour CE PC (vérifiée contre SES allowed_dirs) une tâche non ciblée, réclamable
+ * et finalisable par n'importe quel autre PC. Dans la MÊME transaction, avant le DELETE :
+ *  - verrou de la clé (un claim concurrent par cette clé attend puis échoue sur la FK) ;
+ *  - tâches 'pending' ciblant la clé (corrections en attente comprises) → 'cancelled' ;
+ *  - tâches 'in_progress' réclamées par la clé (ou la ciblant) → 'cancelled' + control 'stop'
+ *    (l'agent révoqué ne peut plus rien envoyer ; aucun autre PC ne doit la finaliser).
+ */
+export async function revokeAgentKey(userId: string, id: string): Promise<RevokeOutcome> {
+  const outcome = await withTransaction(async (client) => {
+    const q = buildRevokeKeyQueries(id, userId);
+    const key = await client.query(q.lockKey.sql, q.lockKey.values);
+    if (key.rowCount !== 1) return { revoked: false, cancelled_task_ids: [] as string[] };
+    const pending = await client.query(q.cancelPending.sql, q.cancelPending.values);
+    const running = await client.query(q.cancelRunning.sql, q.cancelRunning.values);
+    const del = await client.query(q.deleteKey.sql, q.deleteKey.values);
+    if (del.rowCount !== 1) throw new Error("révocation concurrente de la clé agent");
+    const ids = [...pending.rows, ...running.rows].map((r) => r.id as string);
+    return { revoked: true, cancelled_task_ids: ids };
+  });
+  // Timeline (best-effort, hors transaction : un échec ici n'annule pas la révocation).
+  for (const taskId of outcome.cancelled_task_ids) {
+    pool
+      .query(
+        "INSERT INTO agent_events (task_id, user_id, type, message, data) VALUES ($1, $2, 'task_cancelled', $3, $4::jsonb)",
+        [taskId, userId, "PC révoqué : tâche annulée", JSON.stringify({ source: "agent", key_revoked: true })],
+      )
+      .catch(() => {});
+  }
+  return outcome;
 }
 
 /**
@@ -86,6 +118,15 @@ export async function getUserAllowedDirs(userId: string): Promise<string[]> {
   return [...dirs];
 }
 
+/**
+ * Nom affiché d'un PC : son libellé, sinon « PC <8 premiers caractères de l'id> » (même repli
+ * que le front) — deux PC sans libellé restent distinguables dans la liste de choix (§7).
+ */
+export function agentName(id: string, label: unknown): string {
+  const l = typeof label === "string" ? label.trim() : "";
+  return l || `PC ${String(id).slice(0, 8)}`;
+}
+
 export interface AgentKeyInfo {
   id: string;
   name: string;
@@ -99,7 +140,7 @@ export async function getAgentKey(userId: string, keyId: string): Promise<AgentK
     [keyId, userId],
   );
   if (rows.length === 0) return null;
-  return { id: rows[0].id, name: rows[0].label ?? "Agent", allowed_dirs: toDirs(rows[0].allowed_dirs) };
+  return { id: rows[0].id, name: agentName(rows[0].id, rows[0].label), allowed_dirs: toDirs(rows[0].allowed_dirs) };
 }
 
 export type TargetChoice =
@@ -136,7 +177,7 @@ export async function resolveTargetKey(userId: string, requestedId?: string): Pr
   );
   const keys: AgentKeyInfo[] = rows.map((r) => ({
     id: r.id as string,
-    name: (r.label as string | null) ?? "Agent",
+    name: agentName(r.id as string, r.label),
     allowed_dirs: toDirs(r.allowed_dirs),
   }));
   return chooseTargetKey(keys, requestedId);

@@ -149,6 +149,24 @@ export function buildCancel(taskId: string, userId: string): { sql: string; valu
   };
 }
 
+/**
+ * Annulation d'un OBJECTIF entier (T18) : même règle que buildCancel, appliquée à toutes les
+ * tâches actives de l'utilisateur dont goal_meta.root_task_id = racine (et à la racine elle-même),
+ * corrections en attente d'approbation comprises.
+ */
+export function buildGoalCancel(rootTaskId: string, userId: string): { sql: string; values: unknown[] } {
+  return {
+    sql: `UPDATE agent_tasks SET
+         status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
+         completed_at = CASE WHEN status = 'pending' THEN now() ELSE completed_at END,
+         control = CASE WHEN status = 'in_progress' THEN 'stop' ELSE control END
+       WHERE user_id = $2 AND status IN ('pending', 'in_progress')
+         AND (id = $1::uuid OR (payload #>> '{goal_meta,root_task_id}') = $3::text)
+       RETURNING id, status, control`,
+    values: [rootTaskId, userId, rootTaskId],
+  };
+}
+
 /** Approbation d'une correction proposée : awaiting_approval → false (tâche encore 'pending'). */
 export function buildApprove(taskId: string, userId: string): { sql: string; values: unknown[] } {
   return {
@@ -162,8 +180,24 @@ export function buildApprove(taskId: string, userId: string): { sql: string; val
   };
 }
 
-/** Requêtes du reaper GLOBAL (toutes les tâches, tous les utilisateurs). */
-export function buildReaperQueries(staleSeconds: number, maxRequeues: number) {
+/**
+ * Une étape À EFFET RÉEL (types `$3`) de cette tâche a déjà été lancée lors d'une tentative
+ * précédente (évènement step_started/step_done/step_failed dont data.index désigne une
+ * telle étape du plan). L'agent reprend un plan depuis l'étape 0 (la reprise à l'étape est
+ * prévue au LOT 8) : la relancer seule ré-exécuterait commande / écriture / saisie.
+ */
+const SIDE_EFFECT_STARTED = `EXISTS (
+          SELECT 1 FROM agent_events e
+           WHERE e.task_id = t.id
+             AND e.type IN ('step_started', 'step_done', 'step_failed')
+             AND (CASE WHEN (e.data ->> 'index') ~ '^[0-9]{1,4}$'
+                       THEN t.payload -> 'steps' -> ((e.data ->> 'index')::int) ->> 'type' END) = ANY($3::text[]))`;
+
+/**
+ * Requêtes du reaper GLOBAL (toutes les tâches, tous les utilisateurs).
+ * `sideEffectTypes` : types d'étapes à effet réel (SENSITIVE_STEP_TYPES).
+ */
+export function buildReaperQueries(staleSeconds: number, maxRequeues: number, sideEffectTypes: readonly string[] = []) {
   const stale = `status = 'in_progress' AND updated_at < now() - make_interval(secs => $1)`;
   return {
     /** Arrêt demandé par l'utilisateur mais agent muet : on n'exécute JAMAIS à nouveau → 'cancelled'. */
@@ -175,23 +209,65 @@ export function buildReaperQueries(staleSeconds: number, maxRequeues: number) {
         RETURNING id, user_id`,
       values: [staleSeconds],
     },
-    /** Agent muet : remise en file (requeue_count+1 = nouvelle tentative), au plus maxRequeues fois. */
+    /**
+     * Agent muet : remise en file (requeue_count+1 = nouvelle tentative), au plus maxRequeues
+     * fois. control repart à 'none', SAUF :
+     *  - pause demandée par l'utilisateur → conservée (décision explicite) ;
+     *  - étape à effet réel déjà lancée → 'pause' : l'agent qui la reprend attend un
+     *    « Reprendre » explicite avant de rejouer le plan (ou l'utilisateur l'annule).
+     * Jamais pour un stop demandé (traité par cancelStopped : jamais ré-exécutée).
+     */
     requeue: {
-      sql: `UPDATE agent_tasks
+      sql: `UPDATE agent_tasks t
           SET status = 'pending', started_at = NULL, claimed_by_key_id = NULL,
-              requeue_count = requeue_count + 1, updated_at = now()
-        WHERE ${stale} AND requeue_count < $2
-        RETURNING id, user_id, requeue_count`,
-      values: [staleSeconds, maxRequeues],
+              requeue_count = t.requeue_count + 1, updated_at = now(),
+              control = CASE WHEN t.control = 'pause' OR ${SIDE_EFFECT_STARTED} THEN 'pause' ELSE 'none' END
+        WHERE ${stale} AND requeue_count < $2 AND control IS DISTINCT FROM 'stop'
+        RETURNING t.id, t.user_id, t.requeue_count, t.control,
+                  ${SIDE_EFFECT_STARTED} AS side_effects`,
+      values: [staleSeconds, maxRequeues, [...sideEffectTypes]],
     },
     /** Boucle de crash : abandon après maxRequeues reprises. */
     abandon: {
       sql: `UPDATE agent_tasks
           SET status = 'failed', completed_at = now(), updated_at = now(),
               error_message = 'Interrompue puis reprise ' || requeue_count || ' fois sans aboutir — abandonnée'
-        WHERE ${stale} AND requeue_count >= $2
+        WHERE ${stale} AND requeue_count >= $2 AND control IS DISTINCT FROM 'stop'
         RETURNING id, user_id`,
       values: [staleSeconds, maxRequeues],
     },
+  };
+}
+
+/**
+ * Révocation d'une clé agent (T16 / contrat §7), à exécuter DANS L'ORDRE et dans UNE
+ * transaction : la FK ON DELETE SET NULL rendrait sinon les tâches de ce PC non ciblées.
+ *  - lockKey       : verrou de la clé (un claim concurrent par cette clé attend puis échoue sur la FK) ;
+ *  - cancelPending : tâches 'pending' ciblant la clé (corrections en attente comprises) → 'cancelled' ;
+ *  - cancelRunning : tâches 'in_progress' réclamées par la clé (ou la ciblant) → 'cancelled' + 'stop' ;
+ *  - deleteKey     : suppression de la clé.
+ */
+export function buildRevokeKeyQueries(keyId: string, userId: string) {
+  const values = [keyId, userId];
+  return {
+    lockKey: { sql: "SELECT id FROM agent_keys WHERE id = $1 AND user_id = $2 FOR UPDATE", values },
+    cancelPending: {
+      sql: `UPDATE agent_tasks
+          SET status = 'cancelled', completed_at = now(), updated_at = now(),
+              error_message = 'PC ciblé révoqué (clé agent supprimée) — tâche annulée'
+        WHERE user_id = $2 AND status = 'pending' AND target_agent_key_id = $1::uuid
+        RETURNING id`,
+      values,
+    },
+    cancelRunning: {
+      sql: `UPDATE agent_tasks
+          SET status = 'cancelled', control = 'stop', completed_at = now(), updated_at = now(),
+              error_message = 'Clé agent révoquée pendant l''exécution — tâche annulée'
+        WHERE user_id = $2 AND status = 'in_progress'
+          AND (claimed_by_key_id = $1::uuid OR target_agent_key_id = $1::uuid)
+        RETURNING id`,
+      values,
+    },
+    deleteKey: { sql: "DELETE FROM agent_keys WHERE id = $1 AND user_id = $2", values },
   };
 }

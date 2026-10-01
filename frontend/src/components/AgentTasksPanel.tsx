@@ -19,6 +19,7 @@ import {
   agentChoiceFromError,
   approveAgentTask,
   cancelAgentTask,
+  deleteAgentTask,
   listAgents,
   submitGoal,
   type AgentChoice,
@@ -26,7 +27,9 @@ import {
 import {
   applyApproveResponse,
   applyCancelResponse,
+  applyDeleteOutcome,
   applyTaskChange,
+  approvalStepView,
   canCancelTask,
   canDeleteTask,
   describeStep,
@@ -252,16 +255,25 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
     }
   };
 
-  // Suppression : uniquement pour une tâche terminée (une tâche active s'annule).
+  // Suppression via l'API (S9) : uniquement pour une tâche terminée (une tâche active s'annule) ;
+  // le serveur le vérifie (409) et oublie la capture en mémoire. Plus d'écriture Supabase directe.
   const deleteTask = async (task: AgentTask) => {
     if (!canDeleteTask(task)) return;
-    const { error } = await supabase.from("agent_tasks").delete().eq("id", task.id);
-    if (error) {
-      console.error("Error deleting task:", error);
-      toast.error("Suppression impossible", { description: error.message });
-      return;
+    setBusyTaskId(task.id);
+    try {
+      const outcome = await deleteAgentTask(task.id);
+      setTasks((prev) => applyDeleteOutcome(prev, task.id, outcome));
+      if (outcome.kind === "active") {
+        toast.error("Suppression impossible", { description: "La tâche est encore active : annulez-la d'abord." });
+      } else if (outcome.kind === "gone") {
+        toast.info("Tâche déjà supprimée");
+      }
+    } catch (e) {
+      console.error("Error deleting task:", e);
+      toast.error("Suppression impossible", { description: errorMessage(e) });
+    } finally {
+      setBusyTaskId(null);
     }
-    setTasks((prev) => prev.filter((t) => t.id !== task.id));
   };
 
   const toggleExpanded = (id: string) =>
@@ -429,9 +441,10 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
                         onConfirm={() => deleteTask(task)}
                         trigger={
                           <button
-                            className="text-muted-foreground hover:text-destructive"
+                            className="text-muted-foreground hover:text-destructive disabled:opacity-40"
                             aria-label="Supprimer la tâche"
                             title="Supprimer la tâche"
+                            disabled={busy}
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
@@ -464,7 +477,8 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
 
                     {awaiting && (
                       <p className="text-[10px] text-warning mt-1">
-                        Correction proposée par l'IA : vérifiez le plan ci-dessous. Elle ne sera exécutée qu'après votre approbation.
+                        Correction proposée par l'IA : vérifiez le plan ci-dessous (chaque étape est affichée en
+                        entier, telle que l'agent la recevra). Elle ne sera exécutée qu'après votre approbation.
                       </p>
                     )}
 
@@ -478,11 +492,30 @@ const AgentTasksPanel = ({ formationId, formationTitle, formationScript }: Agent
                         {showSteps ? "Masquer le plan" : `Voir le plan (${steps.length} étape${steps.length > 1 ? "s" : ""})`}
                       </button>
                     )}
-                    {showSteps && steps.length > 0 && (
+                    {showSteps && steps.length > 0 && !awaiting && (
                       <ol className="mt-1 space-y-0.5 list-decimal pl-4">
                         {steps.map((step, i) => (
                           <li key={i} className="text-[10px] text-foreground/80 break-words">{describeStep(step)}</li>
                         ))}
+                      </ol>
+                    )}
+                    {/* Correction à approuver : rien de tronqué ni d'omis (S10) */}
+                    {awaiting && steps.length > 0 && (
+                      <ol className="mt-1 space-y-1.5 list-decimal pl-4" aria-label="Plan complet de la correction">
+                        {steps.map((step, i) => {
+                          const view = approvalStepView(step);
+                          return (
+                            <li key={i} className="text-[10px] text-foreground/80 break-words">
+                              <span className={view.sensitive ? "font-medium text-warning" : undefined}>
+                                {view.sensitive && "⚠️ "}
+                                {view.summary}
+                              </span>
+                              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-background/60 p-1.5 font-mono text-[10px] text-muted-foreground">
+                                {view.detail}
+                              </pre>
+                            </li>
+                          );
+                        })}
                       </ol>
                     )}
 

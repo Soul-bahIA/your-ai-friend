@@ -20,6 +20,9 @@ for _k in [k for k in os.environ if k.startswith("LLM_") or k.endswith("_MODEL")
     os.environ.pop(_k, None)
 # Environnement de test (contrat LOT 1 §1) : token inter-services optionnel.
 os.environ["SOULBAH_ENV"] = "test"
+# Filet hermétique : une TTS non simulée par un test vise un port local fermé
+# (connexion refusée) au lieu de joindre l'API OpenAI réelle.
+os.environ["OPENAI_TTS_URL"] = "http://127.0.0.1:9/v1/audio/speech"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

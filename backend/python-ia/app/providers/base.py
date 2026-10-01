@@ -76,6 +76,9 @@ class ModelCapabilities:
     # Accepte output_config.effort.
     effort: bool = False
     max_output_tokens: int = 8192
+    # Nom du paramètre de limite de sortie (API OpenAI-compatible) : les modèles de
+    # raisonnement OpenAI (o1/o3/o4-mini, gpt-5…) refusent `max_tokens`.
+    max_tokens_param: str = "max_tokens"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +87,7 @@ class ModelCapabilities:
             "thinking": self.thinking,
             "effort": self.effort,
             "max_output_tokens": self.max_output_tokens,
+            "max_tokens_param": self.max_tokens_param,
         }
 
 

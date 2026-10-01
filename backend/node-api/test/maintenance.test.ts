@@ -81,6 +81,29 @@ describe("reaper global (T19)", () => {
     ]);
     expect(fakeDb.find(/UPDATE agent_tasks/).every((c) => !/user_id = \$/.test(c.sql))).toBe(true);
   });
+
+  it("remise en file EN PAUSE si une étape à effet réel a déjà été lancée (jamais rejouée sans « Reprendre »)", async () => {
+    fakeDb.on(/pg_try_advisory_xact_lock/, { rows: [{ locked: true }] });
+    fakeDb.on(/SET status = 'pending'/, {
+      rows: [
+        { id: "t3", user_id: "u3", requeue_count: 1, control: "pause", side_effects: true },
+        { id: "t4", user_id: "u4", requeue_count: 2, control: "pause", side_effects: false },
+        { id: "t5", user_id: "u5", requeue_count: 1, control: "none", side_effects: false },
+      ],
+    });
+    const r = await reapStaleTasks(180, 3);
+    expect(r.requeued).toBe(3);
+    const requeue = fakeDb.find(/SET status = 'pending'/)[0];
+    const types = requeue.values[2] as string[];
+    for (const t of ["run_command", "write_file", "type_text", "move_file", "hotkey", "phone_tap"]) expect(types).toContain(t);
+    expect(types).not.toContain("wait");
+    expect(types).not.toContain("screenshot");
+    const events = fakeDb.find(/INSERT INTO agent_events/).map((c) => ({ id: c.values[0], msg: String(c.values[3]), data: JSON.parse(String(c.values[4])) }));
+    expect(events[0].msg).toContain("EN PAUSE");
+    expect(events[0].data).toMatchObject({ reaper: true, side_effects: true, control: "pause", requeue_count: 1 });
+    expect(events[1].msg).toContain("toujours en pause");
+    expect(events[2].msg).not.toContain("pause");
+  });
 });
 
 describe("tâches de fond suivies (T17)", () => {

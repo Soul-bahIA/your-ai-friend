@@ -9,14 +9,17 @@ RUST_SERVICE_URL = os.getenv("RUST_SERVICE_URL", "http://rust-compute:8080")
 # ---------------------------------------------------------------------------
 # Environnement d'exécution (contrat LOT 1 §1) : dev | test | staging | production.
 # Hors dev/test, le service REFUSE de démarrer sans IA_SERVICE_TOKEN.
-# Une valeur inconnue est traitée comme stricte (jamais comme dev).
+# Une valeur inconnue (faute de frappe : "prod"…) REFUSE le démarrage, comme node
+# (envChecks.ts) : jamais un côté démarré et l'autre arrêté pour la même config.
+# Elle reste traitée comme stricte (jamais comme dev) par is_lax_env().
 # ---------------------------------------------------------------------------
 VALID_ENVS = ("dev", "test", "staging", "production")
 _LAX_ENVS = ("dev", "test")
 
 
 def soulbah_env() -> str:
-    return (os.getenv("SOULBAH_ENV", "dev") or "dev").strip().lower()
+    # Absent, vide ou blanc -> dev (même normalisation que node : trim().toLowerCase() || "dev").
+    return (os.getenv("SOULBAH_ENV") or "").strip().lower() or "dev"
 
 
 def is_lax_env() -> bool:
@@ -31,14 +34,15 @@ def service_token() -> str:
 def check_startup_config() -> list[str]:
     """Valide la configuration au démarrage.
 
-    Lève RuntimeError si la configuration est dangereuse (token absent hors dev/test) ;
-    renvoie la liste des avertissements non bloquants sinon.
+    Lève RuntimeError si la configuration est invalide (SOULBAH_ENV inconnu) ou
+    dangereuse (token absent hors dev/test) ; renvoie la liste des avertissements non
+    bloquants sinon.
     """
     env = soulbah_env()
     warnings: list[str] = []
     if env not in VALID_ENVS:
-        warnings.append(
-            f"SOULBAH_ENV={env!r} inconnu (attendu : {', '.join(VALID_ENVS)}) : traité comme production."
+        raise RuntimeError(
+            f"SOULBAH_ENV invalide « {env[:40]} » (attendu : {' | '.join(VALID_ENVS)})."
         )
     if not service_token():
         if not is_lax_env():

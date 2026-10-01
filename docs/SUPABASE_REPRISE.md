@@ -36,7 +36,10 @@ powershell -ExecutionPolicy Bypass -File scripts\backup_db.ps1
 
 - Le script lit `DATABASE_URL` dans `backend/.env` (ou `$env:BACKUP_DATABASE_URL`), passe de
   6543 à 5432 pour le pooler, et transmet le mot de passe via un fichier pgpass temporaire
-  (jamais en argument). Sans variable de chiffrement, il avertit que le dump est en clair.
+  (jamais en argument). Sans variable de chiffrement, il **refuse** de s'exécuter (code 2),
+  sauf `BACKUP_ALLOW_PLAINTEXT=1` (S30).
+- Le dump garde les droits (GRANT/REVOKE) : une restauration ne rend pas `has_role` /
+  `is_admin` à `anon` (S19). Procédure de restauration : `README.md`, « Sauvegardes ».
 - Vérifier : deux fichiers `backups\soulbah_AAAAMMJJ_HHMM.{dump,sql}[.gpg]` non vides. Contrôle
   de lecture du dump : le déchiffrer dans un dossier temporaire, puis `pg_restore -l <fichier>.dump`.
 - Copier les fichiers chiffrés hors du PC (disque externe, stockage cloud).
@@ -68,9 +71,24 @@ Contrôles SQL (éditeur SQL du tableau de bord) :
 SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;
 -- hardening (20261001000000) appliquée ?
 SELECT count(*) FROM pg_constraint WHERE conname IN ('agent_tasks_status_check', 'agent_tasks_control_check');
--- LOT 1 (20261002000000) appliquée ?
+-- LOT 1 (20261001090000_lot1_fixes) appliquée ?
 SELECT count(*) FROM information_schema.columns
  WHERE table_name = 'agent_tasks' AND column_name IN ('target_agent_key_id', 'claimed_by_key_id');
+-- Suite LOT 1 (20261001100000_lot1_verif) appliquée ?
+SELECT to_regclass('public.idx_agent_memory_goal_gin_trgm') IS NOT NULL AS lot1_verif;
+-- Policies qui utilisent encore has_role (créées à la main ?) : doit être vide (vague G4)
+SELECT schemaname, tablename, policyname FROM pg_policies
+ WHERE qual ~ 'has_role' OR with_check ~ 'has_role';
+```
+
+La migration LOT 1 s'appelait `20261002000000_lot1_fixes.sql` avant d'être renommée en
+`20261001090000_lot1_fixes.sql` (sa date était dans le futur : toute migration créée le
+jour même avec `supabase migration new` se serait classée avant elle). Si une base a reçu
+l'ancienne version (`schema_migrations` contient `20261002000000`), la marquer comme
+annulée puis laisser `db push` appliquer la nouvelle, qui est idempotente :
+
+```powershell
+supabase migration repair --status reverted 20261002000000
 ```
 
 Si des migrations ont été appliquées à la main (éditeur SQL) et manquent dans
@@ -88,13 +106,21 @@ de doute, les laisser à `db push`.
 ## 5. Appliquer les migrations
 
 ```powershell
-supabase db push --dry-run    # liste ce qui sera appliqué (attendu : hardening et/ou lot1_fixes)
+supabase db push --dry-run    # attendu : hardening, lot1_fixes et/ou lot1_verif
 supabase db push
 ```
 
 Chaque migration s'exécute dans sa propre transaction. Les NOTICE « non validée » signalent
 des lignes historiques qui violent une nouvelle contrainte : elle reste `NOT VALID`, sans
-erreur (voir l'étape 7).
+erreur (voir l'étape 7). Un WARNING « G4 non appliquée » signale une policy (créée hors
+migrations) qui appelle encore `has_role` : la réécrire avec `public.is_admin()`, puis
+exécuter `REVOKE EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) FROM authenticated;`.
+
+**Déployer le front du même commit** que les migrations : `lot1_verif` retire au client
+l'écriture directe dans `knowledge_base`, `agent_memory` et `agent_keys`, et la suppression
+directe dans `agent_tasks` (vagues G2/G3 de l'audit §12 ; le front actuel passe par l'API).
+Un ancien front encore en ligne verrait ces écritures refusées (INSERT) ou sans effet
+(UPDATE/DELETE).
 
 ## 6. Supprimer les 5 anciennes edge functions
 
@@ -146,6 +172,13 @@ SELECT level, status, count(*) FROM public.agent_memory
 SELECT id, task_type, updated_at FROM public.agent_tasks WHERE status = 'in_progress' ORDER BY updated_at;
 ```
 
+Puis les contrôles de droits, RLS et policies (lecture seule ; échec avec un message qui
+dit quoi corriger) : coller `scripts/sql/post_restore_checks.sql` dans l'éditeur SQL, ou
+
+```powershell
+psql "<URL postgres>" -X -v ON_ERROR_STOP=1 -f scripts\sql\post_restore_checks.sql
+```
+
 - `agent_events.task_id` n'a volontairement **pas** de FK : ses orphelins sont purgés par la
   maintenance de node-api (3 jours).
 - Corriger ou supprimer les orphelins **seulement après** la sauvegarde de l'étape 2, puis
@@ -159,7 +192,7 @@ SELECT id, task_type, updated_at FROM public.agent_tasks WHERE status = 'in_prog
 
 | Secret | Action |
 |---|---|
-| **Clé agent** affichée en clair lors du premier audit | Page *Sécurité* de l'app → révoquer la clé (DELETE `/api/agent-keys/:id`), en créer une nouvelle, la copier dans `agent/.env` (`SOULBAH_AGENT_KEY`). Elle n'est affichée qu'une fois. |
+| **Clé agent** affichée en clair lors du premier audit | Page *Sécurité* de l'app → révoquer la clé (DELETE `/api/agent-keys/:id`), en créer une nouvelle, la copier dans `agent/.env` (`SOULBAH_AGENT_KEY`). Elle n'est affichée qu'une fois. Les clés **n'expirent pas** en V1 (S20, partie « expiration » reportée au LOT 4 : colonne `expires_at` de la table des agents, audit §12) : les faire tourner à la main. |
 | **Mot de passe `postgres`** | Le réinitialiser (*Project Settings → Database → Reset database password*) au moment de l'étape 10 : node-api n'utilisera plus `postgres`. Le nouveau mot de passe ne sert qu'aux sauvegardes et migrations et n'est stocké dans aucun `.env` permanent. |
 | Clés des fournisseurs IA (`backend/.env`) | À faire tourner seulement si elles ont pu fuiter. |
 | **Clé anon** (dans l'historique git public, `.env` du commit `55b39dd`) | Aucune action : publique **par conception** (embarquée dans le front, bornée par la RLS ; S33). Seule cette empreinte est tolérée par gitleaks (`.github/.gitleaksignore`). Une clé `service_role` ne doit jamais être commitée ni ajoutée à cette liste. |
@@ -199,6 +232,10 @@ toutes les tables. Le rôle `soulbah_api` limite le rayon d'action aux seules ta
 opérations que node-api utilise. Inventaire relevé dans `backend/node-api/src` (requêtes
 SQL) au LOT 1.
 
+Les droits sont dans **`scripts/sql/soulbah_api_grants.sql`** (source unique). La CI vérifie
+qu'ils couvrent chaque requête SQL de node-api (`scripts/ci/check_api_grants.py`) et les
+exécute réellement en `soulbah_api` (`scripts/ci/api_role_checks.sql`).
+
 Limite à connaître : node-api filtre lui-même chaque requête par `user_id`, et les routes de
 l'agent (clé `x-agent-key`) n'ont pas de JWT. Le rôle garde donc **BYPASSRLS**, comme
 aujourd'hui. Pour appliquer réellement la RLS à node-api, il faudrait poser
@@ -212,31 +249,11 @@ CREATE ROLE soulbah_api LOGIN PASSWORD '<mot de passe fort>'
 ALTER ROLE soulbah_api SET search_path = public, extensions;   -- opérateurs pgvector (<=>)
 ALTER ROLE soulbah_api SET statement_timeout = '60s';
 
-GRANT USAGE ON SCHEMA public TO soulbah_api;
-GRANT USAGE ON SCHEMA extensions TO soulbah_api;   -- si pgvector y est installé
-
--- File et télémétrie de l'agent
-GRANT SELECT, INSERT, UPDATE         ON public.agent_tasks       TO soulbah_api;
-GRANT SELECT, INSERT, DELETE         ON public.agent_events      TO soulbah_api;  -- DELETE : purge maintenance
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.agent_keys        TO soulbah_api;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.agent_memory      TO soulbah_api;
--- Génération
-GRANT SELECT, INSERT, UPDATE         ON public.formations        TO soulbah_api;
-GRANT SELECT, INSERT, UPDATE         ON public.applications      TO soulbah_api;
-GRANT SELECT, INSERT, UPDATE         ON public.analysis_requests TO soulbah_api;
--- Base de connaissances
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.knowledge_base     TO soulbah_api;
-GRANT SELECT, INSERT                 ON public.knowledge_versions TO soulbah_api;
-GRANT SELECT, INSERT                 ON public.knowledge_domains  TO soulbah_api;
--- Base dynamique (/api/database)
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_schemas     TO soulbah_api;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_table_data  TO soulbah_api;
-GRANT SELECT, INSERT                 ON public.user_migrations  TO soulbah_api;
--- Journal d'activité
-GRANT INSERT                         ON public.system_logs      TO soulbah_api;
--- Admin applicatif (routes/knowledge.ts) : has_role n'est plus accordé à PUBLIC (LOT 1)
-GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO soulbah_api;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO soulbah_api;
+-- Puis : coller ici le contenu de scripts/sql/soulbah_api_grants.sql et l'exécuter.
+-- (Résumé : SELECT/INSERT/UPDATE/DELETE sur agent_tasks, agent_events, agent_keys,
+--  agent_memory, knowledge_base, user_schemas, user_table_data ; SELECT/INSERT/UPDATE sur
+--  formations, applications, analysis_requests, knowledge_domains ; SELECT/INSERT sur
+--  knowledge_versions, user_migrations ; INSERT sur system_logs ; EXECUTE sur has_role.)
 
 -- Vérifications
 SELECT rolname, rolsuper, rolbypassrls, rolcreaterole FROM pg_roles WHERE rolname = 'soulbah_api';
@@ -246,8 +263,10 @@ SELECT table_name, string_agg(privilege_type, ', ' ORDER BY privilege_type)
 ```
 
 **Ce que `soulbah_api` ne peut pas faire** : lire ni écrire `profiles`, `user_roles`,
-`chat_*` ou `modules_status`, accéder au schéma `auth`, exécuter du DDL ou supprimer des
-tâches.
+`chat_*` ou `modules_status`, supprimer dans `system_logs`, accéder au schéma `auth` ou
+exécuter du DDL. Il peut supprimer des tâches : `DELETE /api/agent-tasks/:id` ne supprime
+que des tâches **terminales** de l'utilisateur (filtre dans la requête de l'API), et la
+maintenance horaire met à jour (`image_b64` retiré) puis purge `agent_events`.
 
 **Si `CREATE ROLE … BYPASSRLS` est refusé**, ne pas revenir à `postgres` par défaut. Le
 refus est possible : certaines versions de Postgres réservent cet attribut aux
@@ -284,7 +303,7 @@ DATABASE_URL=postgresql://soulbah_api.ntvwbafvjgzsjoumtcmb:<mot de passe encodé
 - [ ] Image CI `db` épinglée sur la version Supabase, run vert (étape 3)
 - [ ] `supabase migration list` : Local = Remote (étapes 4 et 5)
 - [ ] `supabase functions list` vide (étape 6)
-- [ ] Contraintes NOT VALID et orphelins examinés (étape 7)
+- [ ] Contraintes NOT VALID et orphelins examinés, `post_restore_checks.sql` passé (étape 7)
 - [ ] Clé agent remplacée, mot de passe `postgres` réinitialisé (étape 8)
 - [ ] `SOULBAH_ENV`, `IA_SERVICE_TOKEN`, `PG_SSL_CA` définis ; node-api et python-ia démarrent (étape 9)
 - [ ] node-api tourne sous `soulbah_api` ; aucun `permission denied` dans les logs (étape 10)

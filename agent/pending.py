@@ -70,7 +70,12 @@ def collect_artifacts(result: Any, limit: int = 50) -> list[dict[str, Any]]:
 
 
 def minimal_failed_result(status: str, result: Any, detail: str | None = None) -> dict[str, Any]:
-    """Final `failed` minimal envoyé quand le serveur rejette le final complet."""
+    """Final `failed` minimal envoyé quand le serveur rejette le final complet.
+
+    Il conserve les drapeaux qui interdisent l'évaluation côté serveur (contrat
+    §2 et §4) : `simulated`, `empty_plan`, et pour un run arrêté `cancelled` /
+    `stopped` — un final `cancelled` rejeté puis remplacé par ce `failed` ne doit
+    JAMAIS être évalué (node et python-ia ignorent `result.cancelled=true`)."""
     steps = result.get("steps") if isinstance(result, dict) else None
     minimal: dict[str, Any] = {
         "ok": False,
@@ -81,9 +86,11 @@ def minimal_failed_result(status: str, result: Any, detail: str | None = None) -
         "steps_count": len(steps) if isinstance(steps, list) else 0,
         "artifacts": collect_artifacts(result),
     }
-    for flag in ("simulated", "empty_plan"):
+    for flag in ("simulated", "empty_plan", "cancelled", "stopped", "timed_out"):
         if isinstance(result, dict) and result.get(flag):
             minimal[flag] = True
+    if status == "cancelled":
+        minimal["cancelled"] = True
     return minimal
 
 
