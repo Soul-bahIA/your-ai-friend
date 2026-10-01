@@ -31,6 +31,9 @@ import { knowledgeRoutes } from "./routes/knowledge.js";
 import { researchRoutes } from "./routes/research.js";
 import { orchestratorRoutes } from "./routes/orchestrator.js";
 import { approvalRoutes } from "./v2/routes/approvals.js";
+import { sessionRoutes } from "./v2/routes/sessions.js";
+import { runtimeRoutes } from "./v2/routes/runtime.js";
+import { streamRoutes } from "./v2/routes/stream.js";
 
 /** Erreurs : 4xx → message explicite ; 5xx → message générique (détail journalisé uniquement). */
 export function errorHandler(err: FastifyError & { code?: string }, request: FastifyRequest, reply: FastifyReply) {
@@ -155,6 +158,11 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   // V2 (LOT 6) : approbations par action (HMAC lié au payload) et journal d'audit chaîné.
   await app.register(approvalRoutes);
+  // V2 (LOT 7) : sessions / tâches (JWT), runtime (clé agent : register, lease, keepalive,
+  // résultats, messages, checkpoints), flux SSE.
+  await app.register(sessionRoutes);
+  await app.register(runtimeRoutes);
+  await app.register(streamRoutes);
 
   return app;
 }

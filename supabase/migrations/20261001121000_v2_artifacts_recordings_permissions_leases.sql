@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS soulbah.permissions (
   updated_at         timestamptz NOT NULL DEFAULT now(),
   -- Une demande L3 porte toujours le payload complet (§9.10 : jamais en lot).
   CONSTRAINT permissions_l3_requires_payload CHECK (kind <> 'request' OR security_level <> 'L3' OR payload_sha256 IS NOT NULL),
-  CONSTRAINT permissions_decision_consistent CHECK ((status IN ('approved', 'denied')) = (decided_at IS NOT NULL))
+  -- approved / denied portent une décision datée ; pending, expired et revoked (grant révoqué après
+  -- approbation, demande expirée) peuvent avoir ou non decided_at.
+  CONSTRAINT permissions_decision_consistent CHECK (status NOT IN ('approved', 'denied') OR decided_at IS NOT NULL)
 );
 ALTER TABLE soulbah.permissions ENABLE ROW LEVEL SECURITY;
 DROP TRIGGER IF EXISTS set_updated_at ON soulbah.permissions;

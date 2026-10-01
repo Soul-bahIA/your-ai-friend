@@ -36,10 +36,19 @@ export interface TickReport {
 
 const LEASED_SQL = LEASED_STATUSES.map((s) => `'${s}'`).join(", ");
 
-/** Un passage du scheduler (idempotent, une seule instance à la fois). */
-export async function tick(now = new Date()): Promise<TickReport> {
+export interface TickOptions {
+  now?: Date;
+  /** true : n'attend pas le verrou (boucle périodique) ; défaut : attend (un tick est court). */
+  tryLock?: boolean;
+}
+
+/** Un passage du scheduler (idempotent, une seule instance à la fois : verrou consultatif). */
+export async function tick(opts: TickOptions = {}): Promise<TickReport> {
+  const now = opts.now ?? new Date();
   return withTransaction(async (client) => {
-    const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [SCHEDULER_LOCK_KEY]);
+    const lock = opts.tryLock
+      ? await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [SCHEDULER_LOCK_KEY])
+      : await client.query("SELECT pg_advisory_xact_lock($1), true AS locked", [SCHEDULER_LOCK_KEY]);
     const report: TickReport = { locked: lock.rows[0]?.locked === true, ready: 0, blocked: 0, retried: 0, escalated: 0, reaped: 0, leasesReleased: 0, sessionsClosed: 0 };
     if (!report.locked) return report;
 
@@ -180,6 +189,9 @@ export async function lease(req: LeaseRequest): Promise<LeaseReport> {
   const now = req.now ?? new Date();
   const leaseMs = Math.max(10, Math.min(3600, Math.trunc(req.leaseSeconds ?? config.v2LeaseSeconds))) * 1000;
   return withTransaction(async (client) => {
+    // Capacité comptée sous verrou consultatif PAR UTILISATEUR : deux baux concurrents ne peuvent
+    // pas lire le même « running » et dépasser le plafond ensemble (RUNNING ≤ max, §9.6).
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('soulbah.lease:' || $1::text))", [req.userId]);
     const rt = await client.query("SELECT id, max_slots, status FROM soulbah.runtimes WHERE id = $1 AND user_id = $2", [req.runtimeId, req.userId]);
     if (rt.rows.length !== 1) throw new Error("runtime inconnu");
     const us = await client.query("SELECT max_parallel_agents FROM soulbah.user_settings WHERE user_id = $1", [req.userId]);

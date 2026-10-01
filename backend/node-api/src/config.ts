@@ -86,6 +86,13 @@ export const config = {
   // Période du reaper global (secondes).
   reaperIntervalSeconds: num(process.env.REAPER_INTERVAL_SECONDS, 60),
 
+  // V2 (LOT 7) : plafond global de parallélisme (§9.6, min avec utilisateur / mission / runtime),
+  // durée d'un bail de tâche (prolongé par keepalive), période du scheduler, période du flux SSE.
+  maxParallelAgents: Math.max(1, Math.min(32, num(process.env.SOULBAH_MAX_PARALLEL_AGENTS, 6))),
+  v2LeaseSeconds: Math.max(10, Math.min(3600, num(process.env.SOULBAH_LEASE_SECONDS, 90))),
+  schedulerIntervalSeconds: Math.max(1, num(process.env.SOULBAH_SCHEDULER_INTERVAL_SECONDS, 5)),
+  streamIntervalMs: Math.max(250, num(process.env.SOULBAH_STREAM_INTERVAL_MS, 2000)),
+
   // Générations (formations/applications) bloquées au-delà de ce délai → 'Erreur'.
   staleGenerationMinutes: num(process.env.STALE_GENERATION_MINUTES, 30),
 

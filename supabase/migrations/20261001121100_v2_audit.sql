@@ -15,7 +15,9 @@
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS soulbah.audit_logs (
-  seq          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  -- Attribué par le trigger BEFORE INSERT sous le verrou de la tête de chaîne : l'ordre des
+  -- numéros est EXACTEMENT l'ordre de chaînage (une identité serait tirée avant le verrou).
+  seq          bigint PRIMARY KEY,
   id           uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
   user_id      uuid,
   session_id   uuid,
@@ -75,6 +77,7 @@ BEGIN
     INSERT INTO soulbah.audit_chain_head (id) VALUES (1) RETURNING * INTO head;
   END IF;
   NEW.created_at := coalesce(NEW.created_at, now());
+  NEW.seq        := head.last_seq + 1;
   NEW.prev_hash  := head.last_hash;
   NEW.row_hash   := soulbah.audit_row_hash(NEW.prev_hash, NEW.id, NEW.user_id, NEW.session_id, NEW.task_id,
                                            NEW.actor, NEW.action, NEW.entity, NEW.entity_id, NEW.data, NEW.created_at);

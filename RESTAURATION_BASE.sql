@@ -2291,7 +2291,9 @@ CREATE TABLE IF NOT EXISTS soulbah.permissions (
   updated_at         timestamptz NOT NULL DEFAULT now(),
   -- Une demande L3 porte toujours le payload complet (§9.10 : jamais en lot).
   CONSTRAINT permissions_l3_requires_payload CHECK (kind <> 'request' OR security_level <> 'L3' OR payload_sha256 IS NOT NULL),
-  CONSTRAINT permissions_decision_consistent CHECK ((status IN ('approved', 'denied')) = (decided_at IS NOT NULL))
+  -- approved / denied portent une décision datée ; pending, expired et revoked (grant révoqué après
+  -- approbation, demande expirée) peuvent avoir ou non decided_at.
+  CONSTRAINT permissions_decision_consistent CHECK (status NOT IN ('approved', 'denied') OR decided_at IS NOT NULL)
 );
 ALTER TABLE soulbah.permissions ENABLE ROW LEVEL SECURITY;
 DROP TRIGGER IF EXISTS set_updated_at ON soulbah.permissions;
@@ -2335,7 +2337,9 @@ CREATE INDEX IF NOT EXISTS idx_resource_leases_holder ON soulbah.resource_leases
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS soulbah.audit_logs (
-  seq          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  -- Attribué par le trigger BEFORE INSERT sous le verrou de la tête de chaîne : l'ordre des
+  -- numéros est EXACTEMENT l'ordre de chaînage (une identité serait tirée avant le verrou).
+  seq          bigint PRIMARY KEY,
   id           uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
   user_id      uuid,
   session_id   uuid,
@@ -2395,6 +2399,7 @@ BEGIN
     INSERT INTO soulbah.audit_chain_head (id) VALUES (1) RETURNING * INTO head;
   END IF;
   NEW.created_at := coalesce(NEW.created_at, now());
+  NEW.seq        := head.last_seq + 1;
   NEW.prev_hash  := head.last_hash;
   NEW.row_hash   := soulbah.audit_row_hash(NEW.prev_hash, NEW.id, NEW.user_id, NEW.session_id, NEW.task_id,
                                            NEW.actor, NEW.action, NEW.entity, NEW.entity_id, NEW.data, NEW.created_at);

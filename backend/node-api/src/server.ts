@@ -8,6 +8,7 @@ import { SECRET_LABEL, redactingLogger } from "./v2/security/redactSecrets.js";
 import { buildApp } from "./app.js";
 import { runMaintenance } from "./services/maintenance.js";
 import { reapStaleTasks } from "./services/reaper.js";
+import { auditSchedulerError, tick, tickSummary } from "./v2/scheduler/scheduler.js";
 import { drainBackgroundJobs } from "./services/backgroundJobs.js";
 
 // Journaux : en-têtes d'authentification rédigés par pino ; objets et messages des services
@@ -30,6 +31,7 @@ const MAINTENANCE_MS = 60 * 60 * 1000;
 let dbRetryTimer: NodeJS.Timeout | undefined;
 let maintenanceTimer: NodeJS.Timeout | undefined;
 let reaperTimer: NodeJS.Timeout | undefined;
+let schedulerTimer: NodeJS.Timeout | undefined;
 
 /** Colonnes ajoutées par supabase/migrations/20261001090000_lot1_fixes.sql (ciblage d'un PC). */
 const LOT1_COLUMNS = ["target_agent_key_id", "claimed_by_key_id"];
@@ -54,6 +56,22 @@ function runReaper(): void {
   reapStaleTasks().catch((e) => app.log.warn({ err: (e as Error).message }, "reaper : échec (nouvel essai au prochain tick)"));
 }
 
+// Scheduler V2 (LOT 7) : promotion READY, backoff, escalade, reaper des baux, clôture des sessions.
+let schedulerBusy = false;
+function runScheduler(): void {
+  if (schedulerBusy) return;
+  schedulerBusy = true;
+  tick({ tryLock: true })
+    .then((r) => {
+      const summary = tickSummary(r);
+      if (summary) app.log.info({ scheduler: r }, `scheduler V2 : ${summary}`);
+    })
+    .catch((e) => void auditSchedulerError(e as Error))
+    .finally(() => {
+      schedulerBusy = false;
+    });
+}
+
 async function connectDb(): Promise<void> {
   try {
     await initDb();
@@ -65,6 +83,9 @@ async function connectDb(): Promise<void> {
     runReaper();
     reaperTimer = setInterval(runReaper, Math.max(10, config.reaperIntervalSeconds) * 1000);
     reaperTimer.unref();
+    runScheduler();
+    schedulerTimer = setInterval(runScheduler, config.schedulerIntervalSeconds * 1000);
+    schedulerTimer.unref();
   } catch (err) {
     app.log.warn(
       { err: (err as Error).message },
@@ -84,6 +105,7 @@ async function shutdown(signal: string): Promise<void> {
   clearTimeout(dbRetryTimer);
   clearInterval(maintenanceTimer);
   clearInterval(reaperTimer);
+  clearInterval(schedulerTimer);
   const force = setTimeout(() => process.exit(1), 15_000);
   force.unref();
   try {
