@@ -1,0 +1,202 @@
+{
+ "lots": [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+  "09"
+ ],
+ "files": [
+  "20261002110100_db01_core.sql",
+  "20261002110200_db02_projects.sql",
+  "20261002110300_db03_agents.sql",
+  "20261002110400_db04_policies_guardrails.sql",
+  "20261002110500_db05_memory.sql",
+  "20261002110600_db06_knowledge_research.sql",
+  "20261002110650_db06_vector_embeddings.sql",
+  "20261002110800_db07_project_brain.sql",
+  "20261002110900_db08_code_db_api_ui_intelligence.sql",
+  "20261002111000_db09_skills_tools.sql"
+ ],
+ "steps": [
+  {
+   "step": "apply",
+   "ok": true,
+   "output": "applied            390 ms  20261002110100  db01_core\napplied            921 ms  20261002110200  db02_projects\napplied            375 ms  20261002110300  db03_agents\napplied            686 ms  20261002110400  db04_policies_guardrails\napplied            234 ms  20261002110500  db05_memory\napplied            280 ms  20261002110600  db06_knowledge_research\napplied            264 ms  20261002110650  db06_vector_embeddings\napplied            375 ms  20261002110800  db07_project_brain\napplied           1046 ms  20261002110900  db08_code_db_api_ui_intelligence\napplied            453 ms  20261002111000  db09_skills_tools\n"
+  },
+  {
+   "step": "test 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu sans changement de schéma",
+   "ok": true
+  },
+  {
+   "step": "retour arrière de la séquence (ordre inverse)",
+   "ok": true,
+   "output": "rolled_back   546 ms  20261002111000  db09_skills_tools\nrolled_back   625 ms  20261002110900  db08_code_db_api_ui_intelligence\nrolled_back   546 ms  20261002110800  db07_project_brain\nrolled_back   328 ms  20261002110650  db06_vector_embeddings\nrolled_back  1578 ms  20261002110600  db06_knowledge_research\nrolled_back   890 ms  20261002110500  db05_memory\nrolled_back  2500 ms  20261002110400  db04_policies_guardrails\nrolled_back  1108 ms  20261002110300  db03_agents\nrolled_back   516 ms  20261002110200  db02_projects\nrolled_back   562 ms  20261002110100  db01_core\n"
+  },
+  {
+   "step": "schéma revenu à l'état d'avant les lots",
+   "ok": true
+  },
+  {
+   "step": "réapplication complète",
+   "ok": true,
+   "output": "applied            421 ms  20261002110100  db01_core\napplied            656 ms  20261002110200  db02_projects\napplied           4281 ms  20261002110300  db03_agents\napplied           6078 ms  20261002110400  db04_policies_guardrails\napplied           2905 ms  20261002110500  db05_memory\napplied           6235 ms  20261002110600  db06_knowledge_research\napplied            781 ms  20261002110650  db06_vector_embeddings\napplied           2047 ms  20261002110800  db07_project_brain\napplied          10061 ms  20261002110900  db08_code_db_api_ui_intelligence\napplied           1843 ms  20261002111000  db09_skills_tools\n"
+  },
+  {
+   "step": "test après réapplication 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  }
+ ],
+ "scratch": "soulbah_scratch_db0109b",
+ "ok": true
+}

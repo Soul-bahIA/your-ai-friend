@@ -304,3 +304,29 @@ def test_catalog_redacts_passwords_and_verifiers_in_query_texts():
     text = json.dumps(out)
     assert verifier not in text and "en clair" not in text
     assert out["top_queries"][3]["query"] == "SELECT * FROM t WHERE id = $1"
+
+
+@needs_pg
+def test_rollback_needs_down_file_and_header_and_records_history(scratch_db, migrations):
+    assert run(migrations, "apply", "--target", scratch_db, "--pending") == 0
+    # second : pas d'en-tête rollback → NO → refus avec le plan de reprise
+    with pytest.raises(db_connect.DbError, match="rollback=NO"):
+        run(migrations, "rollback", "--target", scratch_db, "--pending", "--versions", "20990101000100")
+    # first : rollback=YES mais pas de fichier .down.sql → refus
+    with pytest.raises(db_connect.DbError, match="absent"):
+        run(migrations, "rollback", "--target", scratch_db, "--pending", "--versions", "20990101000000")
+    (migrations.repo / "20990101000100_second.sql").write_text(
+        "-- soulbah:rollback=YES\nCREATE TABLE IF NOT EXISTS public.t_second (id int PRIMARY KEY REFERENCES public.t_first(id));\n", "utf-8")
+    # L'empreinte du fichier a changé après application : verify le voit, l'annulation doit l'ignorer ? Non :
+    # la cohérence prime — on remet le fichier d'origine pour ce test.
+    (migrations.repo / "20990101000100_second.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS public.t_second (id int PRIMARY KEY REFERENCES public.t_first(id));\n", "utf-8")
+    (migrations.repo / "20990101000000_first.down.sql").write_text("DROP TABLE IF EXISTS public.t_first CASCADE;\n", "utf-8")
+    assert run(migrations, "rollback", "--target", scratch_db, "--pending", "--versions", "20990101000000") == 0
+    assert q(scratch_db, "SELECT to_regclass('public.t_first') IS NULL") == "t"
+    assert q(scratch_db, "SELECT status FROM soulbah.schema_migrations WHERE version = '20990101000000'") == "rolled_back"
+    assert q(scratch_db, "SELECT count(*) FROM soulbah.schema_migration_runs WHERE version = '20990101000000' AND action = 'rollback' AND status = 'succeeded'") == "1"
+    # Une migration annulée redevient applicable.
+    assert run(migrations, "apply", "--target", scratch_db, "--pending", "--until", "20990101000000") == 0
+    assert q(scratch_db, "SELECT status FROM soulbah.schema_migrations WHERE version = '20990101000000'") == "applied"
+    assert q(scratch_db, "SELECT to_regclass('public.t_first') IS NOT NULL") == "t"

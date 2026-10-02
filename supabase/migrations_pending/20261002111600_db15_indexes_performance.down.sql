@@ -1,0 +1,26 @@
+-- Retour arrière de 20261002111600_db15_indexes_performance.sql
+DROP INDEX IF EXISTS public.idx_agent_memory_source_task_id;
+DROP INDEX IF EXISTS public.idx_chat_messages_user_id;
+DROP INDEX IF EXISTS public.idx_knowledge_versions_user_id;
+DROP INDEX IF EXISTS public.idx_user_migrations_user_id;
+DROP INDEX IF EXISTS public.idx_user_table_data_user_id;
+DROP INDEX IF EXISTS soulbah.idx_actions_user_id;
+DROP INDEX IF EXISTS soulbah.idx_agent_assignments_environment_name;
+DROP INDEX IF EXISTS soulbah.idx_agent_permissions_environment_name;
+DROP INDEX IF EXISTS soulbah.idx_agents_current_task_id;
+DROP INDEX IF EXISTS soulbah.idx_agents_runtime_id;
+DROP INDEX IF EXISTS soulbah.idx_agents_version_id;
+DROP INDEX IF EXISTS soulbah.idx_artifacts_session_id;
+DROP INDEX IF EXISTS soulbah.idx_autonomy_rules_environment_name;
+DROP INDEX IF EXISTS soulbah.idx_evaluations_user_id;
+DROP INDEX IF EXISTS soulbah.idx_messages_from_agent_id;
+DROP INDEX IF EXISTS soulbah.idx_messages_reply_to;
+DROP INDEX IF EXISTS soulbah.idx_permissions_action_id;
+DROP INDEX IF EXISTS soulbah.idx_permissions_decided_by;
+DROP INDEX IF EXISTS soulbah.idx_policy_rules_environment_name;
+DROP INDEX IF EXISTS soulbah.idx_projects_owner_user_id;
+DROP INDEX IF EXISTS soulbah.idx_recordings_artifact_id;
+DROP INDEX IF EXISTS soulbah.idx_recordings_user_id;
+DROP INDEX IF EXISTS soulbah.idx_tool_calls_action_id;
+CREATE INDEX IF NOT EXISTS idx_actions_task ON soulbah.actions USING btree (task_id, attempt, step_index);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document ON soulbah.knowledge_chunks USING btree (document_id, chunk_index);

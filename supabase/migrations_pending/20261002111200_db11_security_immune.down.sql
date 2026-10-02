@@ -1,0 +1,26 @@
+-- Retour arrière de 20261002111200_db11_security_immune.sql
+DROP VIEW IF EXISTS soulbah.audit_events;
+DROP VIEW IF EXISTS soulbah.v_soc_coverage;
+DROP VIEW IF EXISTS soulbah.v_soc_regressions;
+DROP VIEW IF EXISTS soulbah.v_soc_recent_fixes;
+DROP VIEW IF EXISTS soulbah.v_soc_quarantined_agents;
+DROP VIEW IF EXISTS soulbah.v_soc_critical_findings;
+DROP VIEW IF EXISTS soulbah.v_soc_open_findings;
+DROP VIEW IF EXISTS soulbah.v_soc_active_incidents;
+DROP INDEX IF EXISTS soulbah.idx_agent_quarantines_incident;
+ALTER TABLE soulbah.agent_quarantines DROP COLUMN IF EXISTS incident_id;
+ALTER TABLE soulbah.project_commits DROP CONSTRAINT IF EXISTS project_commits_incident_fkey;
+DROP TABLE IF EXISTS soulbah.security_detection_rules;
+DROP TABLE IF EXISTS soulbah.security_regression_tests;
+DROP TABLE IF EXISTS soulbah.security_fixes;
+DROP TABLE IF EXISTS soulbah.incident_recovery_steps;
+DROP TABLE IF EXISTS soulbah.incident_decisions;
+DROP TABLE IF EXISTS soulbah.incident_evidence;
+DROP TABLE IF EXISTS soulbah.incident_actions;
+DROP TABLE IF EXISTS soulbah.incident_events;
+DROP TABLE IF EXISTS soulbah.security_findings;
+DROP VIEW IF EXISTS soulbah.security_incidents;
+DROP TABLE IF EXISTS soulbah.incidents;
+DROP TABLE IF EXISTS soulbah.security_patterns;
+DROP FUNCTION IF EXISTS soulbah.incidents_log_status();
+DROP FUNCTION IF EXISTS soulbah.security_findings_pattern_stats();

@@ -53,8 +53,16 @@ des colonnes ou des tables filles ; on ne duplique pas.
   authenticated ; `REVOKE ALL … FROM PUBLIC, anon, authenticated`. Le rôle `soulbah_api` reçoit ses droits par
   `scripts/sql/soulbah_api_grants.sql` (déjà « ALL TABLES IN SCHEMA soulbah »).
 - `COMMENT ON TABLE` : rôle de la table en une phrase.
+- Fonctions : `REVOKE ALL ON FUNCTION … FROM PUBLIC` (et de `anon`, `authenticated` s'ils existent) dans la migration
+  qui les crée — PostgreSQL donne EXECUTE à PUBLIC à la création, et un `ALTER DEFAULT PRIVILEGES IN SCHEMA`
+  ne peut pas le retirer (une entrée par schéma s'ajoute au défaut global). Le DB LOT 16 vérifie qu'aucune
+  fonction de `soulbah` n'est exécutable par `anon` ni `authenticated`.
 - Journaux, décisions et événements : **ajout seul** par trigger (refus d'UPDATE, DELETE, TRUNCATE), comme
-  `soulbah.audit_logs` et `soulbah.schema_migration_runs`.
+  `soulbah.audit_logs` et `soulbah.schema_migration_runs`. Leurs clés étrangères sont `ON DELETE RESTRICT`
+  (catalogues : projets, dépôts, définitions d'agents, politiques, garde-fous — ils se désactivent, ne se
+  suppriment pas) ou absentes (lignes opérationnelles purgées : sessions, tâches, agents, fichiers de code —
+  colonne `uuid` nue indexée, comme `audit_logs.task_id`). Jamais `CASCADE` ni `SET NULL` : l'action
+  référentielle serait de toute façon refusée par le trigger, avec une erreur trompeuse.
 
 ## 5. Idempotence sans masquer une incompatibilité (§9)
 

@@ -1,0 +1,219 @@
+{
+ "lots": [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+  "09",
+  "10"
+ ],
+ "files": [
+  "20261002110100_db01_core.sql",
+  "20261002110200_db02_projects.sql",
+  "20261002110300_db03_agents.sql",
+  "20261002110400_db04_policies_guardrails.sql",
+  "20261002110500_db05_memory.sql",
+  "20261002110600_db06_knowledge_research.sql",
+  "20261002110650_db06_vector_embeddings.sql",
+  "20261002110800_db07_project_brain.sql",
+  "20261002110900_db08_code_db_api_ui_intelligence.sql",
+  "20261002111000_db09_skills_tools.sql",
+  "20261002111100_db10_models_benchmarks.sql"
+ ],
+ "steps": [
+  {
+   "step": "apply",
+   "ok": true,
+   "output": "applied            235 ms  20261002110100  db01_core\napplied            500 ms  20261002110200  db02_projects\napplied            468 ms  20261002110300  db03_agents\napplied            453 ms  20261002110400  db04_policies_guardrails\napplied            375 ms  20261002110500  db05_memory\napplied            296 ms  20261002110600  db06_knowledge_research\napplied            281 ms  20261002110650  db06_vector_embeddings\napplied            500 ms  20261002110800  db07_project_brain\napplied           1375 ms  20261002110900  db08_code_db_api_ui_intelligence\napplied            608 ms  20261002111000  db09_skills_tools\napplied           1343 ms  20261002111100  db10_models_benchmarks\n"
+  },
+  {
+   "step": "test 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test 20261002111100_db10_models_benchmarks.sql",
+   "ok": false,
+   "output": "ERROR:  statut approuvé sans empreinte vérifiée\nCONTEXTE : PL/pgSQL function inline_code_block line 55 at RAISE"
+  },
+  {
+   "step": "rejeu 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu 20261002111100_db10_models_benchmarks.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "rejeu sans changement de schéma",
+   "ok": true
+  },
+  {
+   "step": "retour arrière de la séquence (ordre inverse)",
+   "ok": true,
+   "output": "rolled_back   578 ms  20261002111100  db10_models_benchmarks\nrolled_back  1578 ms  20261002111000  db09_skills_tools\nrolled_back   906 ms  20261002110900  db08_code_db_api_ui_intelligence\nrolled_back  1311 ms  20261002110800  db07_project_brain\nrolled_back   453 ms  20261002110650  db06_vector_embeddings\nrolled_back   593 ms  20261002110600  db06_knowledge_research\nrolled_back   531 ms  20261002110500  db05_memory\nrolled_back   735 ms  20261002110400  db04_policies_guardrails\nrolled_back  1485 ms  20261002110300  db03_agents\nrolled_back   500 ms  20261002110200  db02_projects\nrolled_back   264 ms  20261002110100  db01_core\n"
+  },
+  {
+   "step": "schéma revenu à l'état d'avant les lots",
+   "ok": true
+  },
+  {
+   "step": "réapplication complète",
+   "ok": true,
+   "output": "applied            281 ms  20261002110100  db01_core\napplied            641 ms  20261002110200  db02_projects\napplied           1171 ms  20261002110300  db03_agents\napplied            687 ms  20261002110400  db04_policies_guardrails\napplied            389 ms  20261002110500  db05_memory\napplied           1125 ms  20261002110600  db06_knowledge_research\napplied            311 ms  20261002110650  db06_vector_embeddings\napplied            390 ms  20261002110800  db07_project_brain\napplied           2672 ms  20261002110900  db08_code_db_api_ui_intelligence\napplied           1625 ms  20261002111000  db09_skills_tools\napplied           4219 ms  20261002111100  db10_models_benchmarks\n"
+  },
+  {
+   "step": "test après réapplication 20261002110100_db01_core.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110200_db02_projects.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110300_db03_agents.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110400_db04_policies_guardrails.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110500_db05_memory.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110600_db06_knowledge_research.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110650_db06_vector_embeddings.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110800_db07_project_brain.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002110900_db08_code_db_api_ui_intelligence.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002111000_db09_skills_tools.sql",
+   "ok": true,
+   "output": ""
+  },
+  {
+   "step": "test après réapplication 20261002111100_db10_models_benchmarks.sql",
+   "ok": false,
+   "output": "ERROR:  statut approuvé sans empreinte vérifiée\nCONTEXTE : PL/pgSQL function inline_code_block line 55 at RAISE"
+  }
+ ],
+ "scratch": "soulbah_scratch_db10",
+ "ok": false
+}

@@ -1,0 +1,535 @@
+{
+ "summary": "Audit de sécurité de la base Supabase restaurée (PostgreSQL 17.6), mené en lecture seule. Sources : catalog.json, functions.sql, migration_state.json, drift.md et le code (backend/node-api, agent, frontend). La copie locale soulbah_restored_copy n'a été interrogée qu'avec scripts/db/sqlq.py, en transactions READ ONLY. Les rôles anon et authenticated ont été simulés par SET LOCAL ROLE et request.jwt.claims. Je n'ai rien écrit dans aucune base, je ne me suis pas connecté à Supabase, je n'ai ouvert aucun fichier de secrets et je n'ai modifié aucun fichier du dépôt.\n\n**Vue d'ensemble**\n- Le schéma public compte 18 tables. Toutes ont la RLS activée (jamais forcée), pour 49 policies au total.\n- anon et authenticated ont tous les droits de table, TRUNCATE compris. La RLS est donc la seule barrière.\n- **En anonyme** : aucune ligne lisible (vérifié : 0 profil, 0 tâche). Les écritures sont bloquées, d'après les policies, parce que auth.uid() vaut NULL. Seule exception : la fonction has_role, appelable par /rpc, qui répond pour n'importe quel utilisateur.\n- **En authentifié** (inscription publique dans le front) :\n  - lecture de tous les profils, dont 2 adresses e-mail ;\n  - écriture directe dans agent_tasks, agent_keys, agent_memory et knowledge_base, sans passer par les contrôles de l'API ;\n  - insertion de lignes rattachées aux données d'un autre compte.\n\n**Bilan : 21 constats, aucun CRITICAL**\n- **HIGH (1)** : n'importe quel détenteur du jeton de session d'un utilisateur peut injecter, via l'API Supabase, des tâches que l'agent du PC exécutera. Il contourne ainsi la validation des étapes, le confinement aux dossiers autorisés et les confirmations imposées par le serveur (captures d'écran silencieuses en mode par défaut). Aujourd'hui, l'exploitation est bloquée par hasard : le node-api du dépôt lit des colonnes que lot1_fixes n'a pas encore créées.\n- **MEDIUM (5)** :\n  - profils lisibles par tous les comptes ;\n  - clé agent exposée lors du premier audit et jamais renouvelée dans cette base ;\n  - 45 jetons de session actifs, restaurés et recopiés en clair dans la copie locale ;\n  - deux vérificateurs de mot de passe SCRAM (empreintes, pas le mot de passe en clair) dans catalog.json, voir le point d'attention plus bas ;\n  - node-api connecté en postgres, rôle soulbah_api absent.\n- **LOW (10)** et **INFO (5)** : détail dans les constats.\n\n**État des migrations de sécurité**\n- hardening, lot1_fixes et lot1_verif ne sont pas appliquées.\n- Le verdict PARTIAL de lot1_verif est un artefact de l'outil. Son seul élément « présent » est l'absence d'une policy que lot1_fixes aurait créée ; or lot1_fixes n'a jamais été appliquée.\n- post_restore_checks.sql échoue sur la copie (S19 : has_role exécutable par PUBLIC) et passe sur le schéma attendu.\n- Ces trois migrations corrigent SEC-01, SEC-02 et SEC-07 à SEC-11, plus SEC-16.\n- Elles ne corrigent pas :\n  - les droits TRUNCATE et les privilèges par défaut ;\n  - pgvector installé dans public ;\n  - les policies TO public ;\n  - le rôle de node-api (le script de droits de soulbah_api ne s'applique pas avant hardening et V2) ;\n  - les sessions, le MFA, la rotation de la clé agent, les 2 tâches en attente héritées.\n\n**Point d'attention immédiat** : catalog.json (top_queries[21]) contient deux vérificateurs SCRAM du rôle de réplication supabase_replication_admin. Le dossier db/ n'est pas ignoré par git et le dépôt est présenté comme public. Il faut l'expurger avant tout commit ; les valeurs ne sont pas reproduites ici.\n\n**Non vérifié**\n- Réglages Auth et PostgREST du tableau de bord (schémas exposés, inscriptions, confirmation d'e-mail).\n- Edge functions encore déployées.\n- Rôle réellement utilisé par DATABASE_URL (backend/.env non ouvert).\n- Laquelle des deux clés agent a été exposée.\n- Méthode d'authentification de la copie locale.\n- Exploitation passée : aucune colonne ni journal ne permet de distinguer une écriture directe.",
+ "findings": [
+  {
+   "id": "SEC-01",
+   "title": "agent_tasks : INSERT, UPDATE et DELETE directs via PostgREST — injection de tâches exécutées par l'agent du PC, hors des contrôles de l'API",
+   "category": "rls-policy",
+   "severity": "HIGH",
+   "objects": [
+    "public.agent_tasks",
+    "policy « Users can create tasks »",
+    "policy « Users can update own tasks »",
+    "policy « Users can delete own tasks »"
+   ],
+   "justification": "Risque réel mais conditionnel : il faut un client authentifié, pas anonyme. Les trois policies sont PERMISSIVE, TO public, avec pour seule condition auth.uid() = user_id ; anon et authenticated ont INSERT/UPDATE/DELETE sur la table. Quiconque détient le JWT d'un utilisateur peut donc écrire une tâche de cet utilisateur avec un payload arbitraire. Ce JWT est accessible au JavaScript, puisque supabase-js garde la session dans localStorage (frontend/src/integrations/supabase/client.ts). L'écriture directe évite POST /api/agent-tasks, qui :\n- valide strictement les étapes (lib/agentSteps.ts:207-232) ;\n- refuse payload.goal_meta, « réservé au serveur » (agentSteps.ts:225) ;\n- confine les chemins aux allowed_dirs du PC (routes/agentTasks.ts:431, S21) ;\n- pose requires_confirmation sans que le client puisse l'abaisser (agentTasks.ts:436).\n\nL'agent fait confiance à ces champs. Un goal_meta non vide fait passer la tâche pour « planifiée par le serveur » (agent/executor.py:254-255). En mode par défaut « confirm » (agent/config.py:43), une capture d'écran de catégorie screen part alors sans confirmation (permissions.py:430-433) au lieu d'être confirmée (permissions.py:451-455). L'image remonte au serveur et se lit avec le même JWT (agentTasks.ts:393-400). Un requires_confirmation absent supprime aussi la confirmation des actions « à effet réel » en mode auto ou avec allow_input_control (executor.py:258, permissions.py:414-424).\n\nL'UPDATE permet en outre de remettre en 'pending' une tâche terminée, de réécrire le payload d'une tâche déjà validée par le serveur, ou de lever goal_meta.awaiting_approval (agentTaskSql.ts:21). Le DELETE supprime une tâche en cours (S9). La migration hardening décrit elle-même ce risque (hardening.sql:21-24).\n\nCe qui reste protégé côté agent : liste blanche et deny-list locales (permissions.py:191-199), shell et actions L3 toujours confirmés (permissions.py:408-410), contrôle souris/clavier verrouillé par défaut.\n\nPourquoi pas CRITICAL : aucun accès anonyme ni inter-comptes (CHECK user_id = auth.uid()), et il faut le jeton de la victime.\n\nExploitabilité actuelle : bloquée par hasard, pas par conception. Le node-api du dépôt ne peut servir aucune tâche sur cette base, car buildPollQuery lit target_agent_key_id (agentTaskSql.ts:116-127), colonne absente tant que lot1_fixes n'est pas appliquée. Le risque devient immédiat si lot1_fixes est appliquée sans hardening, si un ancien node-api tourne, ou si l'edge function agent-tasks est encore déployée (SUPABASE_REPRISE.md:125-137, non vérifié).",
+   "evidence": "- catalog.json policies[3] : INSERT, roles ['public'], WITH CHECK auth.uid() = user_id ; policies[4] : DELETE ; policies[5] : UPDATE, USING propriétaire sans WITH CHECK ; policies[6] : SELECT. Origine : 20260218152103_….sql l.22, 25, 28, 31.\n- catalog.json tables[30].acl : anon=arwdDxtm, authenticated=arwdDxtm.\n- SQL (copie, READ ONLY) : SELECT count(*) FROM information_schema.columns WHERE table_name='agent_tasks' AND column_name IN ('target_agent_key_id','claimed_by_key_id') → 0.\n- post_restore_checks.sql:54-64 attend uniquement SELECT sur agent_tasks.\n- Aucun test CI de refus d'INSERT/UPDATE client : schema_checks.sql ne teste que la suppression (l.350-354).\n- Exploitation passée non vérifiable : pas de colonne d'origine, pas de pgaudit.",
+   "recommendation": "- Appliquer hardening §1 (hardening.sql:20-26, suppression des policies INSERT et UPDATE) puis lot1_verif §4 (lot1_verif.sql:140-143, suppression de la policy DELETE), par supabase db push dans l'ordre, AVANT de reconnecter node-api ou un agent à cette base.\n- Contrôler ensuite avec post_restore_checks.sql.\n- Ne jamais appliquer lot1_fixes seule.\n- Supprimer l'edge function agent-tasks (SUPABASE_REPRISE §6).\n- Défense en profondeur (code, hors base) : côté agent, ne plus faire confiance à goal_meta ni à requires_confirmation s'ils ne sont pas signés par le serveur ; ajouter un test CI « INSERT/UPDATE client refusés sur agent_tasks ».",
+   "fixed_by": "20261001000000_hardening.sql §1 + 20261001100000_lot1_verif.sql §4"
+  },
+  {
+   "id": "SEC-02",
+   "title": "profiles : tout utilisateur authentifié lit les 10 profils, dont 2 adresses e-mail",
+   "category": "rls-policy",
+   "severity": "MEDIUM",
+   "objects": [
+    "public.profiles",
+    "policy « Users can view all profiles »",
+    "public.handle_new_user()"
+   ],
+   "justification": "Risque réel, exploitable par n'importe quel compte : l'inscription est publique (supabase.auth.signUp, frontend/src/pages/Auth.tsx:30). GET /rest/v1/profiles?select=* renvoie user_id, display_name, avatar_url et bio de tous les utilisateurs.\n\nhandle_new_user copie l'e-mail dans display_name quand aucun nom n'est fourni (COALESCE(raw_user_meta_data->>'display_name', NEW.email), functions.sql restauré). C'est ainsi que 2 profils sur 10 exposent une adresse e-mail, donnée personnelle. La liste des user_id alimente aussi l'oracle has_role (SEC-07).\n\nPourquoi pas HIGH : lecture seule, aucun secret, 10 comptes. Aucun usage légitime côté front : Settings.tsx:26-31 ne lit que son propre profil, useSystemStatus.ts:39 fait un simple count.",
+   "evidence": "- catalog.json policies[34] : SELECT TO authenticated USING true (origine 20260218031213:18).\n- SQL (copie, READ ONLY), en SET LOCAL ROLE authenticated avec request.jwt.claims.sub = user_id du plus ancien profil : profils visibles = 10, profils de tiers = 9, display_name de tiers contenant '@' = 1.\n- SELECT count(*) FILTER (WHERE p.display_name = u.email) → 2.\n- Même lecture en anon → 0.\n- Ni post_restore_checks.sql ni schema_checks.sql ne testent profiles.",
+   "recommendation": "- Appliquer hardening §8 (hardening.sql:236-241) : la policy devient « Users can view own profile ».\n- Optionnel, nouvelle migration : après sauvegarde, vider les display_name égaux à l'e-mail, et ne plus prendre l'e-mail comme valeur par défaut dans handle_new_user.\n- Ajouter à post_restore_checks.sql un contrôle « aucune policy USING (true) hors knowledge_domains ».",
+   "fixed_by": "20261001000000_hardening.sql §8"
+  },
+  {
+   "id": "SEC-03",
+   "title": "Clés agent sans expiration, jamais renouvelées depuis l'exposition signalée lors du premier audit",
+   "category": "credentials",
+   "severity": "MEDIUM",
+   "objects": [
+    "public.agent_keys"
+   ],
+   "justification": "Risque réel probable, avec une incertitude. SUPABASE_REPRISE.md:195 indique qu'une clé agent a été affichée en clair lors du premier audit et doit être remplacée. La base restaurée contient 2 clés, créées les 2026-07-03 et 2026-07-04, et aucune plus récente : la rotation n'a pas eu lieu dans cette base. Les clés n'expirent pas (pas de colonne expires_at).\n\nCe que permet la clé exposée :\n- aujourd'hui : seulement /announce, qui réécrit allowed_dirs (services/agentKeys.ts:99). Poll, update et event lisent des colonnes absentes (agentTaskSql.ts:97-131) ;\n- après lot1_fixes : lire les payloads des tâches de ce compte et forger résultats et évènements, qui nourrissent l'évaluateur.\n\nImpossible de dire laquelle des deux clés a été exposée sans ouvrir agent/.env, ce qui est interdit : non vérifié.",
+   "evidence": "- SQL (copie, READ ONLY), table agent_keys :\n  - e9aa7f26… : créée 2026-07-03, dernier usage 2026-07-04, 0 dossier ;\n  - 2e876509… : créée 2026-07-04, dernier usage 2026-07-07, 1 dossier.\n- catalog.json columns : id, user_id, key_hash, label, created_at, last_used_at, allowed_dirs — pas d'expiration.\n- Audit LOT 0 versé le 2026-10-01 (git log docs/SOULBAH_V2_LOT0_AUDIT.md).",
+   "recommendation": "- Après remise en service, révoquer les deux clés via DELETE /api/agent-keys/:id (qui annule aussi les tâches du PC).\n- En régénérer une et mettre à jour agent/.env (SUPABASE_REPRISE §8).\n- Prévoir une expiration des clés (colonne expires_at, LOT 4).",
+   "fixed_by": "action manuelle (SUPABASE_REPRISE §8)"
+  },
+  {
+   "id": "SEC-04",
+   "title": "45 jetons de rafraîchissement actifs, restaurés sans limite de durée et recopiés en clair dans la copie locale",
+   "category": "auth-sessions",
+   "severity": "MEDIUM",
+   "objects": [
+    "auth.sessions",
+    "auth.refresh_tokens",
+    "copie locale soulbah_restored_copy",
+    "sauvegarde chiffrée"
+   ],
+   "justification": "Risque réel, conditionné à l'accès à une copie. La restauration remet en service 45 sessions (8 comptes) et 45 jetons de rafraîchissement non révoqués. Ils sont au format classique de 12 caractères, sans refresh_token_hmac_key ni not_after.\n\nD'après le fonctionnement de GoTrue, ce jeton est exactement la valeur que présente le client (non haché) ; non testé contre le projet. Les deux comptes qui pilotent un agent PC en détiennent 21 et 17.\n\nCes jetons sont aussi dans la copie locale soulbah_restored_copy et dans la sauvegarde chiffrée. La copie est lisible en superutilisateur sur 127.0.0.1:54329, sans mot de passe dans l'URL ; la méthode d'authentification locale n'est pas vérifiée. Quiconque lit la copie peut prendre la main sur ces comptes du projet en production tant que les sessions ne sont pas révoquées, puis piloter leurs agents (sous réserve des confirmations locales). Probabilité limitée : la copie n'écoute que sur 127.0.0.1.",
+   "evidence": "- baseline.json managed_row_counts : auth.sessions=45, auth.refresh_tokens=91.\n- SQL (copie, READ ONLY) :\n  - refresh_tokens non révoqués = 45 ; length(token)=12 pour 91/91 ;\n  - sessions : aal1=45, not_after non NULL=0, refresh_token_hmac_key non NULL=0, 8 utilisateurs distincts ;\n  - jetons actifs par compte : 2e876509…=21, e9aa7f26…=17, 6 autres comptes avec 1 ou 2 ;\n  - max(updated_at)=2026-08-01 ;\n  - listen_addresses=127.0.0.1, current_user superutilisateur.",
+   "recommendation": "- Sur le projet restauré : révoquer toutes les sessions (déconnexion globale).\n- Activer une durée maximale de session et un délai d'inactivité si l'offre le permet.\n- Supprimer la copie locale à la fin du LOT 0, ou y purger auth.refresh_tokens et auth.sessions (opération d'écriture, hors du périmètre lecture seule de cet audit).\n- Garder la sauvegarde chiffrée hors du dépôt.",
+   "fixed_by": "action manuelle"
+  },
+  {
+   "id": "SEC-05",
+   "title": "Artefact du DB LOT 0 : catalog.json contient deux vérificateurs SCRAM du rôle de réplication",
+   "category": "secret-leak",
+   "severity": "MEDIUM",
+   "objects": [
+    "db/baseline/2026-10-02_restored/catalog.json (top_queries[21])",
+    "scripts/db/db_catalog.py",
+    "rôle supabase_replication_admin"
+   ],
+   "justification": "Risque réel de fuite de secret par un artefact de l'audit. La section top_queries, extraite de pg_stat_statements, contient le texte intégral d'une opération de la plateforme : un bloc DO qui crée ou modifie supabase_replication_admin (LOGIN REPLICATION) avec son vérificateur SCRAM-SHA-256, présent deux fois.\n\nUn vérificateur ne donne pas le mot de passe, mais permet une attaque hors ligne par dictionnaire. Le mot de passe est probablement aléatoire et géré par Supabase : probabilité faible, impact élevé, car un rôle de réplication lit toutes les données.\n\nLe dossier db/ n'est ni suivi ni ignoré par git, et le dépôt est présenté comme public : un `git add -A` le publierait.\n\nL'outil ne masque rien. Un `CREATE ROLE soulbah_api … PASSWORD '…'` exécuté selon SUPABASE_REPRISE §10 pourrait être capturé de la même façon, cette fois avec le mot de passe en clair (non testé). Les valeurs ne sont pas reproduites ici.",
+   "evidence": "- catalog.json → top_queries[21].query : 2 occurrences du motif 'SCRAM-SHA-256$<itérations>:' ; rôle cité : supabase_replication_admin.\n- scripts/db/db_catalog.py:242-247 : texte de extensions.pg_stat_statements tronqué à 400 caractères, sans filtre.\n- `git check-ignore` sur ce fichier → code 1 (non ignoré) ; git status : ?? db/.\n- Remote origin : github.com/Soul-bahIA/your-ai-friend ; docs/SUPABASE_REPRISE.md:198 parle de « historique git public ».\n- Scan local de db/baseline/* : aucun autre secret (motifs JWT, sk-, URL avec mot de passe). La seule autre occurrence de PASSWORD est le type de retour de pgbouncer.get_auth (functions[60]).",
+   "recommendation": "- Avant tout commit : retirer top_queries[21] (ou toute la section top_queries) du catalog.json restauré.\n- Ignorer les catalog.json dans git tant que l'outil ne masque rien.\n- Corriger db_catalog.py : exclure les requêtes contenant PASSWORD ou SCRAM-SHA-256, ou en masquer les littéraux.\n- Optionnel, côté Supabase : exécuter pg_stat_statements_reset() après la création de soulbah_api.",
+   "fixed_by": "action manuelle (expurger l'artefact) + correctif de scripts/db/db_catalog.py"
+  },
+  {
+   "id": "SEC-06",
+   "title": "node-api se connecte en postgres (BYPASSRLS, CREATEROLE, REPLICATION) ; le rôle soulbah_api n'existe pas",
+   "category": "least-privilege",
+   "severity": "MEDIUM",
+   "objects": [
+    "rôle postgres",
+    "rôle soulbah_api (absent)",
+    "scripts/sql/soulbah_api_grants.sql"
+   ],
+   "justification": "Risque d'architecture : un client de l'API Supabase ne peut pas l'exploiter directement, mais il aggrave toute compromission de node-api. D'après SUPABASE_REPRISE.md:230, node-api se connecte en postgres (non vérifié : backend/.env non ouvert). Ce rôle a BYPASSRLS, CREATEROLE, CREATEDB et REPLICATION, et appartient à pg_read_all_data, service_role et supabase_privileged_role.\n\nUne injection SQL, une exécution de code ou une fuite du .env donne donc la base entière, y compris auth.users (empreintes de mots de passe) et auth.refresh_tokens, plus le DDL. Un contrôle sommaire par grep des requêtes interpolées de node-api n'a pas montré d'injection (paramètres $n, colonnes constantes) ; ce contrôle n'est pas exhaustif.\n\nLe script de droits ne s'applique pas tel quel à cette base : il référence public.analysis_requests (créée par hardening §6) et le schéma soulbah (migrations V2), tous deux absents. Même avec soulbah_api, la RLS restera contournée, puisque le rôle est prévu BYPASSRLS (doc l.247-248) ; on réduit seulement le rayon d'action (ni DDL ni schéma auth).",
+   "evidence": "- catalog.json roles[5] (postgres) : bypass_rls=true, create_role=true, replication=true, member_of contient pg_read_all_data, service_role, supabase_privileged_role.\n- catalog.json roles : 15 rôles, aucun soulbah_api.\n- docs/SUPABASE_REPRISE.md:228-243.\n- scripts/sql/soulbah_api_grants.sql:38 (analysis_requests) et :60-64 (schéma soulbah).\n- SQL : to_regclass('public.analysis_requests') → NULL ; to_regnamespace('soulbah') → NULL.\n- Incohérence documentaire : SUPABASE_REPRISE.md:265 dit que soulbah_api ne lit pas chat_*, alors que soulbah_api_grants.sql:43-45 lui accorde chat_conversations et chat_messages.",
+   "recommendation": "- Appliquer d'abord les migrations : au minimum hardening pour analysis_requests ; V2 pour le schéma soulbah, ou retirer temporairement les l.60-64 du script.\n- Créer ensuite soulbah_api (SUPABASE_REPRISE §10), appliquer soulbah_api_grants.sql, basculer DATABASE_URL, puis réinitialiser le mot de passe postgres (§8).\n- Corriger l'incohérence sur chat_* dans la documentation.\n- À terme, faire appliquer la RLS à node-api (SET LOCAL ROLE authenticated + request.jwt.claims).",
+   "fixed_by": "action manuelle (SUPABASE_REPRISE §10 + scripts/sql/soulbah_api_grants.sql, après les migrations)"
+  },
+  {
+   "id": "SEC-07",
+   "title": "has_role (SECURITY DEFINER) exécutable par PUBLIC, anon et authenticated : oracle « X est-il admin ? »",
+   "category": "function-grants",
+   "severity": "LOW",
+   "objects": [
+    "public.has_role(uuid, app_role)",
+    "policy « Admins can manage roles » (public.user_roles)"
+   ],
+   "justification": "Risque réel, impact faible aujourd'hui. has_role appartient à postgres (BYPASSRLS), est SECURITY DEFINER et reste exécutable par PUBLIC, anon et authenticated. PostgREST l'expose donc en POST /rest/v1/rpc/has_role : n'importe qui, même anonyme, peut demander le rôle de n'importe quel utilisateur en contournant la RLS de user_roles. Il faut des user_id, qu'un compte authentifié obtient par profiles (SEC-02).\n\nAujourd'hui, aucun admin ni moderator n'existe (10 rôles 'user') : l'oracle ne révèle rien. Il désignerait en revanche la cible dès qu'un admin sera créé.\n\nPas de détournement par search_path : il est fixé à public, et anon/authenticated n'ont pas CREATE sur public. La seule policy qui appelle has_role (« Admins can manage roles », policies[39]) est inerte faute d'admin. Le corps est identique à celui du dépôt.",
+   "evidence": "- catalog.json functions[108] : security_definer=true, config search_path=public, acl =X/postgres, anon=X, authenticated=X.\n- catalog.json function_grants[5..9].\n- SQL (copie, READ ONLY), en SET LOCAL ROLE anon : public.has_role(<user_id d'un tiers>, 'user') → t.\n- SELECT role, count(*) FROM public.user_roles → user|10.\n- has_schema_privilege('anon'|'authenticated','public','CREATE') → f/f.\n- post_restore_checks.sql : sur la copie → « S19 : has_role exécutable par PUBLIC » (code 1) ; sur soulbah_expected → code 0.",
+   "recommendation": "- Appliquer lot1_fixes §3 (lot1_fixes.sql:137-176) : retrait de PUBLIC et anon, création de is_admin() à search_path vide, policy admin réécrite avec is_admin().\n- PUIS lot1_verif §6 (lot1_verif.sql:154-176) : retrait d'authenticated, avec un garde-fou si une policy utilise encore has_role.\n- node-api (routes/knowledge.ts:13) l'appelle en postgres, propriétaire de la fonction : il n'est pas affecté.",
+   "fixed_by": "20261001090000_lot1_fixes.sql §3 + 20261001100000_lot1_verif.sql §6"
+  },
+  {
+   "id": "SEC-08",
+   "title": "agent_keys : policy FOR ALL — le client crée, modifie et supprime ses clés agent sans passer par l'API",
+   "category": "rls-policy",
+   "severity": "LOW",
+   "objects": [
+    "public.agent_keys",
+    "policy « Users manage own agent keys »"
+   ],
+   "justification": "Risque réel, gain marginal. Par PostgREST, le client peut :\n- choisir key_hash, c'est-à-dire créer une clé qui n'expire jamais ;\n- réécrire allowed_dirs, sur lequel repose le contrôle S21 du serveur (agentTasks.ts:431) ;\n- supprimer une clé sans l'annulation des tâches du PC que fait l'API (revokeAgentKey, routes/agentKeys.ts:23-32).\n\nPour un voleur de JWT, le gain reste faible : POST /api/agent-keys crée déjà une clé (routes/agentKeys.ts:10-15), et l'agent applique sa propre liste blanche (permissions.py:191-199). Sur la base actuelle, la suppression directe n'a pas d'effet sur le ciblage (colonnes target/claimed absentes). key_hash est un SHA-256 d'une clé de 32 octets aléatoires (services/agentKeys.ts:12-17) : le propriétaire qui le lit ne peut pas retrouver la clé.",
+   "evidence": "- catalog.json policies[1] : ALL TO authenticated, USING et CHECK auth.uid() = user_id (origine 20260703000000_agent_keys.sql:34).\n- Tests CI visés : schema_checks.sql:257-267 et 316.",
+   "recommendation": "- Appliquer lot1_fixes §4a (lot1_fixes.sql:180-190) : lecture et suppression seulement.\n- Puis lot1_verif §5 (lot1_verif.sql:146-151) : retrait de la suppression côté client.",
+   "fixed_by": "20261001090000_lot1_fixes.sql §4a + 20261001100000_lot1_verif.sql §5"
+  },
+  {
+   "id": "SEC-09",
+   "title": "agent_memory : policy FOR ALL et statut par défaut 'validated' — mémoire « validée » forgeable",
+   "category": "rls-policy",
+   "severity": "LOW",
+   "objects": [
+    "public.agent_memory",
+    "policy « Users manage own agent memory »"
+   ],
+   "justification": "Risque réel, limité au compte. Le client peut écrire directement des mémoires en status 'validated' (valeur par défaut héritée) avec un metadata.validated_by forgé, la colonne jsonb étant libre. node-api les traite alors comme validées par l'utilisateur (lib/memoryRanking.ts:25-30) et les injecte dans le contexte du planificateur (routes/agentMemory.ts:25-36).\n\nUn voleur de JWT obtient ainsi un canal durable pour glisser des consignes dans les plans de l'agent de la victime. Mais l'API autorise déjà l'utilisateur à valider une mémoire (agentMemory.ts:18-20) : le contournement porte sur la traçabilité (validated_by posé par l'API), pas sur un privilège supplémentaire.",
+   "evidence": "- catalog.json policies[2] : ALL TO authenticated (origine 20260704000000_agent_memory.sql:26).\n- drift.md, column_definition_mismatch : agent_memory.status a pour défaut 'validated' (attendu : 'proposed').\n- SQL : SELECT status, level, count(*) FROM public.agent_memory → validated|workflow|4.\n- Test CI visé : schema_checks.sql:320-332 (« validated_by forgé »).",
+   "recommendation": "- Appliquer lot1_verif §2 (lot1_verif.sql:76-91) : défaut 'proposed', client limité à la lecture et à la suppression.\n- Appliquer lot1_fixes §6 (lot1_fixes.sql:256-291) : CHECK sur status et level ; les 4 lignes existantes les respectent.",
+   "fixed_by": "20261001100000_lot1_verif.sql §2 (+ 20261001090000_lot1_fixes.sql §6)"
+  },
+  {
+   "id": "SEC-10",
+   "title": "knowledge_base : écritures client directes qui évitent les calculs du serveur",
+   "category": "rls-policy",
+   "severity": "LOW",
+   "objects": [
+    "public.knowledge_base",
+    "policies « Users can create knowledge », « Users can update own knowledge », « Users can delete own knowledge »"
+   ],
+   "justification": "Risque réel, limité aux données du compte. Les INSERT, UPDATE et DELETE directs (TO public, propriétaire) évitent ce que /api/knowledge calcule côté serveur : content_hash, version et embedding (lot1_verif.sql:134-135). Un client peut ainsi fausser sa propre recherche sémantique ou son historique de versions.\n\nToutes les lectures serveur filtrent par user_id (services/knowledge/supabaseStore.ts, routes/chat.ts:129-131) : aucun effet sur les autres comptes. Le front n'écrit plus directement dans cette table (frontend/src/lib/noDirectWrites.test.ts).",
+   "evidence": "- catalog.json policies[22..24] : INSERT, DELETE et UPDATE, roles ['public'] (origine 20260218041438:52-54).\n- Tests CI visés : schema_checks.sql:336-347.",
+   "recommendation": "Appliquer lot1_verif §4 (lot1_verif.sql:133-138).",
+   "fixed_by": "20261001100000_lot1_verif.sql §4"
+  },
+  {
+   "id": "SEC-11",
+   "title": "Insertions rattachées aux données d'un autre compte (chat_messages, knowledge_versions, user_table_data, user_migrations)",
+   "category": "rls-policy",
+   "severity": "LOW",
+   "objects": [
+    "public.chat_messages",
+    "public.knowledge_versions",
+    "public.user_table_data",
+    "public.user_migrations"
+   ],
+   "justification": "Risque réel mais pratiquement inexploitable. Les policies d'INSERT ne vérifient que user_id = auth.uid(), pas la propriété de la ligne parente, et les contrôles de clé étrangère passent outre la RLS.\n\nUn utilisateur peut donc insérer :\n- un message dans la conversation d'un autre ;\n- une version sur l'entrée de connaissance d'un autre ;\n- une ligne ou une migration dans le schéma dynamique d'un autre (l'UPDATE de user_table_data aussi).\n\nIl faut connaître l'UUID du parent, que la RLS ne divulgue pas. La victime ne voit jamais ces lignes : son SELECT est filtré par user_id, côté RLS comme côté node-api (chatHistory.ts:55). Effet réel : pollution du stockage, nettoyée par cascade quand le parent est supprimé.",
+   "evidence": "- catalog.json policies[15] (chat_messages INSERT, roles public), [27] (knowledge_versions INSERT), [46] et [47] (user_table_data INSERT/UPDATE), [37] (user_migrations INSERT).\n- catalog.json constraints : FK ON DELETE CASCADE sur conversation_id, entry_id, schema_id.\n- SQL : messages dont user_id diffère du propriétaire de la conversation → 0.\n- baseline.json row_counts : user_table_data, user_migrations et knowledge_versions = 0.",
+   "recommendation": "Appliquer lot1_fixes §4b (lot1_fixes.sql:192-246). C'est compatible avec le front : chatStore.ts:59 insère toujours dans la propre conversation de l'utilisateur.",
+   "fixed_by": "20261001090000_lot1_fixes.sql §4b"
+  },
+  {
+   "id": "SEC-12",
+   "title": "Droits de table excessifs pour anon et authenticated (TRUNCATE, TRIGGER, REFERENCES, MAINTAIN) et privilèges par défaut trop larges",
+   "category": "grants",
+   "severity": "LOW",
+   "objects": [
+    "18 tables public",
+    "default_privileges postgres/supabase_admin (schéma public)"
+   ],
+   "justification": "Risque théorique, défense en profondeur. anon et authenticated ont tous les droits sur les 18 tables, y compris TRUNCATE (non soumis à la RLS), TRIGGER, REFERENCES et MAINTAIN. Rien d'exploitable aujourd'hui : PostgREST n'expose ni TRUNCATE ni DDL, et aucune fonction appelable par ces rôles n'exécute de SQL dynamique.\n\nLes privilèges par défaut de postgres et supabase_admin donnent les mêmes droits sur toute future table et EXECUTE sur toute future fonction du schéma public. Une nouvelle fonction SECURITY DEFINER y sera donc appelable par anon via /rpc, sauf REVOKE explicite ; c'est exactement ce qui est arrivé à has_role. L'event trigger ensure_rls compense pour les tables (RLS activée à la création), pas pour les fonctions.\n\nAucune migration du dépôt ne retire ces droits : le schéma attendu les conserve.",
+   "evidence": "- catalog.json tables[*] du schéma public : acl anon=arwdDxtm/postgres, authenticated=arwdDxtm/postgres.\n- catalog.json default_privileges[0] (postgres, public, tables : anon/authenticated arwdDxtm), [1] (fonctions : anon/authenticated X), [4] et [5] (supabase_admin).\n- SQL : has_table_privilege('anon','public.agent_tasks','TRUNCATE') → t.\n- db/baseline/2026-10-02_expected/catalog.json table_grants : mêmes privilèges pour anon et authenticated sur public.",
+   "recommendation": "Nouvelle migration :\n- REVOKE TRUNCATE, TRIGGER, REFERENCES, MAINTAIN ON ALL TABLES IN SCHEMA public FROM anon, authenticated ;\n- même retrait dans ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public ;\n- ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC (sans IN SCHEMA, car le droit PUBLIC est global), puis IN SCHEMA public … FROM anon, authenticated, et accorder ensuite explicitement ce qui est nécessaire.\n\nLes défauts de supabase_admin ne sont probablement pas modifiables par postgres (non vérifié). Étudier aussi le retrait de tout droit de table à anon : aucun flux front connu n'en a besoin avant connexion, à confirmer.",
+   "fixed_by": "nouvelle migration"
+  },
+  {
+   "id": "SEC-13",
+   "title": "Extension vector installée dans le schéma public (118 fonctions exposées)",
+   "category": "extensions",
+   "severity": "LOW",
+   "objects": [
+    "extension vector 0.8.0 (schéma public)"
+   ],
+   "justification": "Risque théorique. pgvector est installée dans public : ses 118 fonctions y sont exécutables par PUBLIC, anon et authenticated, dans le schéma exposé par PostgREST. Aucun accès aux données : la plupart prennent des arguments vector sans nom, que PostgREST ne sait pas appeler, et aucune ne lit de table. Le linter Supabase signale ce cas (extension_in_public). Le problème réel tient à l'encombrement de l'API et à la résolution de noms dans un search_path qui commence par public.",
+   "evidence": "- catalog.json extensions[5] : {name: vector, schema: public, version: 0.8.0}.\n- baseline.json extension_functions_in_app_schemas=118.\n- ACL d'une fonction vector : =X/supabase_admin, anon=X, authenticated=X.\n- supabase/migrations/20260706150000_knowledge_embeddings.sql:5 : CREATE EXTENSION IF NOT EXISTS vector, sans WITH SCHEMA.",
+   "recommendation": "Nouvelle migration, à valider d'abord sur une copie avec le vrai pgvector : ALTER EXTENSION vector SET SCHEMA extensions. Vérifier avant que l'extension est déplaçable (à confirmer) et que le search_path de node-api inclut extensions : c'est le cas pour postgres (roles[5].config) et c'est prévu pour soulbah_api (SUPABASE_REPRISE.md:249).",
+   "fixed_by": "nouvelle migration"
+  },
+  {
+   "id": "SEC-14",
+   "title": "Comptes : aucun MFA, uniquement des sessions aal1, journal d'audit d'authentification vide en base",
+   "category": "auth-posture",
+   "severity": "LOW",
+   "objects": [
+    "auth.mfa_factors",
+    "auth.sessions",
+    "auth.audit_log_entries",
+    "auth.users"
+   ],
+   "justification": "Faiblesse de configuration, pas de faille directement exploitable.\n- Aucun facteur MFA n'existe ; les 45 sessions sont en aal1, ouvertes par mot de passe seul.\n- Aucune entrée d'audit d'authentification en base (peut-être désactivé au profit des journaux de la plateforme ; non vérifié).\n- L'inscription est publique côté front.\n- 2 comptes ne sont pas confirmés ; leurs jetons de confirmation sont hachés (56 caractères) et datent du 2026-06-12, donc a priori expirés.\n- raw_app_meta_data ne contient que provider/providers : aucune autorisation ne repose sur des métadonnées modifiables.\n\nL'impact d'un mot de passe volé reste élevé, puisqu'un compte pilote un agent sur un PC.",
+   "evidence": "- baseline.json managed_row_counts : auth.mfa_factors=0, auth.audit_log_entries=0, auth.identities=10.\n- SQL : authentication_method dans mfa_amr_claims → password|45.\n- auth.users : 10 comptes, 2 non confirmés, 0 banni, 0 anonyme, 0 SSO.\n- one_time_tokens → confirmation_token|2|2026-06-12.\n- Clés de raw_app_meta_data → provider, providers.\n- frontend/src/pages/Auth.tsx:30.",
+   "recommendation": "- Exiger le MFA (TOTP) au moins pour les comptes qui ont une clé agent.\n- Vérifier dans le tableau de bord, ces réglages n'étant pas en base : confirmation d'e-mail, protection contre les mots de passe divulgués, durée du JWT, inscriptions ouvertes ou non.\n- Supprimer les 2 comptes non confirmés s'ils ne servent pas.",
+   "fixed_by": "action manuelle"
+  },
+  {
+   "id": "SEC-15",
+   "title": "Deux tâches agent 'pending' de juillet seront servies dès que l'agent de leur compte se reconnectera",
+   "category": "operational",
+   "severity": "LOW",
+   "objects": [
+    "public.agent_tasks (2 lignes 'pending')"
+   ],
+   "justification": "Risque opérationnel réel. Deux tâches du compte e9aa7f26… attendent depuis juillet, sans approbation en attente. Dès qu'un agent de ce compte se reconnectera à un node-api compatible, elles lui seront servies, hors de leur contexte d'origine :\n- pilotage du téléphone (phone_open_app, phone_screenshot) ;\n- ouverture d'application, saisie de texte (type_text), capture d'écran.\n\nLa tâche marquée goal_meta (« planifiée par le serveur ») obtient la capture d'écran sans confirmation. Les actions souris/clavier restent confirmées sauf si allow_input_control est activé.",
+   "evidence": "- SQL (copie, READ ONLY) : SELECT … FROM public.agent_tasks WHERE status='pending' → 2 lignes :\n  - 8310013a… : goal, 2026-07-04, goal_meta=t ; étapes phone_list_devices, phone_open_app, wait, phone_screenshot ;\n  - dc9cc23e… : goal, 2026-07-06, goal_meta=f ; étapes open_app, wait, type_text, screenshot.\n- agentTaskSql.ts:123-131 : le poll sert les tâches 'pending'.",
+   "recommendation": "- Après la sauvegarde, annuler ces 2 tâches par POST /api/agent-tasks/:id/cancel, ou en SQL dans l'éditeur après accord.\n- Compléter SUPABASE_REPRISE §7, qui ne traite que les tâches in_progress.",
+   "fixed_by": "action manuelle"
+  },
+  {
+   "id": "SEC-16",
+   "title": "Pas de clé étrangère user_id → auth.users sur 9 tables : supprimer un compte n'efface pas ses données",
+   "category": "data-integrity",
+   "severity": "LOW",
+   "objects": [
+    "agent_tasks",
+    "chat_conversations",
+    "chat_messages",
+    "knowledge_base",
+    "user_schemas",
+    "user_table_data",
+    "user_migrations",
+    "knowledge_versions",
+    "agent_events"
+   ],
+   "justification": "Risque réel de conservation de données personnelles, non exploitable par l'API. Sans clé étrangère vers auth.users, la suppression d'un compte laisse ses conversations, connaissances, tâches et évènements orphelins. Aucun orphelin aujourd'hui.",
+   "evidence": "- catalog.json constraints : FK user_id → auth.users(id) présentes seulement sur agent_keys, agent_memory, applications, formations, modules_status, profiles, system_logs et user_roles.\n- hardening.sql:62-115.\n- SQL : 0 orphelin sur agent_tasks, chat_conversations, chat_messages, knowledge_base et agent_events.",
+   "recommendation": "Appliquer hardening §3 : clés étrangères ajoutées NOT VALID puis validées. La validation devrait réussir, puisqu'il n'y a aucun orphelin.",
+   "fixed_by": "20261001000000_hardening.sql §3"
+  },
+  {
+   "id": "SEC-17",
+   "title": "25 policies TO public (anon inclus) sur 7 tables",
+   "category": "rls-policy",
+   "severity": "INFO",
+   "objects": [
+    "agent_tasks",
+    "chat_conversations",
+    "chat_messages",
+    "knowledge_base",
+    "user_migrations",
+    "user_schemas",
+    "user_table_data"
+   ],
+   "justification": "Risque théorique. Ces policies s'appliquent à PUBLIC, donc à anon. Elles restent sûres parce que auth.uid() vaut NULL sans JWT utilisateur, et NULL = user_id n'est jamais vrai ; vérifié en anon : 0 profil, 0 tâche visibles. Mais la sécurité de ces tables repose sur cette seule propriété, et le schéma attendu garde TO public pour plusieurs d'entre elles.",
+   "evidence": "- SQL : SELECT count(*), count(DISTINCT tablename) FROM pg_policies WHERE schemaname='public' AND 'public'=ANY(roles) → 25 / 7.\n- catalog.json policies[3..6], [11..17], [22..25], [37..38], [41..48].\n- Catalogue attendu : chat_conversations, user_schemas, user_table_data encore TO public.",
+   "recommendation": "Nouvelle migration, optionnelle : recréer ces policies en TO authenticated.",
+   "fixed_by": "nouvelle migration (optionnelle)"
+  },
+  {
+   "id": "SEC-18",
+   "title": "Fonctions SECURITY DEFINER handle_new_user et rls_auto_enable : non appelables via l'API, mais EXECUTE accordé à PUBLIC ; ensure_rls absent du dépôt",
+   "category": "functions",
+   "severity": "INFO",
+   "objects": [
+    "public.handle_new_user()",
+    "public.rls_auto_enable()",
+    "event trigger ensure_rls"
+   ],
+   "justification": "Pas de risque exploitable. Le schéma public compte 3 fonctions SECURITY DEFINER ; has_role est traitée en SEC-07.\n\nhandle_new_user (trigger AFTER INSERT sur auth.users) et rls_auto_enable (fonction de l'event trigger ensure_rls) ne peuvent pas être appelées directement : une fonction de trigger ne s'exécute que comme trigger. Le droit EXECUTE accordé à PUBLIC, anon et authenticated est donc sans effet. search_path est fixé, et anon/authenticated n'ont pas CREATE sur public : pas de détournement possible.\n\nLes corps de has_role, handle_new_user et update_updated_at_column sont identiques au dépôt, aux espaces près : aucune altération.\n\nrls_auto_enable et ensure_rls ne viennent d'aucune migration ; ils ont été créés hors dépôt, probablement par l'option « RLS automatique » de Supabase. Ce filet de sécurité n'existe donc ni en CI ni dans une base reconstruite depuis les migrations, et il ne couvre que CREATE TABLE dans public.",
+   "evidence": "- catalog.json functions[107] handle_new_user : security_definer, search_path=public, returns trigger.\n- catalog.json functions[131] rls_auto_enable : security_definer, search_path=pg_catalog, returns event_trigger.\n- catalog.json event_triggers[0] ensure_rls ; trigger on_auth_user_created.\n- drift.md : extra_function et extra_grant.\n- SQL : has_schema_privilege('anon'|'authenticated','public','CREATE') → f/f.\n- Comparaison de functions.sql restauré et attendu, espaces ignorés : identiques.",
+   "recommendation": "- Nouvelle migration, optionnelle : REVOKE EXECUTE sur ces deux fonctions pour PUBLIC, anon et authenticated (hygiène).\n- Décider si ensure_rls doit être versionné dans le dépôt ou documenté comme réglage de plateforme.",
+   "fixed_by": "nouvelle migration (optionnelle)"
+  },
+  {
+   "id": "SEC-19",
+   "title": "Realtime : 4 tables diffusées, filtrées par la RLS sauf pour les évènements DELETE",
+   "category": "realtime",
+   "severity": "INFO",
+   "objects": [
+    "publication supabase_realtime : formations, system_logs, agent_tasks, agent_events"
+   ],
+   "justification": "Risque théorique. La publication diffuse 4 tables, conformément aux migrations, et l'interface s'abonne à chacune.\n- INSERT et UPDATE : Realtime applique les policies SELECT du destinataire, donc chacun ne reçoit que ses lignes.\n- DELETE : d'après la documentation Supabase (non testé), ces évènements ne sont pas filtrés par la RLS. Avec REPLICA IDENTITY DEFAULT, un abonné ne reçoit que la clé primaire (UUID) des lignes supprimées des autres comptes, sans aucune donnée métier.",
+   "evidence": "- catalog.json publications[0..3].\n- Migrations : 20260218031213:123, 20260218152103:41, 20260706130000:38, 20260706140000:5.\n- SQL : relreplident='d' pour les 18 tables.\n- Abonnements du front : ActivityFeed.tsx:72, AgentCockpit.tsx:89, AgentTasksPanel.tsx:165, Formations.tsx:123.",
+   "recommendation": "Aucune correction nécessaire. Ne pas passer ces tables en REPLICA IDENTITY FULL sans réévaluer ce point.",
+   "fixed_by": "action manuelle (aucune correction requise)"
+  },
+  {
+   "id": "SEC-20",
+   "title": "Surface hors du schéma public : rien d'exposé ; les schémas exposés par PostgREST ne sont pas vérifiables en base",
+   "category": "exposure",
+   "severity": "INFO",
+   "objects": [
+    "graphql/graphql_public",
+    "storage",
+    "vault",
+    "pgbouncer.get_auth",
+    "rôles gérés par Supabase"
+   ],
+   "justification": "Pas de risque relevé.\n- pg_graphql n'est pas installée (schémas présents, fonction de remplacement seulement) : /graphql/v1 n'expose rien.\n- Stockage vide (0 bucket, 0 objet), RLS active sans policy : accès refusé à anon et authenticated.\n- vault.secrets est vide d'après les statistiques ; les fonctions SECURITY DEFINER de vault et pgbouncer.get_auth ne sont exécutables que par des rôles d'administration.\n- Les rôles BYPASSRLS autres que postgres (service_role, supabase_admin superutilisateur, supabase_etl_admin, supabase_read_only_user) sont gérés par Supabase. anon et authenticated sont NOLOGIN, sans BYPASSRLS, avec un statement_timeout de 3 s et 8 s.\n\nLes schémas exposés par PostgREST sont un réglage du projet, absent de la base : non vérifiable ici (défaut Supabase : public et graphql_public). Le dépôt ne contient que project_id (supabase/config.toml). Les 5 anciennes edge functions peuvent encore être déployées : non vérifié.",
+   "evidence": "- catalog.json extensions : 6 extensions, pas de pg_graphql ; event_triggers[1] issue_graphql_placeholder.\n- baseline.json : storage.buckets=0, storage.objects=0.\n- catalog.json table_stats : vault.secrets n_live_tup=0 (statistique, non compté exactement).\n- catalog.json functions[60] pgbouncer.get_auth : acl supabase_admin et pgbouncer seulement, schéma pgbouncer sans ACL publique.\n- catalog.json roles[0], [1], [6], [7], [9], [11].",
+   "recommendation": "- Dans le tableau de bord, vérifier que les schémas exposés se limitent à public (et graphql_public), et que soulbah n'y sera jamais ajouté (LOT4_SCHEMA_V2.md:17-19).\n- Exécuter la §6 de SUPABASE_REPRISE (suppression des edge functions).",
+   "fixed_by": "action manuelle"
+  },
+  {
+   "id": "SEC-21",
+   "title": "Migrations de sécurité : aucune n'est appliquée (le PARTIAL de lot1_verif est un artefact) ; ce qu'elles corrigent et ce qu'elles laissent",
+   "category": "migration-state",
+   "severity": "INFO",
+   "objects": [
+    "20261001000000_hardening.sql",
+    "20261001090000_lot1_fixes.sql",
+    "20261001100000_lot1_verif.sql",
+    "scripts/sql/post_restore_checks.sql"
+   ],
+   "justification": "Constat de planification.\n\n**Pourquoi PARTIAL ne veut rien dire ici** : le seul élément « présent » de lot1_verif est l'absence de la policy « Users delete own agent keys ». lot1_verif la supprime (l.151), mais elle n'a jamais existé : c'est lot1_fixes, non appliquée, qui la crée (l.189-190). Or migration_state.py:80-81 compte une suppression comme réussie dès que l'objet est absent.\n\n**Ce que ces migrations corrigent** :\n- hardening : §1 (SEC-01, INSERT/UPDATE sur agent_tasks), §2 (CHECK status/control), §3 (SEC-16), §6 (table analysis_requests avec RLS propriétaire), §8 (SEC-02) ;\n- lot1_fixes : §3 (SEC-07, PUBLIC/anon et is_admin), §4a (SEC-08), §4b (SEC-11), §6 (CHECK agent_memory) ;\n- lot1_verif : §2 (SEC-09), §4 (SEC-10 et DELETE sur agent_tasks), §5 (DELETE sur agent_keys), §6 (has_role pour authenticated).\n\n**Ce qu'elles ne corrigent pas** : SEC-03 à SEC-06, SEC-12 à SEC-15, SEC-17 et SEC-20 ; SEC-18 seulement en partie.\n\n**Ordre obligatoire** : lot1_fixes §3 (is_admin) avant lot1_verif §6 (garde-fou l.162-175).\n\n**Compatibilité avec le front** (vérifiée par lecture du code) :\n- aucune écriture directe dans agent_tasks, agent_keys, agent_memory ou knowledge_base (noDirectWrites.test.ts) ;\n- profil lu seulement pour soi (Settings.tsx:26-31) ;\n- messages insérés dans sa propre conversation (chatStore.ts:59).\n\nLes données existantes respectent les CHECK ajoutés : statuts completed, failed et pending, control none ; agent_memory en validated/workflow.",
+   "evidence": "- migration_state.json : hardening NOT_APPLIED (0/84), lot1_fixes NOT_APPLIED (0/31), lot1_verif PARTIAL (1 présent, 12 absents sur 13).\n- SQL (copie, READ ONLY) : is_admin() absent, pg_trgm absent, CHECK agent_tasks_status_check/control_check = 0, colonnes target/claimed = 0, analysis_requests absente.\n- post_restore_checks.sql : sur la copie → ERROR S19 (code 1) ; sur soulbah_expected → code 0.\n- SQL agent_tasks : status completed|failed|pending, control none.",
+   "recommendation": "- Appliquer les trois migrations par supabase db push, dans l'ordre, après la sauvegarde et l'épinglage CI (SUPABASE_REPRISE §4-5).\n- Rejouer post_restore_checks.sql, qui doit alors passer.\n- Déployer le front du même commit.",
+   "fixed_by": "20261001000000_hardening.sql + 20261001090000_lot1_fixes.sql + 20261001100000_lot1_verif.sql"
+  }
+ ],
+ "rows": [
+  {
+   "table": "agent_events",
+   "lignes": 42,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (policy TO authenticated)",
+   "authenticated_lecture": "ses lignes (policies[0])",
+   "authenticated_ecriture": "aucune (node-api seul)",
+   "realtime": true,
+   "ecart": "aucun",
+   "corrige_par": "—"
+  },
+  {
+   "table": "agent_keys",
+   "lignes": 2,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses clés, key_hash compris",
+   "authenticated_ecriture": "INSERT/UPDATE/DELETE de ses clés (policies[1], FOR ALL)",
+   "realtime": false,
+   "ecart": "SEC-08, SEC-03",
+   "corrige_par": "lot1_fixes §4a + lot1_verif §5 ; rotation manuelle"
+  },
+  {
+   "table": "agent_memory",
+   "lignes": 4,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "INSERT/UPDATE/DELETE (policies[2], FOR ALL) ; status 'validated' par défaut",
+   "realtime": false,
+   "ecart": "SEC-09",
+   "corrige_par": "lot1_verif §2 (+ lot1_fixes §6)"
+  },
+  {
+   "table": "agent_tasks",
+   "lignes": 14,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (policies TO public, auth.uid() NULL ; vérifié : 0 ligne)",
+   "authenticated_lecture": "ses tâches (policies[6])",
+   "authenticated_ecriture": "INSERT/UPDATE/DELETE de ses tâches, payload libre (policies[3..5])",
+   "realtime": true,
+   "ecart": "SEC-01 (HIGH), SEC-15",
+   "corrige_par": "hardening §1 + lot1_verif §4 ; annulation manuelle des 2 tâches pending"
+  },
+  {
+   "table": "applications",
+   "lignes": 1,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "CRUD sur ses lignes (policies[7..10]) — utilisé par le front",
+   "realtime": false,
+   "ecart": "aucun",
+   "corrige_par": "—"
+  },
+  {
+   "table": "chat_conversations",
+   "lignes": 9,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public, auth.uid() NULL)",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "CRUD sur ses lignes (policies[11..14]) — utilisé par le front",
+   "realtime": false,
+   "ecart": "SEC-17 (INFO)",
+   "corrige_par": "—"
+  },
+  {
+   "table": "chat_messages",
+   "lignes": 32,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public)",
+   "authenticated_lecture": "ses messages",
+   "authenticated_ecriture": "INSERT sans contrôle de la conversation parente, DELETE ; pas d'UPDATE (policies[15..17])",
+   "realtime": false,
+   "ecart": "SEC-11",
+   "corrige_par": "lot1_fixes §4b"
+  },
+  {
+   "table": "formations",
+   "lignes": 12,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "CRUD sur ses lignes (policies[18..21]) — utilisé par le front",
+   "realtime": true,
+   "ecart": "aucun",
+   "corrige_par": "—"
+  },
+  {
+   "table": "knowledge_base",
+   "lignes": 1,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public)",
+   "authenticated_lecture": "ses entrées",
+   "authenticated_ecriture": "INSERT/UPDATE/DELETE directs (policies[22..24])",
+   "realtime": false,
+   "ecart": "SEC-10",
+   "corrige_par": "lot1_verif §4"
+  },
+  {
+   "table": "knowledge_domains",
+   "lignes": 15,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "toutes les lignes (USING true, référentiel, 15 domaines système)",
+   "authenticated_ecriture": "aucune",
+   "realtime": false,
+   "ecart": "aucun (voulu)",
+   "corrige_par": "—"
+  },
+  {
+   "table": "knowledge_versions",
+   "lignes": 0,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses versions",
+   "authenticated_ecriture": "INSERT sans contrôle de l'entrée parente, DELETE (policies[27..29])",
+   "realtime": false,
+   "ecart": "SEC-11",
+   "corrige_par": "lot1_fixes §4b"
+  },
+  {
+   "table": "modules_status",
+   "lignes": 0,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "FOR ALL sur ses lignes (policies[30..31]) — table dépréciée",
+   "realtime": false,
+   "ecart": "aucun",
+   "corrige_par": "—"
+  },
+  {
+   "table": "profiles",
+   "lignes": 10,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (vérifié : 0 ligne)",
+   "authenticated_lecture": "TOUS les profils (USING true, policies[34]) — vérifié : 10 lignes, 2 e-mails au total",
+   "authenticated_ecriture": "INSERT/UPDATE de son profil (policies[32..33])",
+   "realtime": false,
+   "ecart": "SEC-02 (MEDIUM)",
+   "corrige_par": "hardening §8"
+  },
+  {
+   "table": "system_logs",
+   "lignes": 59,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "INSERT de ses propres entrées (falsifiables par l'utilisateur lui-même, sans effet ailleurs)",
+   "realtime": true,
+   "ecart": "aucun",
+   "corrige_par": "—"
+  },
+  {
+   "table": "user_migrations",
+   "lignes": 0,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public)",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "INSERT sans contrôle du schéma parent (policies[37])",
+   "realtime": false,
+   "ecart": "SEC-11",
+   "corrige_par": "lot1_fixes §4b"
+  },
+  {
+   "table": "user_roles",
+   "lignes": 10,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès direct ; rôle de n'importe quel utilisateur révélé via /rpc/has_role",
+   "authenticated_lecture": "son rôle (policies[40])",
+   "authenticated_ecriture": "FOR ALL si has_role(auth.uid(),'admin') (policies[39]) — inerte, 0 admin",
+   "realtime": false,
+   "ecart": "SEC-07",
+   "corrige_par": "lot1_fixes §3 + lot1_verif §6"
+  },
+  {
+   "table": "user_schemas",
+   "lignes": 0,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public)",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "CRUD sur ses lignes (policies[41..44])",
+   "realtime": false,
+   "ecart": "SEC-17 (INFO)",
+   "corrige_par": "—"
+  },
+  {
+   "table": "user_table_data",
+   "lignes": 0,
+   "rls": "activée (non forcée)",
+   "anon": "aucun accès (TO public)",
+   "authenticated_lecture": "ses lignes",
+   "authenticated_ecriture": "CRUD ; INSERT/UPDATE sans contrôle du schéma parent (policies[45..48])",
+   "realtime": false,
+   "ecart": "SEC-11",
+   "corrige_par": "lot1_fixes §4b"
+  },
+  {
+   "table": "(toutes les 18 tables)",
+   "lignes": 211,
+   "rls": "activée partout, jamais forcée",
+   "anon": "droits de table arwdDxtm (RLS seule barrière)",
+   "authenticated_lecture": "—",
+   "authenticated_ecriture": "droits de table arwdDxtm, TRUNCATE compris (hors RLS, non exposé par PostgREST)",
+   "realtime": "4 tables publiées",
+   "ecart": "SEC-12",
+   "corrige_par": "nouvelle migration"
+  }
+ ]
+}

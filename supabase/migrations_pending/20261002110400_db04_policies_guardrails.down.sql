@@ -1,0 +1,21 @@
+-- Retour arrière de 20261002110400_db04_policies_guardrails.sql — historiques perdus : les exporter avant.
+DROP TABLE IF EXISTS soulbah.guardrail_events;
+DROP TABLE IF EXISTS soulbah.guardrail_assignments;
+DROP TABLE IF EXISTS soulbah.guardrail_versions;
+DROP TABLE IF EXISTS soulbah.guardrails;
+DROP TABLE IF EXISTS soulbah.autonomy_rules_history;
+DROP TABLE IF EXISTS soulbah.autonomy_rules;
+DROP TABLE IF EXISTS soulbah.policy_decisions;
+DROP TABLE IF EXISTS soulbah.policy_bindings;
+DROP TABLE IF EXISTS soulbah.policy_rules;
+ALTER TABLE soulbah.policies DROP CONSTRAINT IF EXISTS policies_current_version_fkey;
+DROP TABLE IF EXISTS soulbah.policy_versions;
+DROP TABLE IF EXISTS soulbah.policies;
+DROP TABLE IF EXISTS soulbah.resource_policies;
+DROP TABLE IF EXISTS soulbah.principal_roles;
+DROP TABLE IF EXISTS soulbah.role_permissions;
+DROP TABLE IF EXISTS soulbah.roles;
+DROP TABLE IF EXISTS soulbah.permission_definitions;
+DROP FUNCTION IF EXISTS soulbah.guardrails_track();
+DROP FUNCTION IF EXISTS soulbah.autonomy_rules_track();
+DROP FUNCTION IF EXISTS soulbah.policy_versions_freeze();

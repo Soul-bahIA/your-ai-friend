@@ -4,6 +4,7 @@
     python scripts/db/migrate.py plan     --target <cible> [--pending] [--catalog <catalog.json>]
     python scripts/db/migrate.py baseline --target <cible> --versions V1,V2,… --evidence <migration_state.json>
     python scripts/db/migrate.py apply    --target <cible> [--pending] [--until VERSION] [--dry-run]
+    python scripts/db/migrate.py rollback --target <cible> [--pending] --versions V1,V2,…   (fichiers .down.sql)
     python scripts/db/migrate.py verify   --target <cible> [--pending]
 
 Cibles : URL postgresql:// (voir db_connect.py ; « dev » = base locale de développement).
@@ -424,6 +425,70 @@ def cmd_apply(conn: Conn, a) -> int:
     return 1 if failed else 0
 
 
+def down_path(m: Migration) -> Path:
+    return m.path.with_name(m.path.name[:-4] + ".down.sql")
+
+
+def cmd_rollback(conn: Conn, a) -> int:
+    """Annule des migrations appliquées, de la plus récente à la plus ancienne, avec leur fichier .down.sql ;
+    chaque annulation est enregistrée (statut rolled_back + tentative) et la migration redevient applicable."""
+    migrations = discover(a.pending)
+    hist = history(conn)
+    if hist is None:
+        raise DbError("historique absent : rien à annuler")
+    wanted = [v.strip() for v in a.versions.split(",") if v.strip()]
+    if not wanted:
+        raise DbError("--versions requis (exécutées de la plus récente à la plus ancienne)")
+    by_version = {m.version: m for m in migrations}
+    todo: list[tuple[Migration, Path]] = []
+    for v in sorted(set(wanted), reverse=True):
+        m = by_version.get(v)
+        if m is None:
+            raise DbError(f"migration inconnue : {v}")
+        h = hist.get(v)
+        if h is None or h.get("status") not in ("applied", "baselined"):
+            raise DbError(f"{v} n'est pas appliquée (statut : {h.get('status') if h else 'absente'})")
+        info = analyse(m)
+        if info["rollback"] == "NO":
+            raise DbError(f"{v} {m.name} : rollback=NO — plan de reprise : {info['recovery'] or 'non documenté'}")
+        down = down_path(m)
+        if not down.exists():
+            raise DbError(f"{v} {m.name} : fichier de retour arrière absent ({down.name})")
+        todo.append((m, down))
+    guard_write(conn, a, plan_digest([{"version": m.version, "checksum": m.checksum} for m, _ in todo]))
+    for m, down in todo:
+        text = down.read_bytes().decode("utf-8")
+        if STUB_VECTOR:
+            from migration_state import stub_vector
+            text = stub_vector(text)
+        script = f"""SET client_min_messages = warning;
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtext({sql_lit(LOCK_KEY)}));
+SET LOCAL lock_timeout = {sql_lit(a.lock_timeout)};
+SET LOCAL statement_timeout = {sql_lit(a.statement_timeout)};
+{text}
+;
+UPDATE soulbah.schema_migrations SET status = 'rolled_back', executed_at = now(), applied_by = current_user,
+  notes = concat_ws(' | ', notes, 'annulée par ' || {sql_lit(down.name)}) WHERE version = {sql_lit(m.version)};
+INSERT INTO soulbah.schema_migration_runs (version, action, status, checksum, execution_ms, app_commit)
+VALUES ({sql_lit(m.version)}, 'rollback', 'succeeded', {sql_lit(m.checksum)},
+        (extract(epoch FROM clock_timestamp() - transaction_timestamp()) * 1000)::int, {sql_lit(git_commit())});
+COMMIT"""
+        t0 = time.monotonic()
+        try:
+            run_sql(conn, script, read_only=False, timeout_s=3600)
+        except DbError as e:
+            ms = int((time.monotonic() - t0) * 1000)
+            try:
+                record_run(conn, m, "rollback", "failed", ms, str(e))
+            except DbError:
+                pass
+            print(f"failed   {ms:>7} ms  {m.version}  {m.name}\n    {str(e).strip()[:800]}")
+            return 1
+        print(f"rolled_back {int((time.monotonic() - t0) * 1000):>5} ms  {m.version}  {m.name}")
+    return 0
+
+
 def cmd_verify(conn: Conn, a) -> int:
     migrations = discover(a.pending)
     hist = history(conn)
@@ -443,7 +508,7 @@ def cmd_verify(conn: Conn, a) -> int:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["status", "plan", "baseline", "apply", "verify"])
+    ap.add_argument("command", choices=["status", "plan", "baseline", "apply", "rollback", "verify"])
     ap.add_argument("--target", required=True)
     ap.add_argument("--pending", action="store_true", help="inclure supabase/migrations_pending/")
     ap.add_argument("--until", help="dernière version incluse")
@@ -467,7 +532,7 @@ def main(argv: list[str]) -> int:
         global STUB_VECTOR
         STUB_VECTOR = True
     return {"status": cmd_status, "plan": cmd_plan, "baseline": cmd_baseline, "apply": cmd_apply,
-            "verify": cmd_verify}[a.command](conn, a)
+            "rollback": cmd_rollback, "verify": cmd_verify}[a.command](conn, a)
 
 
 if __name__ == "__main__":

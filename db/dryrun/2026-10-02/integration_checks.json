@@ -1,0 +1,29 @@
+{
+ "target": "soulbah_scratch_full",
+ "started_at": "2026-10-02T17:04:52",
+ "steps": [
+  {
+   "step": "schema_checks",
+   "ok": true,
+   "output": "schema_checks : toutes les assertions sont passées\nNOTICE:  pgvector absent (stub) : vérifications vectorielles sautées\n"
+  },
+  {
+   "step": "post_restore_checks",
+   "ok": true,
+   "output": "NOTICE:  post_restore_checks : droits, RLS et policies conformes\n"
+  },
+  {
+   "step": "api_role_checks",
+   "ok": true,
+   "output": "api_role_checks : soulbah_api couvre les requêtes de node-api\n"
+  },
+  {
+   "step": "node-api vitest test/integration",
+   "ok": true,
+   "seconds": 60.1,
+   "summary": " Test Files  10 passed (10)\n      Tests  57 passed (57)",
+   "output_tail": "\n RUN  v5.0.3 C:/Users/SOUL-BAH/Desktop/Soulbah IA/backend/node-api\n\n\n Test Files  10 passed (10)\n      Tests  57 passed (57)\n   Start at  17:04:57\n   Duration  55.20s (tests 95%, transform 3%, import 1%)\n\n    Isolate  10 workers spawned · ~823ms startup each (spawn + environment, per file)\n             at least ~7.41s faster with isolate: false — reuses workers across files instead of one per file\n\n"
+  }
+ ],
+ "ok": true
+}

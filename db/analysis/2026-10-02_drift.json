@@ -1,0 +1,1916 @@
+{
+ "summary": "Interprétation du Schema Drift. Tout s'est fait en lecture seule : catalogues, drift.json (version de 13:05), migration_state.json (version de 13:01) et la copie locale soulbah_restored_copy, interrogée avec sqlq.py en transaction READ ONLY. Je n'ai écrit dans aucune base ni dans aucun fichier du dépôt ; seuls des fichiers temporaires ont été créés dans le scratchpad. Les artefacts ont été régénérés plusieurs fois pendant l'audit (12:38, 12:52, 12:58, 13:05). L'état final des migrations est le suivant : 16 APPLIED de février à juillet, hardening et lot1_fixes NOT_APPLIED, lot1_verif PARTIAL (en réalité un faux partiel, voir MIG-01) et les 12 migrations V2 NOT_APPLIED.\n\nSCHÉMA PUBLIC. 175 écarts (dont 6 sur les extensions), plus 3 écarts bruts de fonctions qui ont disparu après la normalisation des espaces, soit 178 lignes dans rows. 163 de ces écarts sont définis par les migrations en attente, qui les corrigent :\n- hardening seule : 82 ;\n- lot1_fixes seule : 29 ;\n- lot1_verif seule : 11 ;\n- partagés entre ces trois migrations : 3 ;\n- migrations V2 qui étendent des tables de public : 38 (v2_memory 18, v2_knowledge 9, v2_agents_runtimes 8, v2_tasks 3).\n\n15 écarts ne seront corrigés par aucune migration :\n- objets créés HORS migrations, à préserver : rls_auto_enable() avec l'event trigger ensure_rls et ses 5 droits EXECUTE, les 4 extensions de la plateforme (pg_stat_statements, pgcrypto, uuid-ossp, supabase_vault), et les corps CRLF des 3 fonctions de février, posés depuis un texte hors dépôt mais sémantiquement identiques ;\n- artefacts de la simulation de pgvector : l'extension vector (installée dans public par 20260706150000) et l'index HNSW idx_knowledge_base_embedding, présent et valide en production.\n\nAucune table, colonne, policy, aucun index ni trigger du schéma public n'a été créé hors migrations. Les 9 policies en trop viennent toutes de migrations appliquées.\n\nSCHÉMA SOULBAH. 756 objets absents, répartis sur les 12 migrations V2 : 19 tables, 2 vues et 10 fonctions, plus l'index HNSW des chunks, non vérifiable en local.\n\nDONNÉES. Aucune contrainte de hardening, lot1_fixes ou lot1_verif ne serait violée. Chacune est posée NOT VALID puis validée, et chaque VALIDATE réussira :\n- 0 orphelin et 0 user_id NULL sur les 9 tables qui reçoivent une FK ;\n- status d'agent_tasks : completed 6, failed 6, pending 2 ; control : none ×14 ;\n- agent_memory : 4 lignes validated / workflow, conformes ;\n- aucun NOT NULL ni UNIQUE n'est ajouté sur une table existante.\n\nUne seule exception, dans une migration V2 : la contrainte agent_memory_validated_requires_proof (v2_memory) sera violée par les 4 mémoires et restera NOT VALID, ce que la migration prévoit.\n\nLes interdits de SUPABASE_REPRISE.md et les « Jamais » de l'audit §12 sont respectés par les 15 migrations en attente. Nuance : le CHECK de statut d'agent_tasks n'existe pas en production ; hardening le crée avec les 5 statuts, que les données respectent.\n\nRISQUES PRINCIPAUX :\n- HIGH : policies client INSERT et UPDATE encore actives sur agent_tasks ;\n- HIGH : node-api actuel incompatible avec la base tant que lot1_fixes et V2 ne sont pas appliquées ;\n- MEDIUM : aucun historique de migrations, donc db push verrait 31 migrations et `supabase migration repair` est obligatoire ;\n- MEDIUM : profils lisibles par tout compte (2 display_name ont la forme d'une adresse e-mail) ;\n- MEDIUM : écriture client sur agent_keys et agent_memory ;\n- MEDIUM : le trigger updated_at d'agent_tasks prolonge le bail lors d'un ordre pause/stop ;\n- MEDIUM : 2 tâches pending de juillet seront distribuées au premier poll.",
+ "findings": [
+  {
+   "id": "DRIFT-PUB-01",
+   "title": "Policies client d'écriture encore actives sur agent_tasks (INSERT et UPDATE)",
+   "category": "securite-rls",
+   "severity": "HIGH",
+   "justification": "Les policies « Users can create tasks » (INSERT) et « Users can update own tasks » viennent de la migration Lovable de février et sont toujours en place. La seconde n'a qu'un USING, que PostgreSQL réutilise comme WITH CHECK. Avec le JWT de l'utilisateur, un client peut donc écrire directement le payload d'une tâche que l'agent local exécute, sans passer par les validations de node-api (catalogue d'étapes, approbations). L'impact touche des actions sur le PC, mais il faut le JWT de la victime (XSS ou vol de session) : HIGH et non CRITICAL. La policy DELETE ne touche que l'intégrité des propres données de l'utilisateur (LOW).",
+   "evidence": "catalog.json policies[] :\n- agent_tasks « Users can create tasks » : cmd INSERT, roles [public], with_check (auth.uid() = user_id) ;\n- « Users can update own tasks » : cmd UPDATE, roles [public], using (auth.uid() = user_id), with_check null.\nCréées par 20260218152103_e6ec4c1b-…sql:25-29. Motif documenté dans 20261001000000_hardening.sql:20-24.",
+   "recommendation": "1. Appliquer 20261001000000_hardening.sql (DROP POLICY l.25-26).\n2. Appliquer 20261001100000_lot1_verif.sql (l.143).\n3. Déployer le front du même commit (SUPABASE_REPRISE §5).\n4. Contrôler avec scripts/sql/post_restore_checks.sql (bloc 3).",
+   "objects": [
+    "public.agent_tasks.Users can create tasks",
+    "public.agent_tasks.Users can update own tasks",
+    "public.agent_tasks.Users can delete own tasks"
+   ],
+   "fixed_by": "20261001000000_hardening.sql ; 20261001100000_lot1_verif.sql (DELETE)"
+  },
+  {
+   "id": "DRIFT-PUB-02",
+   "title": "Le code actuel exige les migrations en attente : node-api échouera sur la base restaurée telle quelle",
+   "category": "compatibilite-code",
+   "severity": "HIGH",
+   "justification": "node-api est le seul client SQL : python-ia et l'agent n'ouvrent aucune connexion PostgreSQL (grep). Il dépend de trois choses absentes de la base :\n- agent_tasks.target_agent_key_id et claimed_by_key_id (lot1_fixes), dans le poll, le claim et la création de tâches ;\n- le schéma soulbah, que le scheduler V2 interroge à chaque tick ;\n- agent_keys.kind, capabilities et last_seen_at (v2_agents_runtimes), qu'il écrit.\nSur la base restaurée, ces requêtes échoueront avec « column does not exist » ou « relation does not exist » : la file de l'agent et toute la V2 sont indisponibles. Aucune perte de données, mais une fonction centrale est bloquée : HIGH.",
+   "evidence": "backend/node-api/src :\n- server.ts:41-57 (contrôle LOT1_COLUMNS : « poll/claim/création échoueront ») ;\n- lib/agentTaskSql.ts:71, 83, 86, 111, 117, 127 ;\n- routes/agentTasks.ts:440 ; routes/agentGoal.ts:58, 321 ;\n- v2/routes/runtime.ts:70-78 ;\n- 13 fichiers sous src/v2 citent soulbah.sessions|tasks|audit_logs|messages (grep) ;\n- routes/analyze.ts:24.\ndrift.json : ces colonnes et le schéma soulbah sont « missing ».",
+   "recommendation": "- Ne brancher ni node-api ni l'agent sur la base restaurée avant d'avoir appliqué hardening, lot1_fixes et lot1_verif.\n- Décider explicitement si les 12 migrations V2 partent dans la même fenêtre. Sinon, désactiver le scheduler V2 en attendant.",
+   "objects": [
+    "public.agent_tasks.target_agent_key_id",
+    "public.agent_tasks.claimed_by_key_id",
+    "public.agent_keys.kind/capabilities/last_seen_at",
+    "schéma soulbah",
+    "public.analysis_requests"
+   ],
+   "fixed_by": "20261001090000_lot1_fixes.sql ; 20261001120000→20261001121100 (V2) ; 20261001000000_hardening.sql"
+  },
+  {
+   "id": "DRIFT-PUB-03",
+   "title": "Aucun historique de migrations : supabase db push verrait les 31 migrations comme en attente",
+   "category": "migration-history",
+   "severity": "MEDIUM",
+   "justification": "Ni supabase_migrations.schema_migrations ni soulbah.schema_migrations n'existent : l'état n'est connu que par les objets présents.\n\nSans `migration repair`, un db push rejouerait d'abord 20260218031213 (CREATE TYPE, CREATE TABLE sans IF NOT EXISTS) et échouerait. Cet échec est sans danger (transaction annulée). Le vrai risque est le contournement improvisé : un repair qui marquerait hardening comme appliquée, ou l'exécution de RESTAURATION_BASE.sql, qui est interdite.\n\nPar ailleurs, la ligne « attendu : hardening, lot1_fixes et/ou lot1_verif » de SUPABASE_REPRISE §5 est datée. Après le repair des 16 migrations appliquées, le dry-run listera 15 migrations (3 + 12 V2), et db push les appliquera d'un seul tenant.",
+   "evidence": "- drift.json : migration_drift « historique » ;\n- baseline.json : migration_state {supabase_migrations: absent, soulbah_migrations: absent} ;\n- migration_state.json : 16 APPLIED, 14 NOT_APPLIED, 1 PARTIAL ;\n- 20260218031213_…sql:3,6 et 20260218041438_…sql:3 : aucune garde ;\n- docs/SUPABASE_REPRISE.md:94-104 et :109 ;\n- 12 migrations de juillet relues : les gardes (IF NOT EXISTS, « aucune policy sur la table ») rendent leur rejeu sans effet. Vérifié à la lecture, pas exécuté.",
+   "recommendation": "1. Avant tout push, lancer `supabase migration repair --status applied` pour les 16 versions APPLIED (au minimum les 4 de février). Jamais pour hardening, lot1_* ou V2.\n2. Vérifier avec `supabase migration list`.\n3. Mettre à jour la ligne « attendu » de SUPABASE_REPRISE §5.\n4. Décider si V2 part dans le même push.",
+   "objects": [
+    "supabase_migrations.schema_migrations (absente)",
+    "20260218031213, 20260218041438, 20260218121217, 20260218152103 (non rejouables)"
+   ],
+   "fixed_by": "aucune migration (procédure migration repair ; brouillon supabase/migrations_pending/20261002100000_db00_migration_history.sql en préparation, hors périmètre)"
+  },
+  {
+   "id": "DRIFT-PUB-04",
+   "title": "profiles lisibles par tout utilisateur authentifié (adresses e-mail exposées)",
+   "category": "securite-rls",
+   "severity": "MEDIUM",
+   "justification": "La policy Lovable « Users can view all profiles » (USING true) est toujours en place. Or handle_new_user remplit display_name avec l'e-mail quand aucun nom n'est fourni : 2 des 10 profils ont un display_name en forme d'adresse e-mail, lisible par n'importe quel compte. Ce sont des données personnelles, mais pas des secrets, et il faut un compte pour les lire : MEDIUM. L'ouverture des inscriptions n'a pas été vérifiée.",
+   "evidence": "- catalog.json policies[] : profiles « Users can view all profiles », cmd SELECT, using 'true', roles [authenticated] ;\n- 20260218031213_…sql:18 et :133-134 ;\n- requête sqlq sur la copie : SELECT count(*) FILTER (WHERE display_name LIKE '%@%') FROM public.profiles → 2 / 10 (aucune valeur affichée).",
+   "recommendation": "- Appliquer hardening (l.238-241).\n- En attendant, ne pas ouvrir d'inscription publique.\n- Le front reste compatible (Settings.tsx:28, useSystemStatus.ts:39).",
+   "objects": [
+    "public.profiles.Users can view all profiles",
+    "public.profiles.Users can view own profile"
+   ],
+   "fixed_by": "20261001000000_hardening.sql"
+  },
+  {
+   "id": "DRIFT-PUB-05",
+   "title": "Écriture client directe sur agent_keys et agent_memory (FOR ALL), défaut status = 'validated'",
+   "category": "securite-rls",
+   "severity": "MEDIUM",
+   "justification": "Deux policies FOR ALL permettent l'écriture directe depuis le client :\n- « Users manage own agent keys » : avec un JWT volé, on peut créer une clé agent au hash choisi (un identifiant persistant, car les clés n'expirent pas en V1), modifier allowed_dirs, ou supprimer une clé sans annuler les tâches du PC ;\n- « Users manage own agent memory » : on peut écrire des mémoires qui seront réinjectées dans la planification. Comme le défaut est status = 'validated', toute insertion qui omet le statut est validée d'office (contrat §9, audit C26).\nL'exploitation reste limitée aux données de la victime et exige son JWT : MEDIUM.",
+   "evidence": "- catalog.json policies[] : cmd ALL sur agent_keys et agent_memory ;\n- columns[] : public.agent_memory.status default 'validated'::text ;\n- 20260703000000_agent_keys.sql:30-39 ;\n- 20260704000000_agent_memory.sql:22-30 ;\n- 20260706120000_agent_memory_levels.sql:8 ;\n- node-api fixe le statut explicitement (routes/agentMemory.ts:56-70).",
+   "recommendation": "1. Appliquer lot1_fixes (l.184-190).\n2. Appliquer lot1_verif (défaut l.80, policies l.85-91, l.151).\n3. Contrôler avec post_restore_checks.sql (bloc 3).",
+   "objects": [
+    "public.agent_keys.Users manage own agent keys",
+    "public.agent_memory.Users manage own agent memory",
+    "public.agent_memory.status (défaut)"
+   ],
+   "fixed_by": "20261001090000_lot1_fixes.sql ; 20261001100000_lot1_verif.sql"
+  },
+  {
+   "id": "DRIFT-PUB-06",
+   "title": "Trigger updated_at d'agent_tasks : un ordre pause/stop ou le détachement d'une clé prolonge le bail",
+   "category": "integrite-fonctionnelle",
+   "severity": "MEDIUM",
+   "justification": "updated_at sert de bail au reaper, qui remet en file les tâches in_progress muettes. En production, le trigger appelle encore update_updated_at_column() : tout UPDATE, y compris POST /control, rafraîchit ce bail (T45). Il manque aussi le second trigger (UPDATE OF control) et les deux fonctions dédiées. Conséquence : une tâche dont l'agent est mort est reprise en retard. Aucune tâche n'est in_progress aujourd'hui, donc pas d'effet immédiat.",
+   "evidence": "- catalog.json triggers[] : public.agent_tasks.update_agent_tasks_updated_at → update_updated_at_column() ;\n- drift.json : trigger_definition_mismatch, missing_trigger, 2 missing_function ;\n- 20260218152103_…sql:35-38 ;\n- hardening.sql:206-233 ; lot1_fixes.sql:75-134 ; lot1_verif.sql:33-72 ;\n- sqlq : 0 tâche in_progress.",
+   "recommendation": "Appliquer hardening, lot1_fixes puis lot1_verif, dans cet ordre.",
+   "objects": [
+    "public.agent_tasks.update_agent_tasks_updated_at",
+    "public.agent_tasks.update_agent_tasks_updated_at_control",
+    "public.agent_tasks_set_updated_at()",
+    "public.agent_tasks_keep_updated_at_on_control()"
+   ],
+   "fixed_by": "20261001000000_hardening.sql + 20261001090000_lot1_fixes.sql + 20261001100000_lot1_verif.sql"
+  },
+  {
+   "id": "DATA-01",
+   "title": "Deux tâches agent pending de juillet 2026 seront distribuées au premier poll",
+   "category": "donnees",
+   "severity": "MEDIUM",
+   "justification": "Aucune contrainte n'est violée, mais 2 tâches « goal » sont pending depuis le 4–6 juillet. Le poll de node-api n'a pas de filtre d'âge. Après lot1_fixes, leur target_agent_key_id vaut NULL, ce qui les rend éligibles pour n'importe quel PC de l'utilisateur, et aucune n'attend d'approbation. Elles s'exécuteraient donc trois mois plus tard, sans nouvelle intention de l'utilisateur.",
+   "evidence": "Requêtes sqlq sur la copie :\n- regroupement par statut sur public.agent_tasks → pending/goal ×2, créées à partir du 2026-07-04 01:57 (+02), dernière mise à jour 2026-07-06 03:02 ;\n- count(*) FILTER ((payload #> '{goal_meta,awaiting_approval}') IS DISTINCT FROM 'true') → 2/2.\nlib/agentTaskSql.ts:21 et :121-130 (poll).",
+   "recommendation": "Avant de reconnecter un agent, annuler ces 2 tâches (/api/agent-tasks/:id/cancel) ou les faire confirmer par l'utilisateur.",
+   "objects": [
+    "public.agent_tasks (2 lignes pending)"
+   ],
+   "fixed_by": "aucune (décision d'exploitation)"
+  },
+  {
+   "id": "DATA-02",
+   "title": "Compatibilité des données : toutes les contraintes de hardening, lot1_fixes et lot1_verif valideront",
+   "category": "donnees",
+   "severity": "LOW",
+   "justification": "Chaque CHECK et chaque FK de ces trois migrations est posé NOT VALID, puis validé dans un bloc d'exception. Aucune ligne de la copie ne les viole : tous les VALIDATE réussiront. Aucun NOT NULL ni UNIQUE n'est ajouté sur une table existante ; les seuls concernent la table neuve analysis_requests. Une exception, dans une migration V2 : agent_memory_validated_requires_proof (v2_memory) sera violée par les 4 mémoires et restera NOT VALID, ce que la migration prévoit.",
+   "evidence": "Requêtes sqlq, en lecture seule, sur la copie (211 lignes) :\n- agent_tasks : status completed 6 / failed 6 / pending 2, control none ×14 (hardening.sql:32-59) ;\n- orphelins et user_id NULL : 0 sur agent_events (42), agent_tasks (14), chat_conversations (9), chat_messages (32), knowledge_base (1) et les 4 tables vides (hardening.sql:63-115) ;\n- agent_memory : 4 lignes validated / workflow (lot1_fixes.sql:261-291) ;\n- FK sur des colonnes neuves NULL (lot1_fixes.sql:38-59, v2_tasks.sql:123-129) ;\n- 0 doublon de key_hash ;\n- 4 mémoires validated sans metadata.validated_by (v2_memory.sql:41-60).",
+   "recommendation": "- Rien à corriger avant l'application.\n- Après l'application, lister les contraintes NOT VALID (SUPABASE_REPRISE §7) : seule agent_memory_validated_requires_proof doit y figurer.\n- Ne pas forcer son VALIDATE : soulbah.memories lit ces lignes comme « proposed ».",
+   "objects": [
+    "public.agent_tasks_status_check",
+    "public.agent_tasks_control_check",
+    "9 FK *_user_id_fkey",
+    "public.agent_memory_status_check",
+    "public.agent_memory_level_check",
+    "public.agent_memory_validated_requires_proof"
+   ],
+   "fixed_by": "sans objet"
+  },
+  {
+   "id": "DRIFT-PUB-07",
+   "title": "Objets créés hors migrations dans public : rls_auto_enable() et l'event trigger ensure_rls",
+   "category": "hors-migrations",
+   "severity": "LOW",
+   "justification": "Il s'agit d'une fonction SECURITY DEFINER et d'un event trigger (ddl_command_end) qui activent la RLS sur toute table créée dans public. Aucun fichier du dépôt ne les définit ; l'origine probable est une option de la plateforme Supabase ou une action manuelle, ce que le catalogue ne permet pas de vérifier.\n\nIls sont compatibles avec les migrations en attente, mais absents de la CI et du local : une future table de public créée sans policy serait ouverte en test et fermée en production. Les 5 droits EXECUTE sont sans effet, car une fonction event_trigger ne peut pas être appelée directement.",
+   "evidence": "- catalog.json event_triggers[] : {name: ensure_rls, event: ddl_command_end, function: rls_auto_enable(), tags: [CREATE TABLE, CREATE TABLE AS, SELECT INTO]} ;\n- functions.sql:37-67 ;\n- catalogue attendu : event_triggers = [] ;\n- grep « rls_auto_enable|ensure_rls » dans le dépôt : uniquement dans db/baseline.",
+   "recommendation": "- Préserver ; ne jamais faire de DROP à l'aveugle.\n- Décider entre l'adopter (migration idempotente qui la recrée à l'identique, pour la CI) et la documenter comme objet de la plateforme.",
+   "objects": [
+    "public.rls_auto_enable()",
+    "event trigger ensure_rls",
+    "5 droits EXECUTE sur rls_auto_enable()"
+   ],
+   "fixed_by": "aucune"
+  },
+  {
+   "id": "DRIFT-PUB-08",
+   "title": "has_role exécutable par PUBLIC, anon et authenticated ; post_restore_checks.sql échoue aujourd'hui",
+   "category": "securite-droits",
+   "severity": "LOW",
+   "justification": "has_role(uuid, app_role) est SECURITY DEFINER et répond pour n'importe quel utilisateur : c'est un oracle booléen « X est-il admin ? », appelable en RPC par anon. Il faut connaître l'UUID visé et il n'existe aucun admin aujourd'hui : LOW.\n\nLa révocation pour authenticated (G4, dans lot1_verif) est conditionnelle : elle est sautée avec un WARNING si une policy appelle encore has_role. La seule qui le fait est réécrite par lot1_fixes ; G4 s'appliquera donc si l'ordre est respecté. Les policies hors du schéma public n'ont pas été inventoriées (non vérifié).",
+   "evidence": "- catalog.json functions[] : acl de has_role contient =X, anon=X, authenticated=X ;\n- sqlq : pg_policies ~ has_role → 1 ligne (user_roles « Admins can manage roles ») ;\n- user_roles : 10 lignes, toutes « user » ;\n- post_restore_checks.sql:24-28 lève l'erreur S19 ;\n- node-api l'appelle en tant que propriétaire (routes/knowledge.ts:13) ;\n- lot1_fixes.sql:144-146 ; lot1_verif.sql:162-176.",
+   "recommendation": "1. Appliquer lot1_fixes puis lot1_verif.\n2. Chercher le WARNING « G4 non appliquée » dans la sortie.\n3. Repasser post_restore_checks.sql.",
+   "objects": [
+    "public.has_role(uuid, app_role)",
+    "public.user_roles.Admins can manage roles",
+    "public.is_admin()"
+   ],
+   "fixed_by": "20261001090000_lot1_fixes.sql ; 20261001100000_lot1_verif.sql"
+  },
+  {
+   "id": "DRIFT-PUB-09",
+   "title": "Policies d'insertion sans contrôle de la ligne parente (5 policy_definition_mismatch)",
+   "category": "securite-rls",
+   "severity": "LOW",
+   "justification": "Les policies de chat_messages, knowledge_versions, user_table_data (INSERT et UPDATE) et user_migrations ne vérifient que user_id = auth.uid(). Un utilisateur qui connaît l'UUID (v4) de la conversation, de l'entrée ou du schéma d'un autre peut donc y rattacher une ligne. knowledge_versions et les tables user_* sont vides ; chat_messages compte 32 lignes. La sixième divergence (« Admins can manage roles ») a la même sémantique.",
+   "evidence": "- catalogues restauré et attendu : with_check réel '(auth.uid() = user_id)', attendu avec un EXISTS sur la ligne parente ; rôles de chat_messages : [public] au lieu de [authenticated] ;\n- anciennes définitions : 20260218041438_…sql:33 ; 20260706000000_knowledge_base_pro.sql:68-69 ; 20260218121217_…sql:47-48,53 ;\n- nouvelles définitions : lot1_fixes.sql:195-246 ;\n- frontend/src/lib/chatStore.ts:59 reste compatible.",
+   "recommendation": "Appliquer lot1_fixes.",
+   "objects": [
+    "public.chat_messages.Users can create messages",
+    "public.knowledge_versions.Users create own knowledge versions",
+    "public.user_table_data.Users can insert own data",
+    "public.user_table_data.Users can update own data",
+    "public.user_migrations.Users can create migrations"
+   ],
+   "fixed_by": "20261001090000_lot1_fixes.sql"
+  },
+  {
+   "id": "DRIFT-PUB-10",
+   "title": "FK user_id → auth.users absentes sur 9 tables : pas de cascade à la suppression d'un compte",
+   "category": "integrite",
+   "severity": "LOW",
+   "justification": "Supprimer un compte laisserait aujourd'hui ses lignes en place, d'où un effacement incomplet. Aucun orphelin n'existe : la validation réussira.",
+   "evidence": "- drift.json : missing_foreign_key ×9 ;\n- sqlq : 0 orphelin et 0 NULL ;\n- les 8 autres tables ont déjà une FK validée (catalog.json constraints) ;\n- hardening.sql:63-115.",
+   "recommendation": "- Appliquer hardening.\n- Vérifier ensuite qu'aucune FK ne reste NOT VALID (SUPABASE_REPRISE §7).",
+   "objects": [
+    "agent_events",
+    "agent_tasks",
+    "chat_conversations",
+    "chat_messages",
+    "knowledge_base",
+    "knowledge_versions",
+    "user_migrations",
+    "user_schemas",
+    "user_table_data"
+   ],
+   "fixed_by": "20261001000000_hardening.sql"
+  },
+  {
+   "id": "MIG-01",
+   "title": "lot1_verif « PARTIAL » est un faux partiel, et dépend strictement de lot1_fixes",
+   "category": "migration-order",
+   "severity": "LOW",
+   "justification": "Le seul changement « présent » de lot1_verif est la suppression de la policy « Users delete own agent keys ». Or cette policy est créée par lot1_fixes, qui n'a jamais été appliquée : elle n'a donc jamais existé ici. lot1_verif est en réalité NOT_APPLIED.\n\nAutre point : sa fonction agent_tasks_set_updated_at lit NEW.target_agent_key_id et NEW.claimed_by_key_id, deux colonnes créées par lot1_fixes. Appliquée seule, elle ferait échouer toute UPDATE d'agent_tasks.",
+   "evidence": "- migration_state.json : lot1_verif changes 13, present 1, absent 12 ;\n- lot1_verif.sql:151 (suppression de la policy) ; lot1_fixes.sql:189-190 (sa création) ;\n- catalog.json : policy absente ;\n- lot1_verif.sql:52-63 contre lot1_fixes.sql:29-31.\nC'est une déduction : migration_state.json ne liste pas les objets « présents ».",
+   "recommendation": "- Traiter lot1_verif comme NOT_APPLIED.\n- Appliquer hardening → lot1_fixes → lot1_verif, chacune en entier.",
+   "objects": [
+    "20261001100000_lot1_verif.sql",
+    "public.agent_keys.Users delete own agent keys"
+   ],
+   "fixed_by": "sans objet (procédure)"
+  },
+  {
+   "id": "DRIFT-PUB-11",
+   "title": "Table analysis_requests absente ; ses droits viendront des privilèges par défaut",
+   "category": "compatibilite-code",
+   "severity": "LOW",
+   "justification": "POST /api/analyze écrit dans analysis_requests : la route échoue aujourd'hui, mais le frontend ne l'appelle pas. Les 32 droits attendus ne sont pas accordés par la migration elle-même : ils viennent des privilèges par défaut du rôle postgres dans public. Ils n'apparaîtront que si la migration est exécutée en tant que postgres.",
+   "evidence": "- drift.json : 49 écarts liés ;\n- routes/analyze.ts:24-54 ;\n- grep « /analyze » dans frontend/src : 0 ;\n- catalog.json default_privileges (postgres, public, r) ;\n- hardening.sql:155-203.",
+   "recommendation": "- Appliquer hardening en tant que postgres.\n- Vérifier ensuite les droits de la table.",
+   "objects": [
+    "public.analysis_requests"
+   ],
+   "fixed_by": "20261001000000_hardening.sql"
+  },
+  {
+   "id": "DRIFT-PUB-12",
+   "title": "Extensions : 4 extensions de la plateforme hors migrations ; vector et son index HNSW sont des artefacts",
+   "category": "hors-migrations",
+   "severity": "INFO",
+   "justification": "- pg_stat_statements, pgcrypto, uuid-ossp et supabase_vault sont fournies par Supabase : à préserver.\n- vector 0.8.0 est créée par une migration du dépôt, mais dans public (aucun WITH SCHEMA). La déplacer changerait la résolution du type vector, que v2_knowledge et node-api utilisent sans qualification.\n- L'index HNSW existe en production (valid, ready).\n- pg_trgm manque ; lot1_verif la crée dans le schéma extensions (version 1.6 disponible).",
+   "evidence": "- catalog.json extensions[] et available_extensions ;\n- catalog.json indexes[] : idx_knowledge_base_embedding ;\n- 20260706150000_knowledge_embeddings.sql:5,10-11 ;\n- restore_test.json : known_differences ;\n- .github/workflows/ci.yml:167 : image pgvector/pgvector:pg17 (même version majeure que la production), pgvector non épinglé.",
+   "recommendation": "- Préserver ces extensions ; ne pas déplacer vector.\n- Épingler l'image CI sur PG17 + pgvector 0.8.0.",
+   "objects": [
+    "pg_stat_statements",
+    "pgcrypto",
+    "uuid-ossp",
+    "supabase_vault",
+    "vector",
+    "pg_trgm",
+    "public.knowledge_base.idx_knowledge_base_embedding"
+   ],
+   "fixed_by": "aucune (pg_trgm : 20261001100000_lot1_verif.sql)"
+  },
+  {
+   "id": "DRIFT-PUB-13",
+   "title": "Fonctions de février : texte posé hors dépôt (CRLF, mise en page), sémantique identique",
+   "category": "hors-migrations",
+   "severity": "INFO",
+   "justification": "En production, handle_new_user, has_role et update_updated_at_column ont des sources avec des fins de ligne CRLF. Les deux premières ont aussi une autre mise en page. Elles ont donc été posées depuis un texte qui n'est pas le fichier du dépôt (Lovable ou éditeur SQL). Après normalisation, les empreintes sont égales.\n\nAucune migration en attente ne redéfinit ces corps. Les artefacts ont été régénérés pendant l'audit : 3 écarts à 12:38, 2 à 12:52, 0 à 12:58.",
+   "evidence": "Sur la copie, md5(prosrc), brut puis après CRLF→LF :\n- handle_new_user : 608abd42… puis 018be5d5… ; attendu 26c573e5… ;\n- has_role : 73a7fa71… puis 6b9bca1c… ; attendu ef87d9f5… ;\n- update_updated_at_column : 749d6e72… puis 301a8849… = attendu.\nAutres preuves :\n- catalog.json : source_has_crlf = true ;\n- db_catalog.py:156-158 (normalisation) ;\n- le fichier de la migration n'a jamais été modifié depuis le commit bd3ba19.",
+   "recommendation": "- Préserver tel quel ; ne pas réécrire pour l'esthétique.\n- handle_new_user est appelée par le trigger on_auth_user_created.",
+   "objects": [
+    "public.handle_new_user()",
+    "public.has_role(uuid, app_role)",
+    "public.update_updated_at_column()"
+   ],
+   "fixed_by": "aucune"
+  },
+  {
+   "id": "DRIFT-PUB-14",
+   "title": "Index : 3 en trop et 22 manquants dans public, sans enjeu de performance aux volumes actuels",
+   "category": "performance",
+   "severity": "INFO",
+   "justification": "Les 3 index en trop viennent de migrations appliquées : un doublon de l'index UNIQUE sur key_hash, un B-tree mal nommé et un index (user_id, status) remplacé par un sur-ensemble.\n\nLes 22 index manquants sont créés par :\n- hardening : 13 ;\n- lot1_fixes : 3 ;\n- lot1_verif : 1 ;\n- V2 : 5.\nLa plus grosse table compte 59 lignes, et aucun index unique n'est ajouté sur une table existante.",
+   "evidence": "- drift.json : extra_index et missing_index ;\n- catalog.json indexes[] : idx_agent_tasks_user_status, 5 parcours ;\n- baseline.json row_counts.",
+   "recommendation": "Rien de spécifique : ces index suivent les migrations.",
+   "objects": [
+    "public.agent_keys.idx_agent_keys_hash",
+    "public.agent_memory.idx_agent_memory_goal_trgm",
+    "public.agent_tasks.idx_agent_tasks_user_status"
+   ],
+   "fixed_by": "20261001000000_hardening.sql ; 20261001090000_lot1_fixes.sql ; 20261001100000_lot1_verif.sql ; V2"
+  },
+  {
+   "id": "MIG-02",
+   "title": "Interdits de SUPABASE_REPRISE.md : aucune migration en attente ne les enfreint",
+   "category": "conformite",
+   "severity": "INFO",
+   "justification": "Les 4 interdits de SUPABASE_REPRISE.md (l.8-10) et les 2 autres « Jamais » de l'audit §12 sont respectés par les 15 migrations en attente :\n1. Exécuter RESTAURATION_BASE.sql : aucune migration ne l'exécute ni ne l'inclut.\n2. Modifier le CHECK de statut d'agent_tasks : jamais modifié. Nuance : ce CHECK n'existe pas en production ; hardening le crée avec les 5 statuts, que les données respectent.\n3. FK sur agent_events.task_id : aucune ; seule la FK sur agent_events.user_id est ajoutée.\n4. Supprimer modules_status : non ; elle reçoit seulement un COMMENT.\n5. Renommer agent_tasks ou agent_events : aucun renommage ; le seul RENAME porte sur un index.\n6. Changer la dimension de l'embedding : non modifiée.\n\nOpérations destructives présentes, sans perte de données : DROP POLICY, DROP INDEX (2), DROP puis CREATE TRIGGER, REVOKE, SET DEFAULT.",
+   "evidence": "grep sur les 15 migrations en attente :\n- DROP TABLE, TRUNCATE ou DELETE FROM sur public : aucun ;\n- RENAME : hardening.sql:136 seulement ;\n- agent_tasks_status_check : hardening.sql:33-52 seulement ;\n- FK sur agent_events.task_id : uniquement des commentaires (hardening.sql:112) ;\n- modules_status : lot1_fixes.sql:252 (COMMENT) ;\n- ALTER COLUMN embedding : 0 ;\n- RESTAURATION : 0.\nLe brouillon supabase/migrations_pending/20261002100000_db00 ne touche que le schéma soulbah.",
+   "recommendation": "Garder ce grep comme garde-fou avant chaque application.",
+   "objects": [
+    "supabase/migrations/20261001*.sql"
+   ],
+   "fixed_by": "sans objet"
+  },
+  {
+   "id": "SOULBAH-01",
+   "title": "Schéma soulbah : 756 objets absents, tous issus des 12 migrations V2 non appliquées",
+   "category": "schema-v2",
+   "severity": "INFO",
+   "justification": "L'écart est attendu (V2 jamais poussée) et additif. Détail par migration, en objets soulbah (les objets de public sont détaillés dans rows) :\n- v2_schema : 13 ;\n- v2_users_sessions : 64 ;\n- v2_agents_runtimes : 61 (+ 8 dans public) ;\n- v2_tasks : 74 (+ 3 dans public) ;\n- v2_task_dependencies : 24 ;\n- v2_messages : 37 ;\n- v2_actions_tool_calls : 90 ;\n- v2_knowledge : 60 (+ 9 dans public, + l'index HNSW idx_knowledge_chunks_hnsw_te3s, non vérifiable en local) ;\n- v2_memory : 30 (+ 18 dans public) ;\n- v2_skills_evaluations_checkpoints : 101 ;\n- v2_artifacts_recordings_permissions_leases : 136 ;\n- v2_audit : 66.\nTotal : 19 tables et 2 vues. LOT4_SCHEMA_V2.md:41 annonce 20 tables. Le schéma reste fermé à anon et authenticated.",
+   "evidence": "- migration_state.json : absent_items par migration ;\n- drift.json : 756 écarts soulbah ;\n- soulbah_expected, pg_class : 19 tables (r) et 2 vues (v) ;\n- has_schema_privilege('anon' / 'authenticated', 'soulbah', 'USAGE') → f / f.",
+   "recommendation": "- Appliquer après hardening et lot1, et après un job CI db vert avec le vrai pgvector.\n- Ne pas exposer soulbah à PostgREST.\n- Rejouer soulbah_api_grants.sql ensuite.",
+   "objects": [
+    "schéma soulbah (19 tables, 2 vues, 10 fonctions)"
+   ],
+   "fixed_by": "20261001120000_v2_schema.sql → 20261001121100_v2_audit.sql"
+  },
+  {
+   "id": "TOOL-01",
+   "title": "Écarts que l'outil de drift ne compare pas ; artefacts régénérés pendant l'audit",
+   "category": "outillage",
+   "severity": "INFO",
+   "justification": "catalog_diff.py ne compare pas :\n- les commentaires : celui de modules_status et ceux des colonnes LOT 1, posés par lot1_fixes ;\n- les event triggers ;\n- les privilèges par défaut ;\n- les rôles.\nConséquences :\n- le rôle soulbah_api n'existe pas, donc soulbah_api_grants.sql échouerait aujourd'hui ;\n- les policies hors public n'ont pas été inventoriées (non vérifié) ;\n- la copie locale tourne en PG 18.1 contre 17.6 en production, sans incidence sur les contrôles de données.\nLes artefacts ont été régénérés plusieurs fois pendant l'audit. rows reflète drift.json de 13:05, plus les 3 écarts bruts de fonctions.",
+   "evidence": "- scripts/db/catalog_diff.py, SPECS ;\n- catalog.json roles[] : aucun soulbah_api ;\n- commentaires présents seulement dans le catalogue attendu ;\n- scripts/sql/soulbah_api_grants.sql:38,60 ;\n- horodatages des fichiers db/baseline ;\n- SELECT version() sur la copie → 18.1.",
+   "recommendation": "- Ajouter commentaires, event triggers et rôles au diff.\n- Exécuter soulbah_api_grants.sql seulement après hardening et V2.",
+   "objects": [
+    "public.modules_status (commentaire)",
+    "rôle soulbah_api",
+    "event triggers"
+   ],
+   "fixed_by": "commentaires : 20261001090000_lot1_fixes.sql ; reste : aucune"
+  }
+ ],
+ "rows": [
+  {
+   "key": "public.analysis_requests",
+   "drift": "missing_table",
+   "explanation": "Table des requêtes POST /api/analyze (node-api routes/analyze.ts:24-54) absente.",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — route node-api en échec ; non appelée par frontend/src (grep)"
+  },
+  {
+   "key": "public.agent_keys.capabilities",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_keys (kind, scopes, expires_at, capabilities, last_seen_at).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:9-14",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "MEDIUM — écrite par v2/routes/runtime.ts:78 : enregistrement d'un runtime V2 en échec"
+  },
+  {
+   "key": "public.agent_keys.expires_at",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_keys (kind, scopes, expires_at, capabilities, last_seen_at).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:9-14",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "LOW — non lue par le code actuel ; les clés n'expirent pas en V1 (S20)"
+  },
+  {
+   "key": "public.agent_keys.kind",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_keys (kind, scopes, expires_at, capabilities, last_seen_at).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:9-14",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "MEDIUM — écrite par v2/routes/runtime.ts:78 : enregistrement d'un runtime V2 en échec"
+  },
+  {
+   "key": "public.agent_keys.last_seen_at",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_keys (kind, scopes, expires_at, capabilities, last_seen_at).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:9-14",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "MEDIUM — écrite par v2/routes/runtime.ts:78 : enregistrement d'un runtime V2 en échec"
+  },
+  {
+   "key": "public.agent_keys.scopes",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_keys (kind, scopes, expires_at, capabilities, last_seen_at).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:9-14",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "LOW — non lue par le code actuel"
+  },
+  {
+   "key": "public.agent_memory.confidence",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.evidence_ids",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.expires_at",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.is_simulation",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.scope",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.session_id",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.source_task_id",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.status",
+   "drift": "column_definition_mismatch",
+   "explanation": "Défaut de agent_memory.status = 'validated' au lieu de 'proposed' (contrat §9).",
+   "origin_migration": "défaut posé par 20260706120000_agent_memory_levels.sql:8 ; corrigé par 20261001100000_lot1_verif.sql:80",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun (seul le défaut change ; les 4 lignes restent 'validated')",
+   "risk": "LOW — node-api fixe le statut explicitement (agentMemory.ts:57-69) ; MEDIUM combiné à la policy client FOR ALL"
+  },
+  {
+   "key": "public.agent_memory.validated_at",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_memory.validated_by",
+   "drift": "missing_column",
+   "explanation": "Extension V2 d'agent_memory (portée, preuves, validation, expiration, simulation).",
+   "origin_migration": "20261001120800_v2_memory.sql:6-15",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — non utilisée par le code actuel (memoryRanking.ts lit metadata.validated_by)"
+  },
+  {
+   "key": "public.agent_tasks.claimed_by_key_id",
+   "drift": "missing_column",
+   "explanation": "Ciblage/claim d'un PC, lu et écrit par node-api (agentTaskSql.ts:71-127, agentTasks.ts:440, agentGoal.ts:58).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:29-31",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "HIGH — sans elle, poll, claim et création de tâches agent échouent (server.ts:41-57 le signale au démarrage)"
+  },
+  {
+   "key": "public.agent_tasks.target_agent_key_id",
+   "drift": "missing_column",
+   "explanation": "Ciblage/claim d'un PC, lu et écrit par node-api (agentTaskSql.ts:71-127, agentTasks.ts:440, agentGoal.ts:58).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:29-31",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "HIGH — sans elle, poll, claim et création de tâches agent échouent (server.ts:41-57 le signale au démarrage)"
+  },
+  {
+   "key": "public.agent_tasks.v2_task_id",
+   "drift": "missing_column",
+   "explanation": "Pont V1→V2 vers soulbah.tasks ; aucune requête SQL de node-api ne l'utilise aujourd'hui (grep).",
+   "origin_migration": "20261001120300_v2_tasks.sql:122",
+   "fixed_by": "20261001120300_v2_tasks.sql",
+   "data_conflict": "aucun (colonne neuve : NULL ou valeur par défaut)",
+   "risk": "INFO — préparatoire (LOT 8)"
+  },
+  {
+   "key": "public.analysis_requests.created_at",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.id",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.input_text",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.result",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.status",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.user_id",
+   "drift": "missing_column",
+   "explanation": "Colonne de la table analysis_requests (absente).",
+   "origin_migration": "20261001000000_hardening.sql:156-163",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.knowledge_base.doc_status",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL, nullable sans défaut)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.knowledge_base.embedding_model",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.knowledge_base.ingest_status",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.knowledge_base.last_written_at",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.knowledge_base.mime",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.knowledge_base.source_uri",
+   "drift": "missing_column",
+   "explanation": "Extension V2 de knowledge_base (source, ingestion, statut documentaire).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:12-18",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO — non utilisée par node-api (grep)"
+  },
+  {
+   "key": "public.agent_events.agent_events_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK agent_events.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : 0 orphelin et 0 user_id NULL sur la copie (requête sqlq) ; le VALIDATE réussira",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.agent_keys.agent_keys_capabilities_object",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK capabilities est un objet JSON.",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:27-31 NOT VALID ; VALIDATE l.33-43",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun : défaut '{}'",
+   "risk": "INFO — dépend de v2_schema (is_json_object)"
+  },
+  {
+   "key": "public.agent_keys.agent_keys_kind_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK kind ∈ (agent, runtime).",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:17-21 NOT VALID ; VALIDATE l.33-43",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun : défaut 'agent'",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_keys.agent_keys_scopes_array",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK scopes est un tableau JSON.",
+   "origin_migration": "20261001120200_v2_agents_runtimes.sql:22-26 NOT VALID ; VALIDATE l.33-43",
+   "fixed_by": "20261001120200_v2_agents_runtimes.sql",
+   "data_conflict": "aucun : défaut '[]'",
+   "risk": "INFO — dépend de v2_schema (is_json_array)"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_confidence_range",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK 0 ≤ confidence ≤ 1.",
+   "origin_migration": "20261001120800_v2_memory.sql:31-34 NOT VALID ; VALIDATE l.49-60",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun : défaut 0.5",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_evidence_array",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK evidence_ids est un tableau JSON (soulbah.is_json_array).",
+   "origin_migration": "20261001120800_v2_memory.sql:35-38 NOT VALID ; VALIDATE l.49-60",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun : défaut '[]'",
+   "risk": "INFO — dépend de 20261001120000_v2_schema.sql"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_level_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK level ∈ les 8 niveaux de node-api.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:271-278 NOT VALID ; VALIDATE l.281-291",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun : 4 lignes, toutes level = 'workflow'",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_scope_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK scope ∈ (session, project, user, global).",
+   "origin_migration": "20261001120800_v2_memory.sql:27-30 NOT VALID ; VALIDATE l.49-60",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun : colonne neuve au défaut 'user'",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_session_fk",
+   "drift": "missing_foreign_key",
+   "explanation": "FK agent_memory.session_id → soulbah.sessions ON DELETE SET NULL (posée validée).",
+   "origin_migration": "20261001120800_v2_memory.sql:17-26",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_source_task_fk",
+   "drift": "missing_foreign_key",
+   "explanation": "FK agent_memory.source_task_id → soulbah.tasks ON DELETE SET NULL (posée validée).",
+   "origin_migration": "20261001120800_v2_memory.sql:17-26",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_status_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK status ∈ (proposed, validated, rejected).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:261-269 NOT VALID ; VALIDATE l.281-291",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun : 4 lignes, toutes status = 'validated'",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.agent_memory.agent_memory_validated_requires_proof",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK : status = 'validated' exige validated_by, metadata.validated_by ou une preuve.",
+   "origin_migration": "20261001120800_v2_memory.sql:41-47 NOT VALID ; VALIDATE l.49-60",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "OUI : les 4 lignes (validated, sans metadata.validated_by) la violent → VALIDATE en échec (NOTICE), la contrainte reste NOT VALID, comme prévu par la migration",
+   "risk": "LOW — toute UPDATE future de ces 4 lignes qui garde 'validated' sans preuve sera refusée ; les chemins de node-api (agentMemory.ts:150-160) posent validated_by ou changent le statut"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_claimed_by_key_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK vers agent_keys(id) ON DELETE SET NULL.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:38-59 (NOT VALID l.48-50, VALIDATE l.53-57)",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "LOW — suit les colonnes LOT 1"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_control_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK control ∈ (none, pause, stop).",
+   "origin_migration": "20261001000000_hardening.sql:40-45 NOT VALID ; VALIDATE l.49-59",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : control = 'none' ×14 ; le VALIDATE réussira",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_status_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK status ∈ (pending, in_progress, completed, failed, cancelled).",
+   "origin_migration": "20261001000000_hardening.sql:32-37 NOT VALID ; VALIDATE l.49-59",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : completed 6, failed 6, pending 2 ; le VALIDATE réussira",
+   "risk": "LOW — node-api n'écrit que ces valeurs"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_target_agent_key_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK vers agent_keys(id) ON DELETE SET NULL.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:38-59 (NOT VALID l.48-50, VALIDATE l.53-57)",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "LOW — suit les colonnes LOT 1"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK agent_tasks.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : 0 orphelin et 0 user_id NULL sur la copie (requête sqlq) ; le VALIDATE réussira",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.agent_tasks.agent_tasks_v2_task_fk",
+   "drift": "missing_foreign_key",
+   "explanation": "FK agent_tasks.v2_task_id → soulbah.tasks(id) ON DELETE SET NULL (posée validée, sans NOT VALID).",
+   "origin_migration": "20261001120300_v2_tasks.sql:123-129",
+   "fixed_by": "20261001120300_v2_tasks.sql",
+   "data_conflict": "aucun (colonne neuve à NULL)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.analysis_requests.analysis_requests_pkey",
+   "drift": "missing_primary_key",
+   "explanation": "Clé primaire d'analysis_requests.",
+   "origin_migration": "20261001000000_hardening.sql:157",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.analysis_requests_status_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK status ∈ (pending, processing, done, error).",
+   "origin_migration": "20261001000000_hardening.sql:169-183 NOT VALID puis VALIDATE",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.analysis_requests.analysis_requests_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK analysis_requests.user_id → auth.users.",
+   "origin_migration": "20261001000000_hardening.sql:158",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.chat_conversations.chat_conversations_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK chat_conversations.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : 0 orphelin et 0 user_id NULL sur la copie (requête sqlq) ; le VALIDATE réussira",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.chat_messages.chat_messages_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK chat_messages.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : 0 orphelin et 0 user_id NULL sur la copie (requête sqlq) ; le VALIDATE réussira",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.knowledge_base.knowledge_base_doc_status_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK doc_status NULL ou ∈ (finding, user, validated, rejected, deprecated).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:21-25 NOT VALID ; VALIDATE l.32-42",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun : colonne neuve à NULL",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.knowledge_base.knowledge_base_ingest_status_check",
+   "drift": "missing_check_constraint",
+   "explanation": "CHECK ingest_status NULL ou ∈ (pending, chunked, embedded, failed).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:26-30 NOT VALID ; VALIDATE l.32-42",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun : colonne neuve à NULL",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.knowledge_base.knowledge_base_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK knowledge_base.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : 0 orphelin et 0 user_id NULL sur la copie (requête sqlq) ; le VALIDATE réussira",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.knowledge_versions.knowledge_versions_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK knowledge_versions.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : table vide",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.user_migrations.user_migrations_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK user_migrations.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : table vide",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.user_schemas.user_schemas_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK user_schemas.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : table vide",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.user_table_data.user_table_data_user_id_fkey",
+   "drift": "missing_foreign_key",
+   "explanation": "FK user_table_data.user_id → auth.users(id) ON DELETE CASCADE : aujourd'hui, supprimer un compte laisse ces lignes.",
+   "origin_migration": "20261001000000_hardening.sql:63-115 (ADD … NOT VALID l.101-103, VALIDATE l.105-109)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun : table vide",
+   "risk": "LOW — intégrité et effacement des comptes ; aucun orphelin aujourd'hui"
+  },
+  {
+   "key": "public.agent_keys.idx_agent_keys_hash",
+   "drift": "extra_index",
+   "explanation": "Doublon de l'index de la contrainte UNIQUE agent_keys_key_hash_key.",
+   "origin_migration": "créé par 20260703000000_agent_keys.sql:41 ; supprimé par 20261001000000_hardening.sql:139-152 (condition : UNIQUE mono-colonne sur key_hash, vérifiée présente)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (0 doublon de key_hash ; l'unicité reste assurée par agent_keys_key_hash_key)",
+   "risk": "INFO — surcoût d'écriture négligeable"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_expires",
+   "drift": "missing_index",
+   "explanation": "Index partiel sur expires_at.",
+   "origin_migration": "20261001120800_v2_memory.sql:64",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_goal_gin_trgm",
+   "drift": "missing_index",
+   "explanation": "Index GIN trigramme sur goal (goal ILIKE ANY, T11).",
+   "origin_migration": "20261001100000_lot1_verif.sql:112-130",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 4 lignes"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_goal_trgm",
+   "drift": "extra_index",
+   "explanation": "B-tree (user_id, goal) au nom trompeur (ce n'est pas un index trigramme).",
+   "origin_migration": "créé par 20260704000000_agent_memory.sql:39 ; renommé par 20261001000000_hardening.sql:136",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (renommage)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_scope",
+   "drift": "missing_index",
+   "explanation": "Index (user_id, scope, status).",
+   "origin_migration": "20261001120800_v2_memory.sql:62",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_session",
+   "drift": "missing_index",
+   "explanation": "Index partiel sur session_id.",
+   "origin_migration": "20261001120800_v2_memory.sql:63",
+   "fixed_by": "20261001120800_v2_memory.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_memory.idx_agent_memory_user_goal",
+   "drift": "missing_index",
+   "explanation": "Nom correct du B-tree (user_id, goal), présent sous l'ancien nom idx_agent_memory_goal_trgm.",
+   "origin_migration": "20261001000000_hardening.sql:136 (ALTER INDEX … RENAME)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (renommage)",
+   "risk": "INFO — cosmétique"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_claimed_key",
+   "drift": "missing_index",
+   "explanation": "Index partiel de la FK claimed_by_key_id.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:70-72",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_poll",
+   "drift": "missing_index",
+   "explanation": "Index partiel de poll (user_id, priority, created_at) WHERE status = 'pending'.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:63-65",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_target_key",
+   "drift": "missing_index",
+   "explanation": "Index partiel de la FK target_agent_key_id.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:67-69",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_user_status",
+   "drift": "extra_index",
+   "explanation": "Index (user_id, status), 5 parcours relevés (catalog.json, indexes[].scans).",
+   "origin_migration": "créé par 20260218152103_e6ec4c1b-…sql:45 ; supprimé par 20261001000000_hardening.sql:129",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun ; remplacé par idx_agent_tasks_user_status_updated (même préfixe)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_user_status_updated",
+   "drift": "missing_index",
+   "explanation": "Index de file (user_id, status, updated_at), remplace idx_agent_tasks_user_status.",
+   "origin_migration": "20261001000000_hardening.sql:127-129",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 14 lignes"
+  },
+  {
+   "key": "public.agent_tasks.idx_agent_tasks_v2_task",
+   "drift": "missing_index",
+   "explanation": "Index partiel sur v2_task_id.",
+   "origin_migration": "20261001120300_v2_tasks.sql:130",
+   "fixed_by": "20261001120300_v2_tasks.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.analysis_requests.analysis_requests_pkey (index)",
+   "drift": "missing_index",
+   "explanation": "Index de la clé primaire d'analysis_requests.",
+   "origin_migration": "20261001000000_hardening.sql:157",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.idx_analysis_requests_created_at",
+   "drift": "missing_index",
+   "explanation": "Index created_at DESC d'analysis_requests.",
+   "origin_migration": "20261001000000_hardening.sql:187",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.analysis_requests.idx_analysis_requests_status",
+   "drift": "missing_index",
+   "explanation": "Index status d'analysis_requests.",
+   "origin_migration": "20261001000000_hardening.sql:186",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.analysis_requests.idx_analysis_requests_user",
+   "drift": "missing_index",
+   "explanation": "Index user_id d'analysis_requests.",
+   "origin_migration": "20261001000000_hardening.sql:185",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.applications.idx_applications_user",
+   "drift": "missing_index",
+   "explanation": "Index user_id.",
+   "origin_migration": "20261001000000_hardening.sql:120",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 1 ligne"
+  },
+  {
+   "key": "public.chat_conversations.idx_chat_conversations_user",
+   "drift": "missing_index",
+   "explanation": "Index user_id.",
+   "origin_migration": "20261001000000_hardening.sql:121",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 9 lignes"
+  },
+  {
+   "key": "public.formations.idx_formations_user",
+   "drift": "missing_index",
+   "explanation": "Index user_id.",
+   "origin_migration": "20261001000000_hardening.sql:119",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 12 lignes"
+  },
+  {
+   "key": "public.knowledge_base.idx_knowledge_base_doc_status",
+   "drift": "missing_index",
+   "explanation": "Index (user_id, doc_status).",
+   "origin_migration": "20261001120700_v2_knowledge.sql:43",
+   "fixed_by": "20261001120700_v2_knowledge.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.knowledge_base.idx_knowledge_base_embedding",
+   "drift": "unverified_vector_index",
+   "explanation": "Index HNSW présent et valide en production (catalog.json : valid, ready) mais non comparable en local (pgvector simulé).",
+   "origin_migration": "20260706150000_knowledge_embeddings.sql:10-11",
+   "fixed_by": "aucune (déjà conforme)",
+   "data_conflict": "aucun (la seule ligne n'a pas d'embedding)",
+   "risk": "INFO — artefact d'outillage"
+  },
+  {
+   "key": "public.knowledge_base.idx_knowledge_base_user",
+   "drift": "missing_index",
+   "explanation": "Index user_id.",
+   "origin_migration": "20261001000000_hardening.sql:122",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 1 ligne"
+  },
+  {
+   "key": "public.system_logs.idx_system_logs_user_created",
+   "drift": "missing_index",
+   "explanation": "Index (user_id, created_at).",
+   "origin_migration": "20261001000000_hardening.sql:123",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — 59 lignes"
+  },
+  {
+   "key": "public.user_migrations.idx_user_migrations_schema",
+   "drift": "missing_index",
+   "explanation": "Index de la FK schema_id.",
+   "origin_migration": "20261001000000_hardening.sql:125",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — table vide"
+  },
+  {
+   "key": "public.user_table_data.idx_user_table_data_schema",
+   "drift": "missing_index",
+   "explanation": "Index de la FK schema_id.",
+   "origin_migration": "20261001000000_hardening.sql:124",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (non unique)",
+   "risk": "INFO — table vide"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control()",
+   "drift": "missing_function",
+   "explanation": "Fonction du trigger update_agent_tasks_updated_at_control.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112-124",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — voir le trigger"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at()",
+   "drift": "missing_function",
+   "explanation": "Fonction du trigger updated_at d'agent_tasks (version finale : un détachement de clé ou un ordre control ne prolonge pas le bail).",
+   "origin_migration": "20261001000000_hardening.sql:212-228 ; redéfinie 20261001090000_lot1_fixes.sql:94-110 et 20261001100000_lot1_verif.sql:46-72",
+   "fixed_by": "20261001000000_hardening.sql + 20261001090000_lot1_fixes.sql + 20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — voir le trigger ; la version lot1_verif lit NEW.target_agent_key_id : à appliquer après lot1_fixes"
+  },
+  {
+   "key": "public.is_admin()",
+   "drift": "missing_function",
+   "explanation": "is_admin() SECURITY DEFINER, search_path vide, ne répond que pour auth.uid().",
+   "origin_migration": "20261001090000_lot1_fixes.sql:150-170",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — requise par la nouvelle policy « Admins can manage roles »"
+  },
+  {
+   "key": "public.rls_auto_enable()",
+   "drift": "extra_function",
+   "explanation": "Fonction de l'event trigger ensure_rls (ddl_command_end) qui active la RLS sur toute table créée dans public ; absente du dépôt (grep).",
+   "origin_migration": "HORS MIGRATIONS (aucun fichier du dépôt) ; origine probable : plateforme Supabase ou action manuelle, non vérifiable",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "LOW — à PRÉSERVER ; non reproduite en CI ni en local : une table public créée sans policy sera fermée en production seulement"
+  },
+  {
+   "key": "public.agent_tasks.update_agent_tasks_updated_at",
+   "drift": "trigger_definition_mismatch",
+   "explanation": "Le trigger appelle update_updated_at_column() : tout UPDATE (ordre control, détachement de clé) rafraîchit updated_at, qui sert de bail.",
+   "origin_migration": "ancien : 20260218152103_e6ec4c1b-…sql:35-38 ; attendu : 20261001000000_hardening.sql:230-233 puis 20261001090000_lot1_fixes.sql:126-129",
+   "fixed_by": "20261001000000_hardening.sql + 20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — un pause/stop prolonge le bail d'une tâche in_progress muette (T45) ; 0 tâche in_progress aujourd'hui"
+  },
+  {
+   "key": "public.agent_tasks.update_agent_tasks_updated_at_control",
+   "drift": "missing_trigger",
+   "explanation": "Second trigger BEFORE UPDATE OF control : conserve updated_at quand seul control est posé.",
+   "origin_migration": "20261001090000_lot1_fixes.sql:131-134",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — même défaut T45 que le trigger ci-dessus"
+  },
+  {
+   "key": "public.agent_keys.Users manage own agent keys",
+   "drift": "extra_policy",
+   "explanation": "FOR ALL client : création d'une clé au hash choisi, modification d'allowed_dirs, suppression sans annuler les tâches du PC.",
+   "origin_migration": "créée par 20260703000000_agent_keys.sql:30-39 ; remplacée par 20261001090000_lot1_fixes.sql:184-190 puis 20261001100000_lot1_verif.sql:151",
+   "fixed_by": "20261001090000_lot1_fixes.sql + 20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — identifiant agent persistant (sans expiration en V1) créable avec un JWT volé"
+  },
+  {
+   "key": "public.agent_keys.Users view own agent keys",
+   "drift": "missing_policy",
+   "explanation": "SELECT de ses clés (remplace FOR ALL).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:187-188",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO — lecture couverte aujourd'hui par la policy FOR ALL"
+  },
+  {
+   "key": "public.agent_memory.Users delete own agent memory",
+   "drift": "missing_policy",
+   "explanation": "DELETE de sa mémoire.",
+   "origin_migration": "20261001100000_lot1_verif.sql:90-91",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO — couverte par FOR ALL"
+  },
+  {
+   "key": "public.agent_memory.Users manage own agent memory",
+   "drift": "extra_policy",
+   "explanation": "FOR ALL client sur la mémoire réinjectée dans la planification, avec un défaut status = 'validated'.",
+   "origin_migration": "créée par 20260704000000_agent_memory.sql:22-30 ; remplacée par 20261001100000_lot1_verif.sql:85-91",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — injection persistante dans les plans (audit C26), sans trace validated_by"
+  },
+  {
+   "key": "public.agent_memory.Users view own agent memory",
+   "drift": "missing_policy",
+   "explanation": "SELECT de sa mémoire.",
+   "origin_migration": "20261001100000_lot1_verif.sql:88-89",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO — lecture couverte par FOR ALL"
+  },
+  {
+   "key": "public.agent_tasks.Users can create tasks",
+   "drift": "extra_policy",
+   "explanation": "INSERT client (rôles public, WITH CHECK auth.uid() = user_id) : un payload arbitraire peut être inséré sans passer par node-api.",
+   "origin_migration": "créée par 20260218152103_e6ec4c1b-…sql:25-26 ; supprimée par 20261001000000_hardening.sql:25",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "HIGH — contourne la validation serveur d'un payload exécuté par l'agent local ; exige un JWT de la victime"
+  },
+  {
+   "key": "public.agent_tasks.Users can delete own tasks",
+   "drift": "extra_policy",
+   "explanation": "DELETE client de ses tâches, sans passer par /cancel.",
+   "origin_migration": "créée par 20260218152103_e6ec4c1b-…sql:31-32 ; supprimée par 20261001100000_lot1_verif.sql:143",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — intégrité de ses propres données"
+  },
+  {
+   "key": "public.agent_tasks.Users can update own tasks",
+   "drift": "extra_policy",
+   "explanation": "UPDATE client (USING seul, réutilisé comme WITH CHECK) : payload ou statut d'une tâche pending modifiables hors API.",
+   "origin_migration": "créée par 20260218152103_e6ec4c1b-…sql:28-29 ; supprimée par 20261001000000_hardening.sql:26",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "HIGH — même vecteur : modifier le payload avant le claim"
+  },
+  {
+   "key": "public.analysis_requests.Users create own analysis requests",
+   "drift": "missing_policy",
+   "explanation": "Policy propriétaire (INSERT).",
+   "origin_migration": "20261001000000_hardening.sql:198-199",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.Users delete own analysis requests",
+   "drift": "missing_policy",
+   "explanation": "Policy propriétaire (DELETE).",
+   "origin_migration": "20261001000000_hardening.sql:202-203",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.Users update own analysis requests",
+   "drift": "missing_policy",
+   "explanation": "Policy propriétaire (UPDATE).",
+   "origin_migration": "20261001000000_hardening.sql:200-201",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.analysis_requests.Users view own analysis requests",
+   "drift": "missing_policy",
+   "explanation": "Policy propriétaire (SELECT).",
+   "origin_migration": "20261001000000_hardening.sql:196-197",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "LOW — suit la table"
+  },
+  {
+   "key": "public.chat_messages.Users can create messages",
+   "drift": "policy_definition_mismatch",
+   "explanation": "INSERT sans contrôle de la conversation parente, rôles public au lieu d'authenticated.",
+   "origin_migration": "ancienne : 20260218041438_db569e91-…sql:33 ; attendue : 20261001090000_lot1_fixes.sql:195-203",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (chatStore.ts:59 insère dans la conversation de l'utilisateur)",
+   "risk": "LOW — écriture inter-locataires si l'UUID de conversation est connu"
+  },
+  {
+   "key": "public.knowledge_base.Users can create knowledge",
+   "drift": "extra_policy",
+   "explanation": "INSERT client direct : hash, version et embedding non calculés par le serveur.",
+   "origin_migration": "créée par 20260218041438_db569e91-…sql:52 ; supprimée par 20261001100000_lot1_verif.sql:136",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — intégrité de ses propres données"
+  },
+  {
+   "key": "public.knowledge_base.Users can delete own knowledge",
+   "drift": "extra_policy",
+   "explanation": "DELETE client direct.",
+   "origin_migration": "créée par 20260218041438_db569e91-…sql:54 ; supprimée par 20261001100000_lot1_verif.sql:138",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.knowledge_base.Users can update own knowledge",
+   "drift": "extra_policy",
+   "explanation": "UPDATE client direct.",
+   "origin_migration": "créée par 20260218041438_db569e91-…sql:53 ; supprimée par 20261001100000_lot1_verif.sql:137",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.knowledge_versions.Users create own knowledge versions",
+   "drift": "policy_definition_mismatch",
+   "explanation": "INSERT sans contrôle de l'entrée parente.",
+   "origin_migration": "ancienne : 20260706000000_knowledge_base_pro.sql:68-69 ; attendue : 20261001090000_lot1_fixes.sql:205-213",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (table vide)",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.profiles.Users can view all profiles",
+   "drift": "extra_policy",
+   "explanation": "SELECT USING (true) pour tout authentifié : tous les profils sont lisibles.",
+   "origin_migration": "créée par 20260218031213_fc7d9650-…sql:18 ; supprimée par 20261001000000_hardening.sql:238",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "MEDIUM — 2 des 10 display_name ressemblent à une adresse e-mail (repli de handle_new_user), lisibles par tout compte"
+  },
+  {
+   "key": "public.profiles.Users can view own profile",
+   "drift": "missing_policy",
+   "explanation": "SELECT de son seul profil (remplace USING true).",
+   "origin_migration": "20261001000000_hardening.sql:239-241",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun ; Settings.tsx:28 et useSystemStatus.ts:39 restent compatibles",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.user_migrations.Users can create migrations",
+   "drift": "policy_definition_mismatch",
+   "explanation": "INSERT sans contrôle du schéma parent.",
+   "origin_migration": "ancienne : 20260218121217_e64522cf-…sql:53 ; attendue : 20261001090000_lot1_fixes.sql:238-246",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (table vide)",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.user_roles.Admins can manage roles",
+   "drift": "policy_definition_mismatch",
+   "explanation": "USING has_role(auth.uid(), 'admin') au lieu de is_admin(), même sémantique.",
+   "origin_migration": "ancienne : 20260218031213_fc7d9650-…sql:46 ; attendue : 20261001090000_lot1_fixes.sql:174-176",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (aucun admin : 10 rôles 'user')",
+   "risk": "LOW — tant qu'elle n'est pas réécrite, la révocation G4 de lot1_verif serait sautée"
+  },
+  {
+   "key": "public.user_table_data.Users can insert own data",
+   "drift": "policy_definition_mismatch",
+   "explanation": "INSERT sans contrôle du schéma parent.",
+   "origin_migration": "ancienne : 20260218121217_e64522cf-…sql:47 ; attendue : 20261001090000_lot1_fixes.sql:217-225",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (table vide)",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.user_table_data.Users can update own data",
+   "drift": "policy_definition_mismatch",
+   "explanation": "UPDATE sans WITH CHECK du schéma parent.",
+   "origin_migration": "ancienne : 20260218121217_e64522cf-…sql:48 ; attendue : 20261001090000_lot1_fixes.sql:227-236",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun (table vide)",
+   "risk": "LOW"
+  },
+  {
+   "key": "public.analysis_requests DELETE → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit DELETE de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests INSERT → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit INSERT de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests MAINTAIN → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit MAINTAIN de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests REFERENCES → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit REFERENCES de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests SELECT → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit SELECT de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRIGGER → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit TRIGGER de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRUNCATE → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit TRUNCATE de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests UPDATE → anon",
+   "drift": "missing_grant",
+   "explanation": "Droit UPDATE de anon sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests DELETE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit DELETE de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests INSERT → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit INSERT de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests MAINTAIN → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit MAINTAIN de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests REFERENCES → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit REFERENCES de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests SELECT → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit SELECT de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRIGGER → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit TRIGGER de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRUNCATE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit TRUNCATE de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests UPDATE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "Droit UPDATE de authenticated sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests DELETE → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit DELETE de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests INSERT → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit INSERT de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests MAINTAIN → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit MAINTAIN de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests REFERENCES → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit REFERENCES de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests SELECT → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit SELECT de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRIGGER → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit TRIGGER de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRUNCATE → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit TRUNCATE de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests UPDATE → postgres",
+   "drift": "missing_grant",
+   "explanation": "Droit UPDATE de postgres (propriétaire) sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests DELETE → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit DELETE de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests INSERT → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit INSERT de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests MAINTAIN → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit MAINTAIN de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests REFERENCES → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit REFERENCES de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests SELECT → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit SELECT de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRIGGER → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit TRIGGER de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests TRUNCATE → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit TRUNCATE de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.analysis_requests UPDATE → service_role",
+   "drift": "missing_grant",
+   "explanation": "Droit UPDATE de service_role sur analysis_requests (table absente).",
+   "origin_migration": "20261001000000_hardening.sql:156 + privilèges par défaut (postgres, public)",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun (table neuve)",
+   "risk": "INFO — suit la table"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control() EXECUTE → PUBLIC",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de PUBLIC sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112 + privilèges par défaut",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control() EXECUTE → anon",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de anon sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112 + privilèges par défaut",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control() EXECUTE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de authenticated sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112 + privilèges par défaut",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control() EXECUTE → postgres",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de postgres sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112 + privilèges par défaut",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_keep_updated_at_on_control() EXECUTE → service_role",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de service_role sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001090000_lot1_fixes.sql:112 + privilèges par défaut",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at() EXECUTE → PUBLIC",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de PUBLIC sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001000000_hardening.sql:212 + privilèges par défaut",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at() EXECUTE → anon",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de anon sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001000000_hardening.sql:212 + privilèges par défaut",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at() EXECUTE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de authenticated sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001000000_hardening.sql:212 + privilèges par défaut",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at() EXECUTE → postgres",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de postgres sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001000000_hardening.sql:212 + privilèges par défaut",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.agent_tasks_set_updated_at() EXECUTE → service_role",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de service_role sur la fonction de trigger (droit par défaut).",
+   "origin_migration": "20261001000000_hardening.sql:212 + privilèges par défaut",
+   "fixed_by": "20261001000000_hardening.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO"
+  },
+  {
+   "key": "public.has_role(_user_id uuid, _role app_role) EXECUTE → PUBLIC",
+   "drift": "extra_grant",
+   "explanation": "has_role (SECURITY DEFINER) exécutable par PUBLIC : oracle « l'utilisateur X est-il admin ? ».",
+   "origin_migration": "droit par défaut à la création (20260218031213_fc7d9650-…sql:33-43) ; révoqué par 20261001090000_lot1_fixes.sql:144-146",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — réponse booléenne, UUID requis ; aucun admin aujourd'hui"
+  },
+  {
+   "key": "public.has_role(_user_id uuid, _role app_role) EXECUTE → anon",
+   "drift": "extra_grant",
+   "explanation": "has_role (SECURITY DEFINER) exécutable par anon : oracle « l'utilisateur X est-il admin ? ».",
+   "origin_migration": "droit par défaut à la création (20260218031213_fc7d9650-…sql:33-43) ; révoqué par 20261001090000_lot1_fixes.sql:144-146",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — réponse booléenne, UUID requis ; aucun admin aujourd'hui"
+  },
+  {
+   "key": "public.has_role(_user_id uuid, _role app_role) EXECUTE → authenticated",
+   "drift": "extra_grant",
+   "explanation": "has_role (SECURITY DEFINER) exécutable par authenticated : oracle « l'utilisateur X est-il admin ? ».",
+   "origin_migration": "droit par défaut à la création (20260218031213_fc7d9650-…sql:33-43) ; révoqué par 20261001100000_lot1_verif.sql:162-176 (garde G4)",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — réponse booléenne, UUID requis ; aucun admin aujourd'hui ; révocation sautée (WARNING) si une policy appelle encore has_role : seule « Admins can manage roles », réécrite par lot1_fixes"
+  },
+  {
+   "key": "public.is_admin() EXECUTE → authenticated",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de authenticated sur is_admin().",
+   "origin_migration": "20261001090000_lot1_fixes.sql:168-170 (GRANT explicite ; postgres = propriétaire)",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — suit la fonction"
+  },
+  {
+   "key": "public.is_admin() EXECUTE → postgres",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de postgres sur is_admin().",
+   "origin_migration": "20261001090000_lot1_fixes.sql:168-170 (GRANT explicite ; postgres = propriétaire)",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — suit la fonction"
+  },
+  {
+   "key": "public.is_admin() EXECUTE → service_role",
+   "drift": "missing_grant",
+   "explanation": "EXECUTE de service_role sur is_admin().",
+   "origin_migration": "20261001090000_lot1_fixes.sql:168-170 (GRANT explicite ; postgres = propriétaire)",
+   "fixed_by": "20261001090000_lot1_fixes.sql",
+   "data_conflict": "aucun",
+   "risk": "LOW — suit la fonction"
+  },
+  {
+   "key": "public.rls_auto_enable() EXECUTE → PUBLIC",
+   "drift": "extra_grant",
+   "explanation": "Droit EXECUTE de PUBLIC sur rls_auto_enable() (fonction hors migrations).",
+   "origin_migration": "HORS MIGRATIONS (droits par défaut Supabase du rôle postgres)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — une fonction event_trigger ne peut pas être appelée directement"
+  },
+  {
+   "key": "public.rls_auto_enable() EXECUTE → anon",
+   "drift": "extra_grant",
+   "explanation": "Droit EXECUTE de anon sur rls_auto_enable() (fonction hors migrations).",
+   "origin_migration": "HORS MIGRATIONS (droits par défaut Supabase du rôle postgres)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — une fonction event_trigger ne peut pas être appelée directement"
+  },
+  {
+   "key": "public.rls_auto_enable() EXECUTE → authenticated",
+   "drift": "extra_grant",
+   "explanation": "Droit EXECUTE de authenticated sur rls_auto_enable() (fonction hors migrations).",
+   "origin_migration": "HORS MIGRATIONS (droits par défaut Supabase du rôle postgres)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — une fonction event_trigger ne peut pas être appelée directement"
+  },
+  {
+   "key": "public.rls_auto_enable() EXECUTE → postgres",
+   "drift": "extra_grant",
+   "explanation": "Droit EXECUTE de postgres sur rls_auto_enable() (fonction hors migrations).",
+   "origin_migration": "HORS MIGRATIONS (droits par défaut Supabase du rôle postgres)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — une fonction event_trigger ne peut pas être appelée directement"
+  },
+  {
+   "key": "public.rls_auto_enable() EXECUTE → service_role",
+   "drift": "extra_grant",
+   "explanation": "Droit EXECUTE de service_role sur rls_auto_enable() (fonction hors migrations).",
+   "origin_migration": "HORS MIGRATIONS (droits par défaut Supabase du rôle postgres)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — une fonction event_trigger ne peut pas être appelée directement"
+  },
+  {
+   "key": "pg_stat_statements",
+   "drift": "extra_extension",
+   "explanation": "Extension standard du projet Supabase (schéma extensions).",
+   "origin_migration": "HORS MIGRATIONS (plateforme Supabase)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — à préserver"
+  },
+  {
+   "key": "pg_trgm",
+   "drift": "missing_extension",
+   "explanation": "pg_trgm, pour l'index GIN trigramme d'agent_memory.goal.",
+   "origin_migration": "20261001100000_lot1_verif.sql:101-110 (WITH SCHEMA extensions)",
+   "fixed_by": "20261001100000_lot1_verif.sql",
+   "data_conflict": "aucun",
+   "risk": "INFO — disponible en production (catalog.json available_extensions : pg_trgm 1.6)"
+  },
+  {
+   "key": "pgcrypto",
+   "drift": "extra_extension",
+   "explanation": "Extension standard du projet Supabase (schéma extensions).",
+   "origin_migration": "HORS MIGRATIONS (plateforme Supabase)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — à préserver"
+  },
+  {
+   "key": "supabase_vault",
+   "drift": "extra_extension",
+   "explanation": "Extension standard du projet Supabase (schéma vault).",
+   "origin_migration": "HORS MIGRATIONS (plateforme Supabase)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — à préserver"
+  },
+  {
+   "key": "uuid-ossp",
+   "drift": "extra_extension",
+   "explanation": "Extension standard du projet Supabase (schéma extensions).",
+   "origin_migration": "HORS MIGRATIONS (plateforme Supabase)",
+   "fixed_by": "aucune",
+   "data_conflict": "aucun",
+   "risk": "INFO — à préserver"
+  },
+  {
+   "key": "vector",
+   "drift": "extra_extension",
+   "explanation": "pgvector 0.8.0 installée dans public ; écart d'outillage (le schéma attendu simule vector par real[]).",
+   "origin_migration": "20260706150000_knowledge_embeddings.sql:5 (CREATE EXTENSION sans WITH SCHEMA → public)",
+   "fixed_by": "aucune (rien à corriger)",
+   "data_conflict": "aucun",
+   "risk": "INFO — à préserver ; avertissement Supabase « extension in public », ne pas la déplacer sans plan (V2 utilise le type vector non qualifié)"
+  },
+  {
+   "key": "public.handle_new_user()",
+   "drift": "function_definition_mismatch (source brute ; absent du drift.json depuis 12:58, après normalisation des espaces)",
+   "explanation": "Même corps que la migration, mais texte posé avec des fins de ligne CRLF et une autre mise en page (requête sur une ligne) : exécuté depuis un texte hors dépôt (Lovable ou éditeur SQL).",
+   "origin_migration": "20260218031213_fc7d9650-…sql:126-141",
+   "fixed_by": "aucune (aucune migration en attente ne redéfinit ce corps)",
+   "data_conflict": "aucun",
+   "risk": "INFO — sémantiquement identique (source_md5 normalisé égal) ; à préserver, ne pas réécrire pour l'esthétique"
+  },
+  {
+   "key": "public.has_role(_user_id uuid, _role app_role)",
+   "drift": "function_definition_mismatch (source brute ; absent du drift.json depuis 12:58, après normalisation des espaces)",
+   "explanation": "Même corps que la migration, mais texte posé avec des fins de ligne CRLF et une autre mise en page (requête sur une ligne) : exécuté depuis un texte hors dépôt (Lovable ou éditeur SQL).",
+   "origin_migration": "20260218031213_fc7d9650-…sql:33-43",
+   "fixed_by": "aucune (aucune migration en attente ne redéfinit ce corps ; lot1_fixes/lot1_verif ne changent que ses droits)",
+   "data_conflict": "aucun",
+   "risk": "INFO — sémantiquement identique (source_md5 normalisé égal) ; à préserver, ne pas réécrire pour l'esthétique"
+  },
+  {
+   "key": "public.update_updated_at_column()",
+   "drift": "function_definition_mismatch (source brute ; absent du drift.json depuis 12:52, après normalisation CRLF)",
+   "explanation": "Même corps que la migration, mais texte posé avec des fins de ligne CRLF : exécuté depuis un texte hors dépôt (Lovable ou éditeur SQL).",
+   "origin_migration": "20260218031213_fc7d9650-…sql:148-154",
+   "fixed_by": "aucune (aucune migration en attente ne redéfinit ce corps)",
+   "data_conflict": "aucun",
+   "risk": "INFO — sémantiquement identique (md5 égal après CRLF→LF) ; à préserver"
+  }
+ ]
+}

@@ -45,6 +45,38 @@ def gpg_decrypt(src: Path, dest: Path, passphrase_file: Path) -> None:
         raise DbError(f"déchiffrement impossible ({src.name}) : {p.stderr.strip()[:300]}")
 
 
+SCRUB_AUTH_SQL = """
+DO $scrub$
+DECLARE t text; c text;
+BEGIN
+  -- Jetons, sessions et défis : supprimés (jamais utiles à une copie d'essai).
+  FOREACH t IN ARRAY ARRAY['refresh_tokens','sessions','one_time_tokens','flow_state','mfa_challenges',
+                           'mfa_amr_claims','saml_relay_states','oauth_authorizations','oauth_consents',
+                           'oauth_client_states','webauthn_challenges','audit_log_entries'] LOOP
+    IF to_regclass('auth.' || t) IS NOT NULL THEN EXECUTE format('DELETE FROM auth.%I', t); END IF;
+  END LOOP;
+  -- Secrets portés par les comptes : effacés (les identifiants et e-mails restent pour l'intégrité des FK).
+  FOREACH c IN ARRAY ARRAY['encrypted_password','confirmation_token','recovery_token','email_change_token_new',
+                           'email_change_token_current','phone_change_token','reauthentication_token'] LOOP
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'users'
+                                                           AND column_name = c) THEN
+      EXECUTE format('UPDATE auth.users SET %I = NULL WHERE %I IS NOT NULL', c, c);
+    END IF;
+  END LOOP;
+  IF to_regclass('auth.mfa_factors') IS NOT NULL THEN
+    UPDATE auth.mfa_factors SET secret = NULL WHERE secret IS NOT NULL;
+  END IF;
+END $scrub$;
+"""
+
+
+def scrub_auth_secrets(conn) -> None:
+    """Copie LOCALE seulement : retire jetons, sessions et empreintes de mots de passe (constat SEC-04 du DB LOT 0)."""
+    if not conn.is_local:
+        raise DbError("nettoyage réservé aux copies locales")
+    run_sql(conn, SCRUB_AUTH_SQL, read_only=False)
+
+
 def pg_tool(name: str) -> str:
     return str(Path(psql_path()).with_name(name + (".exe" if psql_path().endswith(".exe") else "")))
 
@@ -58,6 +90,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--target", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--schemas", default="public")
+    ap.add_argument("--keep-auth-secrets", action="store_true",
+                    help="ne pas effacer jetons, sessions et empreintes de la copie (déconseillé)")
     a = ap.parse_args(argv)
     conn = parse(a.target)
     if not conn.is_local or not re.search(r"restore|copy", conn.dbname):
@@ -149,6 +183,10 @@ def main(argv: list[str]) -> int:
                                    "mismatch": row_mismatch}
         report["restore_verified"] = all(report["steps"][k]["ok"] for k in ("restore", "structure", "rows")) and \
             report["steps"].get("dump_readable", {"ok": True})["ok"]
+        # Après la preuve : la copie d'essai ne garde ni jetons, ni sessions, ni empreintes de mots de passe.
+        if not a.keep_auth_secrets:
+            scrub_auth_secrets(conn)
+            report["steps"]["auth_secrets_scrubbed"] = {"ok": True}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)  # aucun déchiffré ne reste sur le disque
         report["plaintext_removed"] = not tmp.exists()
