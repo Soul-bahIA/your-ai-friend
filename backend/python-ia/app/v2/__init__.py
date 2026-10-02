@@ -7,9 +7,11 @@ from fastapi import APIRouter
 
 from .models import router as models_router
 from .planner import router as planner_router
+from .resources import router as resources_router
 
 router = APIRouter(prefix="/v2")
 router.include_router(models_router)
 router.include_router(planner_router)
+router.include_router(resources_router)
 
 __all__ = ["router"]

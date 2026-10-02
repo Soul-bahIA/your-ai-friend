@@ -132,7 +132,8 @@ if (-not $SansAgent) {
     $env:SOULBAH_PERMISSION_MODE = 'auto'      # actions confinées au dossier autorisé : sans question
     $env:SOULBAH_APPROVAL_MODE = 'remote'      # actions sensibles : approbation dans l'application
     New-Item -ItemType Directory -Force $env:SOULBAH_ALLOWED_DIRS | Out-Null
-    $agentArgs = $(if ($AgentV2) { '-m runtime.supervisor --max-slots 2' } else { '-m runtime.supervisor --legacy' })
+    # V3 LOT 6 : 6 slots ; le Resource Manager du runtime ne lance un worker que si la RAM libre le permet.
+    $agentArgs = $(if ($AgentV2) { '-m runtime.supervisor --max-slots 6' } else { '-m runtime.supervisor --legacy' })
     $pids['agent'] = Start-Hidden 'agent' $py $agentArgs (Join-Path $Root 'agent')
     Write-Host "  agent : agit dans $($env:SOULBAH_ALLOWED_DIRS)"
 }

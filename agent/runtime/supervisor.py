@@ -14,7 +14,9 @@ Rôle : un processus principal par PC qui
      < 10 s, journal purgé ; réponse humaine à une QUESTION → worker relancé) ; détection
      des workers bloqués (aucune activité au-delà de SOULBAH_STEP_TIMEOUT + marge → arbre
      tué, ERROR timeout) ; **lease** avec `slots = max_slots − tâches détenues` (0 tant
-     qu'une écriture attend dans l'outbox : base injoignable ou final non accepté) ;
+     qu'une écriture attend dans l'outbox : base injoignable ou final non accepté), réduits par le
+     **Resource Manager** (V3 LOT 6) : pas de nouveau worker si la mémoire libre ne le permet pas
+     (soulbah_resources.worker_slots_allowed) ; l'état mémoire part avec lease et keepalive ;
   5. un **worker = un sous-processus dans son propre Job Object** (KILL_ON_JOB_CLOSE,
      BREAKAWAY_OK pour open_app) : si le superviseur meurt, ses workers meurent avec lui ;
      un worker mort sans final est relancé en reprise (même tentative, même bail) au plus
@@ -41,6 +43,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import soulbah_resources
 from client import AUTH, OK
 from config import Config, load_config
 from redaction import RedactingFormatter
@@ -103,8 +106,13 @@ class WorkerHandle:
 class Supervisor:
     def __init__(self, cfg: Config, client: RuntimeClient, journal: Journal, max_slots: int, *,
                  python: str | None = None, tick_s: float = 1.0, hang_margin_s: float = HANG_MARGIN_S,
-                 now: Callable[[], float] = time.monotonic):
+                 now: Callable[[], float] = time.monotonic,
+                 memory: Callable[[], dict[str, Any]] = soulbah_resources.memory):
         self.cfg = cfg
+        self._memory = memory
+        self.policy = soulbah_resources.ResourcePolicy.from_env()
+        self.throttled = False
+        self.last_resources: dict[str, Any] = {}
         self.client = client
         self.journal = journal
         self.max_slots = max(1, min(32, int(max_slots)))
@@ -358,7 +366,7 @@ class Supervisor:
         if not held:
             return
         outcome, detail, data, _status = self.client.keepalive(
-            [{"task_id": h["task_id"], "attempt": h["attempt"]} for h in held])
+            [{"task_id": h["task_id"], "attempt": h["attempt"]} for h in held], resources=self.resources())
         if outcome != OK or not isinstance(data, dict):
             log.warning("Keepalive impossible (%s)", detail)
             return
@@ -393,6 +401,23 @@ class Supervisor:
                     self.spawn(h["spec"], resume_actions=self._resume_actions(tid, h["attempt"]),
                                answer=str(fresh[-1]["answer"]))
 
+    def resources(self) -> dict[str, Any]:
+        """État mémoire du PC et slots permis maintenant (V3 LOT 6) — envoyé au serveur."""
+        try:
+            mem = self._memory() or {}
+        except Exception:  # noqa: BLE001 — une lecture impossible ne bloque pas le runtime
+            mem = {}
+        held = len(self.journal.held())
+        free = mem.get("free_mb")
+        allowed = soulbah_resources.worker_slots_allowed(free, held, self.max_slots, self.policy)
+        self.last_resources = {
+            "free_mb": free, "total_mb": mem.get("total_mb"), "load_percent": mem.get("load_percent"),
+            "pressure": soulbah_resources.pressure(free, self.policy), "held": held, "max_slots": self.max_slots,
+            "allowed_new": allowed, "throttled": allowed < max(0, self.max_slots - held),
+            "policy": self.policy.as_dict(),
+        }
+        return self.last_resources
+
     def lease(self) -> int:
         if self.stopping or not self.reconciled:
             return 0
@@ -401,7 +426,19 @@ class Supervisor:
         slots = self.max_slots - len(self.journal.held())
         if slots <= 0:
             return 0
-        outcome, detail, data, _status = self.client.lease(slots)
+        res = self.resources()
+        if res["allowed_new"] < slots:
+            if not self.throttled:
+                log.warning("Mémoire libre %s Mo (%s) : %d nouveau(x) worker(s) permis au lieu de %d",
+                            res["free_mb"], res["pressure"], res["allowed_new"], slots)
+            self.throttled = True
+            slots = res["allowed_new"]
+        elif self.throttled:
+            log.info("Mémoire libre %s Mo : limitation levée", res["free_mb"])
+            self.throttled = False
+        if slots <= 0:
+            return 0
+        outcome, detail, data, _status = self.client.lease(slots, resources=res)
         if outcome != OK or not isinstance(data, dict):
             log.warning("Bail impossible (%s)", detail)
             return 0

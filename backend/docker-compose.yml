@@ -65,6 +65,13 @@ x-soulbah-env: &soulbah-env
   SOULBAH_COMPUTER_CONTROL: ${SOULBAH_COMPUTER_CONTROL:-}
   SOULBAH_RECORDING: ${SOULBAH_RECORDING:-}
   SOULBAH_SELF_IMPROVEMENT: ${SOULBAH_SELF_IMPROVEMENT:-}
+  # V3 LOT 6 : Resource Manager (politique mémoire ; file d'inférence des serveurs locaux de python-ia).
+  SOULBAH_RAM_RESERVE_MB: ${SOULBAH_RAM_RESERVE_MB:-400}
+  SOULBAH_RAM_CRITICAL_MB: ${SOULBAH_RAM_CRITICAL_MB:-200}
+  SOULBAH_WORKER_RAM_MB: ${SOULBAH_WORKER_RAM_MB:-150}
+  SOULBAH_INFERENCE_SLOTS: ${SOULBAH_INFERENCE_SLOTS:-}
+  SOULBAH_INFERENCE_QUEUE_MAX_S: ${SOULBAH_INFERENCE_QUEUE_MAX_S:-600}
+  SOULBAH_INFERENCE_PROBE: ${SOULBAH_INFERENCE_PROBE:-1}
 
 # Routeur de modèles de python-ia (LOT 1, cf. .env.example). Vide = défaut du routeur ;
 # les valeurs numériques lues sans repli dans le code reçoivent leur défaut documenté

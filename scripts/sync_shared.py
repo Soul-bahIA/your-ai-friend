@@ -3,7 +3,7 @@
   python scripts/sync_shared.py          réécrit les copies
   python scripts/sync_shared.py --check  échoue (code 1) si une copie diffère de la source
 
-Source → copies : voir COPIES (configuration centrale, NetworkGuard, garde des processus enfants). Les tests de chaque service vérifient aussi la
+Source → copies : voir COPIES (configuration centrale, NetworkGuard, garde des processus enfants, Resource Manager). Les tests de chaque service vérifient aussi la
 non-dérive (une copie modifiée à la main est refusée).
 """
 from __future__ import annotations
@@ -23,6 +23,11 @@ COPIES = {
         ROOT / "agent" / "network_guard.py",
         ROOT / "agent" / "guard_site" / "network_guard.py",
         ROOT / "backend" / "python-ia" / "app" / "network_guard.py",
+    ],
+    # Resource Manager (V3 LOT 6) : politique mémoire commune (workers de l'agent, inférences de python-ia).
+    ROOT / "shared" / "config" / "soulbah_resources.py": [
+        ROOT / "agent" / "soulbah_resources.py",
+        ROOT / "backend" / "python-ia" / "app" / "soulbah_resources.py",
     ],
     ROOT / "shared" / "config" / "guard_site" / "sitecustomize.py": [ROOT / "agent" / "guard_site" / "sitecustomize.py"],
     ROOT / "shared" / "config" / "guard_site" / "network_guard_child.cjs": [

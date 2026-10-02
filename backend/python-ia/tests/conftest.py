@@ -24,6 +24,9 @@ for _k in [k for k in os.environ if k.startswith("SOULBAH_")]:
     os.environ.pop(_k, None)
 os.environ["SOULBAH_CONFIG"] = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "shared", "config", "soulbah.config.example.json")
+# V3 LOT 6 : la file d'inférence ne sonde jamais un vrai serveur local (llama-server peut tourner
+# sur la machine de test) ; les tests de la file injectent les réponses de /props et /slots.
+os.environ["SOULBAH_INFERENCE_PROBE"] = "0"
 # Environnement de test (contrat LOT 1 §1) : token inter-services optionnel.
 os.environ["SOULBAH_ENV"] = "test"
 # Filet hermétique : une TTS non simulée par un test vise un port local fermé

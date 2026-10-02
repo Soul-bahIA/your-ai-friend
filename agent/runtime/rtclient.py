@@ -141,12 +141,18 @@ class RuntimeClient(TaskClient):
             self.runtime_id = str(data["runtime_id"])
         return outcome, detail, data, status
 
-    def lease(self, slots: int) -> tuple[str, str, Any, int | None]:
-        return self._call("POST", "lease", {"runtime_id": self.runtime_id, "slots": int(slots)}, _TIMEOUT_LONG)
+    def lease(self, slots: int, resources: dict[str, Any] | None = None) -> tuple[str, str, Any, int | None]:
+        body: dict[str, Any] = {"runtime_id": self.runtime_id, "slots": int(slots)}
+        if resources:
+            body["resources"] = resources  # V3 LOT 6 : état mémoire du PC (Resource Manager)
+        return self._call("POST", "lease", body, _TIMEOUT_LONG)
 
-    def keepalive(self, tasks: list[dict[str, Any]]) -> tuple[str, str, Any, int | None]:
-        body = {"runtime_id": self.runtime_id,
-                "tasks": [{"task_id": t["task_id"], "attempt": int(t["attempt"])} for t in tasks]}
+    def keepalive(self, tasks: list[dict[str, Any]], resources: dict[str, Any] | None = None
+                  ) -> tuple[str, str, Any, int | None]:
+        body: dict[str, Any] = {"runtime_id": self.runtime_id,
+                                "tasks": [{"task_id": t["task_id"], "attempt": int(t["attempt"])} for t in tasks]}
+        if resources:
+            body["resources"] = resources
         return self._call("POST", "keepalive", body, _TIMEOUT_LONG)
 
     def reconcile(self, tasks: list[dict[str, Any]]) -> tuple[str, str, Any, int | None]:

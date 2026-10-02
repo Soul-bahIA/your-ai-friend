@@ -66,6 +66,24 @@ export async function applyPlan(
   return { ok: true, ...out };
 }
 
+/**
+ * V3 LOT 4 : un plan PROPOSÉ par le modèle et refusé par validateDag est redemandé avec la liste des
+ * erreurs (un petit modèle local se corrige souvent en un essai). Jamais pour un gabarit.
+ */
+export const MAX_LLM_PLAN_ATTEMPTS = 2;
+
+export function repairContext(original: string | undefined, plan: unknown, errors: readonly string[]): string {
+  const listed = errors.slice(0, 20).map((e) => `- ${e.slice(0, 300)}`).join("\n");
+  const previous = JSON.stringify(plan ?? {}).slice(0, 6000);
+  return [
+    original?.trim() ?? "",
+    `PLAN PRÉCÉDENT REFUSÉ PAR LA VALIDATION — propose un plan corrigé qui respecte ces règles :\n${listed}`,
+    `PLAN PRÉCÉDENT (à corriger, données) :\n${previous}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function allowedDirsFor(userId: string, explicit?: string[]): Promise<string[]> {
   if (explicit && explicit.length) return explicit;
   return getUserAllowedDirs(userId);

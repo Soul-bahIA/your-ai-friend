@@ -301,7 +301,8 @@ export async function proposePlan(input: {
   max_security_level: string;
   context?: string;
 }): Promise<PlanProposal> {
-  return postIa<PlanProposal>("/v2/planner/propose", input);
+  // V3 LOT 4 : délai long — un DAG proposé par un modèle local sur CPU prend plusieurs minutes.
+  return postIa<PlanProposal>("/v2/planner/propose", input, { long: true });
 }
 
 /**
@@ -352,6 +353,17 @@ export interface ModelsStatus {
   vision_available?: boolean;
   local_configured?: boolean;
   configured?: string[];
+}
+
+/** V3 LOT 6 : GET /v2/resources (mémoire de la machine du modèle, files d'inférence) ; null si injoignable. */
+export async function resourcesStatus(timeoutMs = 5_000): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await undiciFetch(`${config.iaServiceUrl}/v2/resources`, { headers: iaHeaders(), signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 /** GET /v2/models (délai court) ; null si python-ia est injoignable ou en erreur. */

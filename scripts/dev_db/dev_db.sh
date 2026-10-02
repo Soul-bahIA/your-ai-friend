@@ -214,7 +214,9 @@ cmd_test() {
   is_running || die "base non démarrée (« start »)"
   is_migrated || die "schéma absent (« migrate »)"
   info "tests d'intégration node-api sur $(db_url)"
-  ( cd "$ROOT/backend/node-api" && TEST_DATABASE_URL="$(db_url)" npx vitest run test/integration "$@" )
+  # Fichiers en série, comme la CI (npm run test:pg) : le scheduler V2 est global, un fichier qui le fait
+  # tourner agit aussi sur les tâches d'un autre fichier lancé en parallèle (faux échecs).
+  ( cd "$ROOT/backend/node-api" && TEST_DATABASE_URL="$(db_url)" npx vitest run test/integration --no-file-parallelism "$@" )
 }
 
 cmd_up() {

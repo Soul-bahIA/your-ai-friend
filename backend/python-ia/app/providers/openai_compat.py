@@ -42,6 +42,11 @@ class OpenAICompatProvider(LLMProvider):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
 
+    @property
+    def base_url(self) -> str:
+        """URL de base (V3 LOT 6 : clé de la file d'inférence d'un serveur local)."""
+        return self._base_url
+
     def capabilities(self, model: str | None = None) -> ModelCapabilities:
         caps = capabilities_for(self.id, self.family, model or self.model)
         if self.id == "local_vision" and not caps.vision:

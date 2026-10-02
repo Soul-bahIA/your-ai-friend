@@ -15,6 +15,7 @@ import { RUNTIME_PROTOCOL, checkRuntimeCompatibility } from "../runtime/version.
 import { isActionStatus, listActions, upsertAction } from "../runtime/actions.js";
 import { containsBinaryBlob, validateEvidenceList } from "../evidence.js";
 import { audit } from "../audit.js";
+import { recordRuntimeResources, sanitizeLiveResources } from "../resources/resourceManager.js";
 
 function bad(reply: FastifyReply, error: string) {
   return reply.status(400).send({ error });
@@ -87,18 +88,23 @@ export async function runtimeRoutes(app: FastifyInstance): Promise<void> {
 
   // --- Baux --------------------------------------------------------------------------------
   app.post("/api/v2/runtime/lease", agentOpts, async (request, reply) => {
-    const body = (request.body ?? {}) as { runtime_id?: unknown; slots?: unknown };
+    const body = (request.body ?? {}) as { runtime_id?: unknown; slots?: unknown; resources?: unknown };
     const rt = await ownedRuntime(request, body.runtime_id);
     if (!rt) return reply.status(404).send({ error: "runtime inconnu (enregistrez-le d'abord)" });
+    // V3 LOT 6 : état mémoire du PC (avant le bail : le garde-fou du scheduler le lit).
+    const live = sanitizeLiveResources(body.resources);
+    if (live) await recordRuntimeResources(rt.id, live);
     const slots = typeof body.slots === "number" && Number.isInteger(body.slots) ? Math.max(0, Math.min(32, body.slots)) : 1;
     const out = await lease({ runtimeId: rt.id, userId: request.agentUserId!, slots });
-    return { tasks: out.granted, max_parallel: out.max_parallel, running: out.running, skipped_resources: out.skipped_resources, lease_seconds: config.v2LeaseSeconds };
+    return { tasks: out.granted, max_parallel: out.max_parallel, running: out.running, skipped_resources: out.skipped_resources, memory_limited: out.memory_limited === true, lease_seconds: config.v2LeaseSeconds };
   });
 
   app.post("/api/v2/runtime/keepalive", agentOpts, async (request, reply) => {
-    const body = (request.body ?? {}) as { runtime_id?: unknown; tasks?: unknown };
+    const body = (request.body ?? {}) as { runtime_id?: unknown; tasks?: unknown; resources?: unknown };
     const rt = await ownedRuntime(request, body.runtime_id);
     if (!rt) return reply.status(404).send({ error: "runtime inconnu" });
+    const live = sanitizeLiveResources(body.resources);
+    if (live) await recordRuntimeResources(rt.id, live);
     const items: { task_id: string; attempt: number }[] = [];
     if (body.tasks !== undefined) {
       if (!Array.isArray(body.tasks) || body.tasks.length > 64) return bad(reply, "tasks : liste (≤ 64) de { task_id, attempt } attendue");

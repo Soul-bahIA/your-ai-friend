@@ -20,7 +20,7 @@ import { userActor } from "../audit.js";
 import { answerQuestion } from "../bus/messages.js";
 import { tick } from "../scheduler/scheduler.js";
 import { isSecurityLevel } from "../security/policy.js";
-import { allowedDirsFor, applyPlan, draftPlan } from "../planner/planner.js";
+import { allowedDirsFor, applyPlan, draftPlan, MAX_LLM_PLAN_ATTEMPTS, repairContext } from "../planner/planner.js";
 import {
   approveSession,
   cancelSession,
@@ -158,22 +158,31 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(409).send({ error: `plan non modifiable dans l'état ${session.status}`, status: session.status });
     }
     const dirs = await allowedDirsFor(userId);
-    const draft = await draftPlan(session, { template: body.template as string | undefined, params: body.params as Record<string, unknown> | undefined, goal: body.goal as string | undefined, context: body.context as string | undefined }, dirs);
-    if (!draft.ok) return reply.status(draft.status).send({ error: draft.error, reason: draft.reason });
-    try {
-      const out = await withTransaction(async (client) => {
-        const locked = await getSession(client, userId, id, true);
-        if (!locked) return null;
-        const applied = await applyPlan(client, locked, draft.plan, userId, dirs);
-        if (!applied.ok) throw Object.assign(new Error(applied.error), { statusCode: applied.status, planErrors: applied.errors });
-        return applied;
-      });
-      if (!out) return reply.status(404).send({ error: "Session introuvable" });
-      return { session: out.session, tasks: out.tasks, source: draft.source, understanding: draft.understanding };
-    } catch (e) {
-      const err = e as Error & { statusCode?: number; planErrors?: string[] };
-      if (err.planErrors) return reply.status(422).send({ error: err.message, errors: err.planErrors, plan: draft.plan, source: draft.source });
-      throw e;
+    let context = body.context as string | undefined;
+    for (let attempt = 1; ; attempt++) {
+      const draft = await draftPlan(session, { template: body.template as string | undefined, params: body.params as Record<string, unknown> | undefined, goal: body.goal as string | undefined, context }, dirs);
+      if (!draft.ok) return reply.status(draft.status).send({ error: draft.error, reason: draft.reason });
+      try {
+        const out = await withTransaction(async (client) => {
+          const locked = await getSession(client, userId, id, true);
+          if (!locked) return null;
+          const applied = await applyPlan(client, locked, draft.plan, userId, dirs);
+          if (!applied.ok) throw Object.assign(new Error(applied.error), { statusCode: applied.status, planErrors: applied.errors });
+          return applied;
+        });
+        if (!out) return reply.status(404).send({ error: "Session introuvable" });
+        return { session: out.session, tasks: out.tasks, source: draft.source, understanding: draft.understanding, attempts: attempt };
+      } catch (e) {
+        const err = e as Error & { statusCode?: number; planErrors?: string[] };
+        if (!err.planErrors) throw e;
+        // V3 LOT 4 : plan du modèle refusé → nouvel essai avec les erreurs (jamais pour un gabarit).
+        if (draft.source === "llm" && attempt < MAX_LLM_PLAN_ATTEMPTS) {
+          request.log.info({ session: id, attempt, errors: err.planErrors.length }, "plan du modèle refusé : nouvel essai avec les erreurs");
+          context = repairContext(body.context as string | undefined, draft.plan, err.planErrors);
+          continue;
+        }
+        return reply.status(422).send({ error: err.message, errors: err.planErrors, plan: draft.plan, source: draft.source, attempts: attempt });
+      }
     }
   });
 

@@ -37,6 +37,7 @@ import { streamRoutes } from "./v2/routes/stream.js";
 import { artifactRoutes } from "./v2/routes/artifacts.js";
 import { capabilityRoutes } from "./v2/routes/capabilities.js";
 import { chatHistoryRoutes } from "./routes/chatHistory.js";
+import { resourceRoutes } from "./v2/routes/resources.js";
 
 /** Erreurs : 4xx → message explicite ; 5xx → message générique (détail journalisé uniquement). */
 export function errorHandler(err: FastifyError & { code?: string }, request: FastifyRequest, reply: FastifyReply) {
@@ -172,6 +173,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(capabilityRoutes);
   // V3 : historique du chat via node-api (base locale ; sans Supabase dans le navigateur).
   await app.register(chatHistoryRoutes);
+  // V3 LOT 6 : Resource Manager (agents logiques, mémoire des PC, files d'inférence).
+  await app.register(resourceRoutes);
 
   return app;
 }

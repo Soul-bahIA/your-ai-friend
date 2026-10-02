@@ -50,7 +50,7 @@ from typing import Any
 from .. import request_context
 from .base import CompletionResult, LLMError, LLMProvider
 from .circuit import CircuitBreaker  # noqa: F401 — réexporté (compatibilité LOT 1)
-from .. import network_guard, soulbah_settings
+from .. import inference_gate, network_guard, soulbah_settings
 from ..config import soulbah_settings_now
 from .registry import BLOCKED_BY_MODE, build_providers
 from .usage import UsageMeter, estimate_cost, price_for
@@ -349,17 +349,20 @@ class Orchestrator:
         images: list[str] | None = None,
         provider: str | None = None,
         effort: str | None = None,
+        timeout_s: float | None = None,
     ) -> CompletionResult:
         """`effort` (LOT 5, relais /v2/models/complete) : impose le niveau d'effort à
-        tous les sauts ; None = effort du profil / LLM_EFFORT_DEFAULT."""
+        tous les sauts ; None = effort du profil / LLM_EFFORT_DEFAULT.
+        `timeout_s` (V3 LOT 4) : délai par appel imposé (ex. DAG proposé par un modèle local, plusieurs
+        minutes sur CPU) ; le budget global s'allonge d'autant, toujours borné par x-deadline-ms."""
         hops = self.plan_hops(task, provider, bool(images))
         # Budget quotidien : refus AVANT tout appel, sans repli (402 kind="budget").
         self.meter.check_budget()
         max_tokens = self.cap_output_tokens(task, max_tokens)
         effort = (effort or "").strip().lower() or None
         started = time.monotonic()
-        local_deadline = started + self._task_budget_s(task)
-        task_timeout = self._task_timeout_s(task)
+        task_timeout = float(timeout_s) if timeout_s and timeout_s > 0 else self._task_timeout_s(task)
+        local_deadline = started + max(self._task_budget_s(task), task_timeout + 5.0)
         max_hops = max(1, _env_int("LLM_MAX_HOPS", 3))
         attempts = 0
         tried: list[str] = []
@@ -381,6 +384,34 @@ class Orchestrator:
                 logger.warning("Fournisseur %s ignoré : disjoncteur ouvert (ou essai déjà en cours)", pid)
                 continue
             attempts += 1
+
+            # V3 LOT 6 : file d'inférence du serveur local (place libre avant l'appel ; l'attente
+            # ne réduit que l'échéance globale, pas le délai de l'appel au modèle).
+            gate = inference_gate.gates.gate_for(hop.provider)
+            if gate is not None:
+                t_wait = time.monotonic()
+                try:
+                    waited = await gate.acquire(task, min(inference_gate.gates.queue_max_s(), remaining - MIN_HOP_S))
+                except inference_gate.GateBusy as busy:
+                    self.breaker.release(pid, token)  # le serveur n'a pas échoué : il est occupé
+                    err = LLMError(503, str(busy), fallback=True, kind="local_busy")
+                    self._log_failure(task, hop, err, t_wait)
+                    tried.append(pid)
+                    if first_error is None:
+                        first_error = err
+                    continue
+                except asyncio.CancelledError:
+                    self.breaker.release(pid, token)
+                    raise
+                if waited >= 1.0:
+                    logger.info("Inférence %s : %.1f s en file pour %s", task, waited, pid)
+                remaining = request_context.remaining_s()
+                if remaining is None:
+                    remaining = local_deadline - time.monotonic()
+                if remaining < MIN_HOP_S:
+                    gate.release()
+                    self.breaker.release(pid, token)
+                    raise LLMError(504, "Délai de la requête dépassé en file d'attente du modèle local.", kind="deadline")
             sdk_timeout, hard_timeout = self._hop_timeouts(task_timeout, remaining)
 
             t0 = time.monotonic()
@@ -408,6 +439,11 @@ class Orchestrator:
                 logger.exception("Erreur inattendue du fournisseur %s", pid)
                 err = LLMError(502, f"Erreur du fournisseur {pid}", fallback=True, kind="internal")
             else:
+                err = None
+            finally:
+                if gate is not None:
+                    gate.release()
+            if err is None:
                 self.breaker.success(pid)
                 result.fallback_from = list(tried)
                 if not result.provider:

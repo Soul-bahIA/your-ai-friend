@@ -23,6 +23,12 @@ for _k in ("SOULBAH_MODE", "SOULBAH_MAX_PARALLEL_AGENTS", "SOULBAH_RESOURCE_PROF
 os.environ["SOULBAH_CONFIG"] = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                                             "shared", "config", "soulbah.config.example.json")
 
+# V3 LOT 6 : Resource Manager neutre (la RAM libre de la machine de test ne limite pas les
+# workers) ; les tests dédiés injectent la mémoire et la politique.
+os.environ["SOULBAH_RAM_RESERVE_MB"] = "0"
+os.environ["SOULBAH_RAM_CRITICAL_MB"] = "0"
+os.environ["SOULBAH_WORKER_RAM_MB"] = "10"
+
 AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)

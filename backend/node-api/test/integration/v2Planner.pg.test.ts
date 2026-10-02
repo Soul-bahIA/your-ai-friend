@@ -159,16 +159,18 @@ describe.skipIf(!RUN)("planificateur V2 (LOT 11)", () => {
     expect((await pool.query("SELECT status FROM soulbah.tasks WHERE session_id = $1 AND node_key = 'module_1'", [sid])).rows[0].status).toBe("RETRYING");
   });
 
-  it("proposition du modèle : plan invalide → 422 avec les erreurs (rien n'est posé) ; plan valide → AWAITING_APPROVAL", async () => {
+  it("proposition du modèle : plan invalide (même après réparation) → 422 avec les erreurs (rien n'est posé) ; plan valide → AWAITING_APPROVAL", async () => {
     const sid = await newSession("Tape bonjour");
-    vi.mocked(ia.proposePlan).mockResolvedValueOnce({
+    const invalid = {
       feasible: true,
       understanding: "taper",
       reason: "",
       plan: { nodes: [{ key: "act", title: "Taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text", text: "bonjour" }] } }], edges: [] },
-    });
+    };
+    vi.mocked(ia.proposePlan).mockResolvedValueOnce(invalid).mockResolvedValueOnce(invalid);
     const bad = await app.inject({ method: "POST", url: `/api/v2/sessions/${sid}/propose`, headers: jwt, payload: {} });
     expect(bad.statusCode).toBe(422);
+    expect(bad.json().attempts).toBe(2);
     expect(bad.json().errors.join(" ")).toContain("sans observation préalable");
     expect(bad.json().errors.join(" ")).toContain("sans critère d'acceptation requis");
     expect(Number((await pool.query("SELECT count(*)::int AS n FROM soulbah.tasks WHERE session_id = $1", [sid])).rows[0].n)).toBe(0);
@@ -176,6 +178,10 @@ describe.skipIf(!RUN)("planificateur V2 (LOT 11)", () => {
     const call = vi.mocked(ia.proposePlan).mock.calls[0][0];
     expect(call.allowed_dirs).toEqual(["C:\\w"]);
     expect(call.roles.map((r) => r.name)).toContain("content_writer");
+    // V3 LOT 4 : le 2e essai reçoit les erreurs de validation du 1er.
+    expect(vi.mocked(ia.proposePlan).mock.calls).toHaveLength(2);
+    expect(vi.mocked(ia.proposePlan).mock.calls[1][0].context).toContain("PLAN PRÉCÉDENT REFUSÉ");
+    expect(vi.mocked(ia.proposePlan).mock.calls[1][0].context).toContain("sans observation préalable");
 
     vi.mocked(ia.proposePlan).mockResolvedValueOnce({
       feasible: true,
@@ -196,6 +202,33 @@ describe.skipIf(!RUN)("planificateur V2 (LOT 11)", () => {
     const nope = await app.inject({ method: "POST", url: `/api/v2/sessions/${sid}/propose`, headers: jwt, payload: {} });
     expect(nope.statusCode).toBe(422);
     expect(nope.json().reason).toBe("hors capacités");
+  });
+
+  it("V3 LOT 4 : plan du modèle refusé puis corrigé au 2e essai → posé (AWAITING_APPROVAL)", async () => {
+    const sid = await newSession("Tape bonjour (réparé)");
+    vi.mocked(ia.proposePlan)
+      .mockResolvedValueOnce({
+        feasible: true,
+        understanding: "taper",
+        reason: "",
+        plan: { nodes: [{ key: "act", title: "Taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text", text: "bonjour" }] } }], edges: [] },
+      })
+      .mockResolvedValueOnce({
+        feasible: true,
+        understanding: "taper",
+        reason: "",
+        plan: {
+          nodes: [
+            { key: "observe", title: "Observer", role: "desktop_operator", security_level: "L1", spec: { steps: [{ type: "screenshot" }] } },
+            { key: "act", title: "Taper", role: "desktop_operator", security_level: "L2", spec: { steps: [{ type: "type_text", text: "bonjour" }] }, acceptance_criteria: [{ type: "ui_element_state", window_title: "Bloc-notes" }] },
+          ],
+          edges: [{ from: "observe", to: "act" }],
+        },
+      });
+    const ok = await app.inject({ method: "POST", url: `/api/v2/sessions/${sid}/propose`, headers: jwt, payload: { goal: "Tape bonjour dans le bloc-notes" } });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json()).toMatchObject({ source: "llm", attempts: 2, session: { status: "AWAITING_APPROVAL" } });
+    expect(ok.json().tasks).toHaveLength(2);
   });
 
   it("gabarit avec un chemin hors workspace → 422 ; plan manuel aussi validé", async () => {

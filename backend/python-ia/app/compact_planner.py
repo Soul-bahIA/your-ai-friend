@@ -149,12 +149,15 @@ def _required(tool: dict) -> list[str]:
     return req
 
 
-def step_schema(tool: dict, allowed: list[str]) -> dict[str, Any]:
-    props: dict[str, Any] = {"type": {"const": tool["name"]}, "note": {"type": "string"}}
+def step_schema(tool: dict, allowed: list[str], note: bool = True) -> dict[str, Any]:
+    """`note=False` (DAG) : pas de champ « note » — moins de jetons à générer sur CPU."""
+    props: dict[str, Any] = {"type": {"const": tool["name"]}}
+    if note:
+        props["note"] = {"type": "string"}
     for p in tool["params"]:
         if not p.get("deprecated"):
             props[p["name"]] = _param_schema(p, allowed)
-    return {"type": "object", "required": ["type", *_required(tool), "note"], "properties": props,
+    return {"type": "object", "required": ["type", *_required(tool), *(["note"] if note else [])], "properties": props,
             "additionalProperties": False}
 
 
@@ -217,3 +220,127 @@ EVAL_SCHEMA: dict[str, Any] = {
                                        "properties": {"type": {"type": "string"}}}},
     },
 }
+
+
+# --- V3 LOT 4 : proposition de DAG multi-agents par un modèle local -------------------------------
+DAG_MAX_NODES = 6
+DAG_MAX_STEPS = 4
+DAG_MAX_CRITERIA = 2
+DAG_MAX_TOKENS = 1500
+# Mesuré sur le PC de référence (qwen2.5-1.5b, 2 cœurs) : ≈ 3,5 jetons/s sous grammaire JSON, ≈ 1 200
+# jetons de prompt — un DAG de 3 nœuds dépasse les 280 s du délai ordinaire. Délai long imposé.
+DAG_TIMEOUT_S = 600.0
+LEVELS = ("L0", "L1", "L2", "L3")
+
+# Critères d'acceptation proposables (forme exigée par node-api, evaluation/criteria.ts).
+CRITERIA_SCHEMAS: dict[str, dict[str, Any]] = {
+    "file_exists": {"required": ["path"], "properties": {"path": {"type": "string"}}},
+    "file_contains": {"required": ["path", "text"], "properties": {"path": {"type": "string"}, "text": {"type": "string"}}},
+    "command_succeeds": {"required": [], "properties": {"command": {"type": "string"}}},
+    "tests_pass": {"required": [], "properties": {"command": {"type": "string"}}},
+    "ui_element_state": {"required": ["name"], "properties": {"name": {"type": "string"}, "state": {"type": "string"},
+                                                               "window_title": {"type": "string"}}},
+    "video_valid": {"required": ["path"], "properties": {"path": {"type": "string"}}},
+    "llm_rubric": {"required": ["rubric"], "properties": {"rubric": {"type": "string"}}},
+}
+
+
+def _criterion_schema(ctype: str) -> dict[str, Any]:
+    spec = CRITERIA_SCHEMAS[ctype]
+    return {"type": "object", "required": ["type", *spec["required"]],
+            "properties": {"type": {"const": ctype}, **spec["properties"]}, "additionalProperties": False}
+
+
+def dag_tools(catalog: dict, goal: str, roles: list[dict], internet: bool = True) -> list[dict]:
+    """Outils pertinents pour l'objectif ET planifiables par au moins un rôle exécuté sur le PC."""
+    allowed = {t for r in roles if r.get("executor") != "p1" for t in r.get("tools", [])}
+    return [t for t in select_tools(catalog, goal, internet) if t["name"] in allowed]
+
+
+def _levels(max_level: str) -> list[str]:
+    return list(LEVELS[: LEVELS.index(max_level) + 1]) if max_level in LEVELS else list(LEVELS[:3])
+
+
+def dag_roles(roles: list[dict], tools: list[dict]) -> list[tuple[dict, list[dict]]]:
+    """Rôles proposables au modèle local, chacun avec SES outils pertinents. Seuls les rôles exécutés sur
+    le PC : un rôle du serveur exige des champs de spec (relecture, rédaction) que le petit modèle ne
+    sait pas produire — mesuré : nœuds refusés à coup sûr par validateDag."""
+    out = []
+    for r in roles:
+        if r.get("executor") == "p1":
+            continue
+        own = [t for t in tools if t["name"] in set(r.get("tools", []))]
+        if own:
+            out.append((r, own))
+    return out
+
+
+def dag_schema(tools: list[dict], roles: list[dict], max_level: str) -> dict[str, Any]:
+    """Un nœud = une variante PAR RÔLE : le rôle est une constante et ses étapes n'utilisent que les outils
+    de ce rôle (mesuré en réel : sans cette contrainte, le petit modèle mettait write_file dans le rôle
+    desktop_operator, refusé par validateDag)."""
+    crit = {"type": "array", "maxItems": DAG_MAX_CRITERIA, "items": {"anyOf": [_criterion_schema(c) for c in CRITERIA_SCHEMAS]}}
+    variants = []
+    for role, own in dag_roles(roles, tools) or [({"name": r["name"], "max_security_level": r.get("max_security_level", "L1")}, []) for r in roles]:
+        cap = min(_levels(max_level), _levels(role.get("max_security_level", "L1")), key=len)
+        steps: dict[str, Any] = {"type": "array", "maxItems": DAG_MAX_STEPS,
+                                 "items": {"anyOf": [step_schema(t, [], note=False) for t in own]} if own else {"type": "object"}}
+        variants.append({
+            "type": "object",
+            "required": ["key", "title", "role", "security_level", "steps", "acceptance_criteria"],
+            "properties": {
+                "key": {"type": "string"},
+                "title": {"type": "string"},
+                "role": {"const": role["name"]},
+                "security_level": {"type": "string", "enum": cap},
+                "steps": steps,
+                "acceptance_criteria": crit,
+            },
+            "additionalProperties": False,
+        })
+    node: dict[str, Any] = variants[0] if len(variants) == 1 else {"anyOf": variants}
+    edge = {"type": "object", "required": ["from", "to"],
+            "properties": {"from": {"type": "string"}, "to": {"type": "string"},
+                           "kind": {"type": "string", "enum": ["hard", "soft"]}},
+            "additionalProperties": False}
+    # Pas de champ « feasible » : mesuré en réel, le petit modèle le remplissait AVANT d'écrire ses nœuds
+    # et se déclarait « irréalisable » à tort. Ordre imposé par la grammaire : comprendre, planifier,
+    # puis (facultatif) expliquer. Plan vide = irréalisable ; sinon validateDag (node) juge le plan.
+    return {
+        "type": "object",
+        "required": ["understanding", "nodes", "edges"],
+        "properties": {
+            "understanding": {"type": "string"},
+            "nodes": {"type": "array", "maxItems": DAG_MAX_NODES, "items": node},
+            "edges": {"type": "array", "maxItems": 12, "items": edge},
+            "reason": {"type": "string"},
+        },
+    }
+
+
+def dag_system(catalog: dict, goal: str, roles: list[dict], allowed_dirs: list[str], max_level: str,
+               internet: bool = True) -> tuple[str, dict[str, Any]]:
+    tools = dag_tools(catalog, goal, roles, internet)
+    role_lines = [f"- {r['name']} (niveau max {r.get('max_security_level', 'L1')}) : "
+                  f"{_first_sentence(r.get('description', ''), 120)} Outils : {', '.join(t['name'] for t in own)}"
+                  for r, own in dag_roles(roles, tools)]
+    dirs = "\n".join(f"- {d}" for d in allowed_dirs) or "(aucun : n'utilise AUCUN chemin de fichier)"
+    system = (
+        "Tu es le planificateur multi-agents de SoulBah AI. Découpe l'objectif en tâches (nœuds) confiées à des "
+        f"rôles, avec leurs dépendances (edges). {DAG_MAX_NODES} nœuds au plus. Tu PROPOSES : le serveur valide, "
+        "l'utilisateur approuve.\n\nRÔLES :\n" + "\n".join(role_lines)
+        + "\n\nOUTILS (* = champ obligatoire) :\n" + compact_catalog(tools, catalog.get("workspace_placeholder", "<dossier autorisé>"))
+        + f"\n\nDOSSIERS AUTORISÉS (chemins absolus, à l'intérieur) :\n{dirs}\n\n"
+        f"Plafond de sécurité : {max_level}.\n"
+        "Règles :\n"
+        "- key : identifiant court et UNIQUE par nœud (ex. fichier_a, fichier_b ; jamais le nom du rôle). role : un "
+        "rôle ci-dessus ; ses étapes n'utilisent QUE ses outils.\n"
+        "- security_level ≥ niveau [Lx] de chaque outil du nœud.\n"
+        "- Un nœud qui touche le bureau (clic, clavier, fenêtre, application) commence par screenshot ou ui_snapshot.\n"
+        "- Un nœud qui modifie quelque chose (niveau L2) a au moins un critère vérifiable (ex. file_exists avec le chemin écrit).\n"
+        "- Tâches indépendantes = aucun edge entre elles (exécution en parallèle). Edge {from, to} : to dépend de from.\n"
+        "- Irréalisable avec ces rôles et outils : nodes et edges vides, reason explique pourquoi.\n"
+        "- understanding : l'objectif reformulé en une phrase, EN FRANÇAIS.\n"
+        "Réponds UNIQUEMENT par l'objet JSON {understanding, nodes, edges, reason}."
+    )
+    return system, dag_schema(tools, roles, max_level)

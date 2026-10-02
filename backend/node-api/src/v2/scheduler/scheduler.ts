@@ -19,6 +19,7 @@ import { TASK_COLS, transitionTask, type TaskRow } from "../tasks/repo.js";
 import { afterFailure, DEFAULT_ESCALATION_MS, LEASED_STATUSES, retryBackoffMs } from "../tasks/stateMachine.js";
 import { effectiveMaxParallel, grantableSlots } from "./parallelism.js";
 import { P1_ROLES } from "../evaluation/reviewer.js";
+import { memoryCap } from "../resources/resourceManager.js";
 
 export const SCHEDULER_LOCK_KEY = 0x53_42_53_43; // « SBSC »
 export const SYSTEM_SCHEDULER = "system:scheduler";
@@ -173,6 +174,8 @@ export interface LeaseReport {
   max_parallel: number;
   running: number;
   skipped_resources: number;
+  /** V3 LOT 6 : aucun bail car la mémoire du PC est critique. */
+  memory_limited?: boolean;
 }
 
 async function leasedCount(client: pg.PoolClient, where: string, values: unknown[]): Promise<number> {
@@ -204,13 +207,18 @@ export async function lease(req: LeaseRequest): Promise<LeaseReport> {
     // Capacité comptée sous verrou consultatif PAR UTILISATEUR : deux baux concurrents ne peuvent
     // pas lire le même « running » et dépasser le plafond ensemble (RUNNING ≤ max, §9.6).
     await client.query("SELECT pg_advisory_xact_lock(hashtext('soulbah.lease:' || $1::text))", [req.userId]);
-    const rt = await client.query("SELECT id, max_slots, status FROM soulbah.runtimes WHERE id = $1 AND user_id = $2", [req.runtimeId, req.userId]);
+    const rt = await client.query("SELECT id, max_slots, status, capabilities->'live' AS live FROM soulbah.runtimes WHERE id = $1 AND user_id = $2", [req.runtimeId, req.userId]);
     if (rt.rows.length !== 1) throw new Error("runtime inconnu");
     const us = await client.query("SELECT max_parallel_agents FROM soulbah.user_settings WHERE user_id = $1", [req.userId]);
     const maxParallel = effectiveMaxParallel({ global: config.maxParallelAgents, user: us.rows[0]?.max_parallel_agents ?? null, runtime: rt.rows[0].max_slots });
     const running = await leasedCount(client, "user_id = $1", [req.userId]);
     const report: LeaseReport = { granted: [], max_parallel: maxParallel, running, skipped_resources: 0 };
     let grantable = grantableSlots(maxParallel, running, req.slots);
+    // V3 LOT 6 : garde-fou du Resource Manager — mémoire critique (état récent) : aucun nouveau bail.
+    if (grantable > 0 && memoryCap(rt.rows[0].live, now) === 0) {
+      report.memory_limited = true;
+      grantable = 0;
+    }
     if (grantable === 0) return report;
 
     const candidates = await client.query(
