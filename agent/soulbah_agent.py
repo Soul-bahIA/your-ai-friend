@@ -451,6 +451,7 @@ class LoopState:
     auth_failures: int = 0
     finalizing_logged: bool = False
     exit_code: int | None = None
+    announced: bool = True  # whitelist déclarée au backend (sinon : nouvel essai après un poll réussi)
 
 
 def run_cycle(client: TaskClient, executor: Executor, pending: PendingUpdates, cfg: Config,
@@ -496,6 +497,11 @@ def run_cycle(client: TaskClient, executor: Executor, pending: PendingUpdates, c
         log.info("Connexion au backend rétablie")
     state.failures = 0
     state.auth_failures = 0
+    if not state.announced and client.announce(cfg.allowed_dirs):
+        # Démarrage avant le backend : sans whitelist, le planificateur ne connaît pas les
+        # chemins valides et chaque étape fichier serait refusée par le gate.
+        state.announced = True
+        log.info("Whitelist annoncée au backend")
     if tasks:
         log.info("%d tâche(s) en attente", len(tasks))
     for task in tasks:
@@ -550,8 +556,10 @@ def _serve_locked(cfg: Config, executor: Executor, once: bool) -> int:
     # chemins valides. Non bloquant : en cas d'échec, l'agent fonctionne quand même.
     if client.announce(cfg.allowed_dirs):
         log.info("Whitelist annoncée au backend")
-    elif getattr(client, "last_error", None) == AUTH:
-        state.auth_failures = 1
+    else:
+        state.announced = False
+        if getattr(client, "last_error", None) == AUTH:
+            state.auth_failures = 1
 
     # Mises à jour finales restées en attente lors d'une session précédente.
     if len(pending):

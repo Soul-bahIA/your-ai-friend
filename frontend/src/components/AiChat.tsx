@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Brain, Send, Loader2, User, Plus, Trash2, MessageSquare, Sparkles, Menu, Wrench, Check, X } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiFetch, apiFetchRaw, ApiError, errorMessage, isAbortError } from "@/lib/api";
@@ -22,6 +21,7 @@ import {
 import ConfirmAction from "@/components/ConfirmAction";
 import ErrorState from "@/components/ErrorState";
 import { toast } from "sonner";
+import { chatStore } from "@/lib/chatStore";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Conversation = { id: string; title: string; created_at: string };
@@ -70,17 +70,12 @@ const AiChat = () => {
   const loadConversations = useCallback(async () => {
     if (!userId) return;
     setConversationsError(null);
-    const { data, error } = await supabase
-      .from("chat_conversations")
-      .select("id, title, created_at")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false });
-    if (error) {
+    try {
+      setConversations(await chatStore().list(userId));
+    } catch (error) {
       console.error("Error loading conversations:", error);
-      setConversationsError(error.message);
-      return;
+      setConversationsError(error instanceof Error ? error.message : String(error));
     }
-    setConversations(data ?? []);
   }, [userId]);
 
   useEffect(() => {
@@ -98,20 +93,19 @@ const AiChat = () => {
 
     let ignore = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("chat_messages")
-        .select("role, content")
-        .eq("conversation_id", activeConversationId)
-        .order("created_at", { ascending: true });
-      // Réponse obsolète (l'utilisateur a changé de conversation entre-temps).
-      if (ignore) return;
-      if (error) {
+      let data: { role: string; content: string }[] = [];
+      try {
+        data = await chatStore().messages(activeConversationId);
+      } catch (error) {
+        // Réponse obsolète (l'utilisateur a changé de conversation entre-temps).
+        if (ignore) return;
         console.error("Error loading messages:", error);
-        setMessagesError(error.message);
+        setMessagesError(error instanceof Error ? error.message : String(error));
         setMessages([]);
         return;
       }
-      setMessages((data ?? []).map((m) => ({ role: m.role as Msg["role"], content: m.content })));
+      if (ignore) return;
+      setMessages(data.map((m) => ({ role: m.role as Msg["role"], content: m.content })));
     })();
     return () => {
       ignore = true;
@@ -125,40 +119,34 @@ const AiChat = () => {
   const createConversation = async (firstMessage: string) => {
     if (!userId) return null;
     const title = firstMessage.slice(0, 60) + (firstMessage.length > 60 ? "..." : "");
-    const { data, error } = await supabase
-      .from("chat_conversations")
-      .insert({ user_id: userId, title })
-      .select("id, title, created_at")
-      .single();
-    if (error || !data) {
+    try {
+      const data = await chatStore().create(userId, title);
+      setConversations((prev) => [data, ...prev]);
+      return data.id;
+    } catch (error) {
       console.error("Conversation creation error:", error);
       toast.error("Erreur lors de la création de la conversation");
       return null;
     }
-    setConversations((prev) => [data, ...prev]);
-    return data.id;
   };
 
   const saveMessage = async (conversationId: string, role: Msg["role"], content: string) => {
     if (!userId) return false;
-    const { error } = await supabase.from("chat_messages").insert({
-      conversation_id: conversationId,
-      user_id: userId,
-      role,
-      content,
-    });
-    if (error) {
+    try {
+      await chatStore().save(conversationId, userId, role, content);
+      return true;
+    } catch (error) {
       console.error("Error saving message:", error);
-      toast.error("Le message n'a pas pu être enregistré", { description: error.message });
+      toast.error("Le message n'a pas pu être enregistré", { description: error instanceof Error ? error.message : String(error) });
       return false;
     }
-    return true;
   };
 
   const deleteConversation = async (id: string) => {
-    const { error } = await supabase.from("chat_conversations").delete().eq("id", id);
-    if (error) {
-      toast.error("Suppression impossible", { description: error.message });
+    try {
+      await chatStore().remove(id);
+    } catch (error) {
+      toast.error("Suppression impossible", { description: error instanceof Error ? error.message : String(error) });
       return;
     }
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -319,11 +307,7 @@ const AiChat = () => {
 
     if (assistantSoFar && convId) {
       await saveMessage(convId, "assistant", assistantSoFar);
-      const { error } = await supabase
-        .from("chat_conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", convId);
-      if (error) console.error("Error updating conversation:", error);
+      await chatStore().touch(convId).catch((error) => console.error("Error updating conversation:", error));
     }
 
     // Ne réinitialise l'état que si ce flux est toujours le flux courant.

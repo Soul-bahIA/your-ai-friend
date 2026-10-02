@@ -14,7 +14,11 @@ from __future__ import annotations
 import json
 import re
 
-from .llm import text_generate_json, vision_generate_json
+from . import compact_planner as CP
+from . import soulbah_settings
+from .config import soulbah_settings_now
+from .llm import LLMError, _parse_json, text_generate_json, vision_generate_json
+from .providers import orchestrator
 from .parsing import parse_bool
 from .tool_catalog import load_catalog, path_params, tool_names
 
@@ -198,13 +202,38 @@ def _sanitize_steps(steps) -> list:
     return out
 
 
+def _local_first(task: str, vision: bool = False) -> bool:
+    """V3 : le premier modèle de la chaîne de cette tâche est-il un serveur local ?"""
+    try:
+        hops = orchestrator.plan_hops(task, None, vision)
+    except LLMError:
+        return False
+    return bool(hops) and getattr(hops[0].provider, "family", "") == "local"
+
+
+def _vision_available() -> bool:
+    try:
+        orchestrator.plan_hops("vision", None, True)
+        return True
+    except LLMError:
+        return False
+
+
 async def plan_goal(goal: str, context: str | None = None) -> dict:
     user = f"OBJECTIF DE L'UTILISATEUR :\n{goal}"
     if context:
         user += f"\n\nCONTEXTE :\n{context}"
-    plan = await text_generate_json(
-        _PLAN_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="automation"
-    )
+    if _local_first("automation"):
+        # V3 : prompt compact (outils pertinents seulement) + sortie JSON contrainte par schéma.
+        system, schema = CP.plan_system(_CATALOG, goal, soulbah_settings.internet_allowed(soulbah_settings_now()),
+                                        context)
+        res = await orchestrator.generate("automation", system, [{"role": "user", "content": user}],
+                                          CP.PLAN_MAX_TOKENS, json_schema=schema)
+        plan = _parse_json(res.text)
+    else:
+        plan = await text_generate_json(
+            _PLAN_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="automation"
+        )
     plan.setdefault("understanding", goal)
     if not isinstance(plan.get("reason"), str):
         plan["reason"] = str(plan.get("reason") or "")
@@ -340,6 +369,11 @@ async def evaluate_execution(
         f"RAPPORT D'EXECUTION :\n{_dump_for_prompt(result, mask=True)}"
     )
 
+    if screenshots and not _vision_available():
+        # V3 : aucun modèle de vision (mode local) — jugement sur le rapport seul, sans le prétendre visuel.
+        user += ("\n\n(Des captures ont été prises mais aucun modèle de vision n'est disponible : juge "
+                 "uniquement sur le rapport d'exécution.)")
+        screenshots = None
     if screenshots:
         user += (
             "\n\nDes captures d'ecran REELLES ont ete prises pendant l'execution "
@@ -350,6 +384,17 @@ async def evaluate_execution(
             "sur ce que tu VOIS, pas seulement sur le rapport textuel."
         )
         ev = await vision_generate_json(_EVAL_SYSTEM, user, screenshots, max_tokens=4096, task="vision")
+    elif _local_first("evaluation"):
+        used = [s.get("type") for s in steps if isinstance(s, dict)]
+        compact_user = (
+            f"OBJECTIF :\n{goal}\n\n"
+            f"PLAN EXECUTE :\n{_dump_for_prompt(steps, mask=True)[:CP.SECTION_CHARS]}\n\n"
+            f"RAPPORT D'EXECUTION :\n{_dump_for_prompt(result, mask=True)[:CP.SECTION_CHARS]}"
+        )
+        res = await orchestrator.generate("evaluation", CP.eval_system(_CATALOG, used),
+                                          [{"role": "user", "content": compact_user}], CP.EVAL_MAX_TOKENS,
+                                          json_schema=CP.EVAL_SCHEMA)
+        ev = _parse_json(res.text)
     else:
         ev = await text_generate_json(
             _EVAL_SYSTEM, [{"role": "user", "content": user}], max_tokens=4096, task="evaluation"

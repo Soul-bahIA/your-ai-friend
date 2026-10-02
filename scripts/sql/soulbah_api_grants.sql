@@ -40,6 +40,9 @@ GRANT SELECT, INSERT, UPDATE         ON public.analysis_requests  TO soulbah_api
 -- Base de connaissances
 -- knowledge_domains UPDATE : INSERT … ON CONFLICT (slug) DO UPDATE (création de domaine).
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.knowledge_base     TO soulbah_api;
+-- V3 : historique du chat servi par node-api (routes /api/chat/conversations).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.chat_conversations TO soulbah_api;
+GRANT SELECT, INSERT                 ON public.chat_messages      TO soulbah_api;
 GRANT SELECT, INSERT                 ON public.knowledge_versions TO soulbah_api;
 GRANT SELECT, INSERT, UPDATE         ON public.knowledge_domains  TO soulbah_api;
 

@@ -70,7 +70,11 @@ class OpenAICompatProvider(LLMProvider):
             raise LLMError(400, f"Le modèle {use_model} ne prend pas en charge les images.", kind="no_vision")
 
         sys_text = system
-        if json_schema is not None:
+        if json_schema is not None and self.family == "local":
+            # V3 : llama-server impose le schéma par grammaire (response_format.schema) — inutile de
+            # le recopier dans le prompt (des centaines de jetons de moins pour un petit contexte).
+            sys_text = f"{system}\n\nRéponds UNIQUEMENT avec un objet JSON valide (sans texte ni balises autour)."
+        elif json_schema is not None:
             # Pas de json_schema natif garanti partout : on impose le schéma en consigne
             # et on active response_format json_object (respecté par la plupart).
             sys_text = (

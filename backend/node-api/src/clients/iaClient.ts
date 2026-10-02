@@ -14,7 +14,9 @@ export class ServiceError extends Error {
 }
 
 // Délais par appel (AbortSignal.timeout) — plus de timeout global de 900 s.
-const DEFAULT_TIMEOUT_MS = 120_000; // planification, évaluation, routage, synthèse…
+// Planification, évaluation, routage, synthèse… IA_TIMEOUT_MS (V3) : allongé pour un modèle local sur CPU,
+// plus lent qu'une API cloud (borné entre 10 s et 15 min ; défaut 120 s).
+const DEFAULT_TIMEOUT_MS = Math.min(900_000, Math.max(10_000, Number(process.env.IA_TIMEOUT_MS) || 120_000));
 const LONG_TIMEOUT_MS = 900_000; // génération de contenu / vidéo / PDF (plusieurs minutes)
 
 // Dispatcher dédié aux appels longs : le dispatcher par défaut coupe à 300 s

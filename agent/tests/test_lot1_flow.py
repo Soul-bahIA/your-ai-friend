@@ -668,3 +668,18 @@ def test_typed_text_masked_everywhere(tmp_path, monkeypatch, caplog, capsys):
     assert "[texte masqué : 25 car.]" in json.dumps(events, ensure_ascii=False)
     # La console LOCALE affiche le contenu complet à la confirmation (S7).
     assert secret in capsys.readouterr().out
+
+
+# --- V3 : agent démarré avant le backend -------------------------------------------------------------
+def test_whitelist_announced_again_once_backend_answers(tmp_path):
+    """Défaut constaté avec le lanceur local : l'agent démarre avant l'API, l'annonce de sa whitelist
+    échoue, et le planificateur ne connaît pas les dossiers autorisés. Nouvel essai après un poll réussi."""
+    srv = FakeServer()
+    calls = []
+    srv.announce = lambda dirs: calls.append(list(dirs)) or True
+    executor, pending, cfg, state = _setup(tmp_path)
+    cfg.allowed_dirs = [str(tmp_path)]
+    state.announced = False
+    soulbah_agent.run_cycle(srv, executor, pending, cfg, state)
+    soulbah_agent.run_cycle(srv, executor, pending, cfg, state)
+    assert calls == [[str(tmp_path)]] and state.announced is True
