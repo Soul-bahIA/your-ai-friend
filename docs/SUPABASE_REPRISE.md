@@ -250,6 +250,9 @@ ALTER ROLE soulbah_api SET search_path = public, extensions;   -- opérateurs pg
 ALTER ROLE soulbah_api SET statement_timeout = '60s';
 
 -- Puis : coller ici le contenu de scripts/sql/soulbah_api_grants.sql et l'exécuter.
+-- Fait le 2026-10-02 sur le projet ntvwbafvjgzsjoumtcmb (mot de passe transmis en vérificateur SCRAM, stocké hors dépôt
+-- dans %USERPROFILE%\.soulbah\soulbah_api_password.txt). Convention backend/.env : DATABASE_URL = soulbah_api (node-api) ;
+-- DATABASE_ADMIN_URL = postgres (scripts/db/migrate.py, db_catalog.py, scripts/backup_db.sh la préfèrent).
 -- (Résumé : SELECT/INSERT/UPDATE/DELETE sur agent_tasks, agent_events, agent_keys,
 --  agent_memory, knowledge_base, user_schemas, user_table_data ; SELECT/INSERT/UPDATE sur
 --  formations, applications, analysis_requests, knowledge_domains ; SELECT/INSERT sur

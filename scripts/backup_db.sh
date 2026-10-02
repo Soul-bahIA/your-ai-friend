@@ -8,7 +8,7 @@
 #
 # Source de la connexion (par ordre de priorité) :
 #   1. BACKUP_DATABASE_URL (variable d'environnement)
-#   2. DATABASE_URL lu dans backend/.env
+#   2. DATABASE_ADMIN_URL, sinon DATABASE_URL, lu dans backend/.env
 # Le pooler Supabase en mode transaction (port 6543) est remplacé par le mode
 # session (port 5432), seul compatible avec pg_dump.
 #
@@ -96,7 +96,9 @@ if [[ -z "$DB_URL" ]]; then
     exit 1
   fi
   # Dernière définition de DATABASE_URL, sans \r (fichiers édités sous Windows) ni guillemets.
-  DB_URL="$(tr -d '\r' < "$ENV_FILE" | grep -E '^[[:space:]]*DATABASE_URL=' | tail -n 1 | cut -d= -f2-)"
+  # DATABASE_ADMIN_URL (rôle postgres) de préférence : DATABASE_URL est celle de node-api (soulbah_api, sans accès à auth).
+  DB_URL="$(tr -d '\r' < "$ENV_FILE" | grep -E '^[[:space:]]*DATABASE_ADMIN_URL=' | tail -n 1 | cut -d= -f2-)"
+  [ -n "$DB_URL" ] || DB_URL="$(tr -d '\r' < "$ENV_FILE" | grep -E '^[[:space:]]*DATABASE_URL=' | tail -n 1 | cut -d= -f2-)"
   DB_URL="${DB_URL%\"}"; DB_URL="${DB_URL#\"}"
   DB_URL="${DB_URL%\'}"; DB_URL="${DB_URL#\'}"
 fi

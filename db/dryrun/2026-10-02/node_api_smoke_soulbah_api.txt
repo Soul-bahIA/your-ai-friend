@@ -1,0 +1,15 @@
+[démarrage] avertissement (dev) : IA_SERVICE_TOKEN vide : les appels à python-ia ne sont pas authentifiés (toléré en dev/test)
+[démarrage] avertissement (dev) : DATABASE_SSL=true sans PG_SSL_CA : certificat Postgres non vérifié (toléré en dev/test)
+[démarrage] avertissement (dev) : SOULBAH_APPROVAL_SECRET vide : secret d'approbation ÉPHÉMÈRE par processus (toléré en dev/test)
+[pg] DATABASE_SSL=true sans PG_SSL_CA : connexion chiffrée mais certificat serveur NON vérifié (définissez PG_SSL_CA avec le certificat CA de Supabase pour activer la vérification).
+{"level":30,"time":1790973830162,"pid":14704,"hostname":"DESKTOP-FOQBU0N","msg":"Server listening at http://127.0.0.1:3100"}
+{"level":30,"time":1790973830185,"pid":14704,"hostname":"DESKTOP-FOQBU0N","msg":"Server listening at http://172.24.112.1:3100"}
+{"level":30,"time":1790973830185,"pid":14704,"hostname":"DESKTOP-FOQBU0N","msg":"Server listening at http://10.22.251.150:3100"}
+{"level":30,"time":1790973830198,"pid":14704,"hostname":"DESKTOP-FOQBU0N","corsOrigins":["http://localhost:8080","http://127.0.0.1:8080","http://localhost:5173"],"env":"dev","trustProxy":false,"mode":"HYBRID","maxAgents":6,"msg":"node-api en écoute sur http://0.0.0.0:3100"}
+{"level":30,"time":1790973830878,"pid":14704,"hostname":"DESKTOP-FOQBU0N","msg":"PostgreSQL joignable"}
+{"level":30,"time":1790973831038,"pid":14704,"hostname":"DESKTOP-FOQBU0N","reqId":"req-1","req":{"method":"GET","url":"/health","host":"127.0.0.1:3100","remoteAddress":"127.0.0.1","remotePort":55470},"msg":"incoming request"}
+{"level":30,"time":1790973831058,"pid":14704,"hostname":"DESKTOP-FOQBU0N","reqId":"req-1","res":{"statusCode":200},"responseTime":18.43560000000025,"msg":"request completed"}
+{"level":30,"time":1790973831060,"pid":14704,"hostname":"DESKTOP-FOQBU0N","reqId":"req-2","req":{"method":"GET","url":"/health/deep","host":"127.0.0.1:3100","remoteAddress":"127.0.0.1","remotePort":55471},"msg":"incoming request"}
+{"level":40,"time":1790973831142,"pid":14704,"hostname":"DESKTOP-FOQBU0N","count":1,"msg":"générations bloquées marquées en erreur"}
+{"level":30,"time":1790973831392,"pid":14704,"hostname":"DESKTOP-FOQBU0N","deleted":42,"images_stripped":0,"msg":"évènements agent purgés"}
+{"level":30,"time":1790973831908,"pid":14704,"hostname":"DESKTOP-FOQBU0N","reqId":"req-2","res":{"statusCode":200},"responseTime":847.3286999999996,"msg":"request completed"}

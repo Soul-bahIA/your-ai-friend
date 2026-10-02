@@ -5,7 +5,7 @@ Le mot de passe n'apparaît jamais sur une ligne de commande ni dans une sortie 
 au processus psql par l'environnement (PGPASSWORD) et masqué dans les messages d'erreur.
 
 Cibles :
-  supabase  DATABASE_URL de backend/.env (base Supabase restaurée)
+  supabase  DATABASE_ADMIN_URL (sinon DATABASE_URL) de backend/.env (base Supabase, rôle postgres)
   dev       DATABASE_URL de .dev_db/dev.env (PostgreSQL local jetable, port 54329)
   <url>     toute URL postgresql://… (ex. base de copie locale)
 Variables : PSQL (chemin de psql), SOULBAH_DB_URL_<CIBLE> pour surcharger une cible.
@@ -49,7 +49,10 @@ def resolve_url(target: str) -> str:
     if override:
         return override
     if target == "supabase":
-        url = _env_file(ROOT / "backend" / ".env").get("DATABASE_URL")
+        # Administration (migrations, catalogue, sauvegarde) en postgres : DATABASE_ADMIN_URL ; node-api (DATABASE_URL)
+        # se connecte en soulbah_api, rôle de moindre privilège sans DDL (SUPABASE_REPRISE §10).
+        env = _env_file(ROOT / "backend" / ".env")
+        url = env.get("DATABASE_ADMIN_URL") or env.get("DATABASE_URL")
     elif target == "dev":
         url = _env_file(ROOT / ".dev_db" / "dev.env").get("DATABASE_URL")
     elif "://" in target:

@@ -370,9 +370,18 @@ versions, 5 résultats de benchmark, 1 version de schéma ; 0 policy client d'é
 de `soulbah` sans RLS ; 4 index HNSW ; 50 tentatives dans `schema_migration_runs` (49 réussies, 1 échec = la
 coupure du lot 07).
 
-**Non fait, à décider par l'utilisateur** : basculer node-api sur `soulbah_api` (`DATABASE_URL` avec cet
-utilisateur et le mot de passe du fichier ci-dessus, puis redémarrage et `api_role_checks`) ; les décisions
-listées au §19.
+**Suites faites le 2026-10-02 (22:35 → 22:50), sur demande de l'utilisateur** :
+
+| Action | Résultat | Preuve |
+|---|---|---|
+| Secrets du bureau | fichier `Soulbah IA.txt` supprimé ; le jeton `sbp_` reste à révoquer dans le tableau de bord Supabase (pas d'API pour cela) | — |
+| Dépôt | 34 commits poussés vers `origin/main` (GitHub) | `git status -sb` : à jour |
+| Tâches de juillet (DATA-01) | les 2 tâches `pending` passées à `cancelled` avec `completed_at`, comme le fait `POST /api/agent-tasks/:id/cancel`, et un événement `task_cancelled` par tâche ; 0 tâche `pending` restante | `public.agent_tasks`, `public.agent_events` |
+| Bascule de node-api sur `soulbah_api` (SEC-06) | `backend/.env` : `DATABASE_URL` → `soulbah_api.<ref>` (mot de passe du fichier `%USERPROFILE%\.soulbah\soulbah_api_password.txt`) ; `DATABASE_ADMIN_URL` (rôle `postgres`) ajoutée pour les outils d'administration (`scripts/db`, `scripts/backup_db.sh`, qui la préfèrent désormais). Vérifié : lecture de `public` et `soulbah`, écriture d'une ligne d'audit, `has_role` exécutable, pas de DELETE sur `audit_logs` | sortie du script de bascule |
+| Test de fumée de node-api sous `soulbah_api` contre Supabase | démarrage sur le port 3100 : `/health` ok, `/health/deep` ok (postgres ok, python_ia ok), aucun message d'erreur au démarrage ni pendant 20 s d'ordonnanceur ; processus arrêté | `db/dryrun/2026-10-02/node_api_smoke_soulbah_api.log` |
+
+Le lanceur local (`scripts/dev_local/Lancer_Soulbah_Local.ps1`) utilise toujours la base de développement locale ;
+tout démarrage de node-api avec `backend/.env` se fait désormais en `soulbah_api`.
 
 **Deux limites de l'instance Supabase constatées** : (1) une transaction unique couvrant les 17 lots fait tomber
 la connexion (ressources) — appliquer lot par lot, c'est ce que fait le mode d'emploi ; (2) coupures de connexion
@@ -391,4 +400,4 @@ pilote réessaie après relecture de l'historique.
 | Impact applicatif | node-api : nécessaire (rattrapage) ; compatible avec les lots (57/57). Frontend : policies de lecture conservées, écritures client déjà retirées du code. Agent : aucune (passe par node-api). Temps réel : publications inchangées par les lots. |
 | Tests passés | banc 56/56 (rejoué après le correctif 06v) ; CI 3/3 sur copie et **3/3 sur la base réelle** ; node-api 57/57 ; outillage 18/18 ; restauration de la sauvegarde de 16:54 vérifiée ; `verify` 49/49 sur la base réelle. |
 | Préparation du retour arrière | sauvegarde 16:54 vérifiée ; `.down.sql` de chaque lot prouvés (séquence entière, schéma identique) ; historique de chaque action dans `soulbah.schema_migration_runs`. |
-| Reste à décider par l'utilisateur | basculer node-api sur `soulbah_api` (§18) ; rotation des clés agent (SEC-03) et révocation des sessions (SEC-04) ; sort des 2 tâches de juillet (DATA-01) ; création du rôle `soulbah_api` (SEC-06) ; MFA (SEC-14) ; pgvector hors de `public` (SEC-13) ; politique de rétention des journaux. |
+| Reste à décider par l'utilisateur | révoquer le jeton `sbp_` (tableau de bord) ; rotation des clés agent (SEC-03) et révocation des sessions (SEC-04) ; MFA (SEC-14) ; pgvector hors de `public` (SEC-13) ; politique de rétention des journaux. Faits : rôle `soulbah_api` et bascule de node-api (SEC-06), tâches de juillet annulées (DATA-01). |
