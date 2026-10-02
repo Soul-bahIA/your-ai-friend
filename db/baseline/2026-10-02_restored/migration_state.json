@@ -1,0 +1,8865 @@
+[
+ {
+  "file": "20260218031213_fc7d9650-ca05-4801-a5f5-67d083ff843d.sql",
+  "version": "20260218031213",
+  "verdict": "APPLIED",
+  "changes": 305,
+  "present": 305,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260218041438_db569e91-d5f0-4b0d-88e0-872ff733fd0a.sql",
+  "version": "20260218041438",
+  "verdict": "APPLIED",
+  "changes": 143,
+  "present": 143,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260218121217_e64522cf-01fb-446a-901b-f30e6194531b.sql",
+  "version": "20260218121217",
+  "verdict": "APPLIED",
+  "changes": 140,
+  "present": 140,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260218152103_e6ec4c1b-542d-4f94-866b-6d4012de265a.sql",
+  "version": "20260218152103",
+  "verdict": "APPLIED",
+  "changes": 55,
+  "present": 55,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260703000000_agent_keys.sql",
+  "version": "20260703000000",
+  "verdict": "APPLIED",
+  "changes": 47,
+  "present": 47,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260704000000_agent_memory.sql",
+  "version": "20260704000000",
+  "verdict": "APPLIED",
+  "changes": 48,
+  "present": 48,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260704120000_formation_video_url.sql",
+  "version": "20260704120000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260704130000_agent_allowed_dirs.sql",
+  "version": "20260704130000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706000000_knowledge_base_pro.sql",
+  "version": "20260706000000",
+  "verdict": "APPLIED",
+  "changes": 102,
+  "present": 102,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706100000_formation_curriculum.sql",
+  "version": "20260706100000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706110000_formation_pdf_url.sql",
+  "version": "20260706110000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706120000_agent_memory_levels.sql",
+  "version": "20260706120000",
+  "verdict": "APPLIED",
+  "changes": 6,
+  "present": 6,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706130000_agent_events.sql",
+  "version": "20260706130000",
+  "verdict": "APPLIED",
+  "changes": 47,
+  "present": 47,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706140000_formations_realtime.sql",
+  "version": "20260706140000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260706150000_knowledge_embeddings.sql",
+  "version": "20260706150000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20260707000000_agent_tasks_requeue.sql",
+  "version": "20260707000000",
+  "verdict": "APPLIED",
+  "changes": 1,
+  "present": 1,
+  "absent": 0,
+  "differs": 0,
+  "absent_items": [],
+  "differs_items": []
+ },
+ {
+  "file": "20261001000000_hardening.sql",
+  "version": "20261001000000",
+  "verdict": "NOT_APPLIED",
+  "changes": 84,
+  "present": 0,
+  "absent": 84,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "public",
+     "name": "analysis_requests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "input_text"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "result"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_events",
+     "name": "agent_events_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_control_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "analysis_requests_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "analysis_requests_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "analysis_requests_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "chat_conversations",
+     "name": "chat_conversations_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "chat_messages",
+     "name": "chat_messages_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "knowledge_base_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_versions",
+     "name": "knowledge_versions_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "user_migrations",
+     "name": "user_migrations_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "user_schemas",
+     "name": "user_schemas_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "user_table_data",
+     "name": "user_table_data_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "idx_agent_keys_hash"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_goal_trgm"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_user_goal"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_user_status"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_user_status_updated"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "analysis_requests_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "idx_analysis_requests_created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "idx_analysis_requests_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "idx_analysis_requests_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "applications",
+     "name": "idx_applications_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "chat_conversations",
+     "name": "idx_chat_conversations_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "formations",
+     "name": "idx_formations_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "idx_knowledge_base_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "system_logs",
+     "name": "idx_system_logs_user_created"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "user_migrations",
+     "name": "idx_user_migrations_schema"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "user_table_data",
+     "name": "idx_user_table_data_schema"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "public",
+     "name": "agent_tasks_set_updated_at",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "update_agent_tasks_updated_at"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "Users can create tasks"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "Users can update own tasks"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "Users create own analysis requests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "Users delete own analysis requests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "Users update own analysis requests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "name": "Users view own analysis requests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "profiles",
+     "name": "Users can view all profiles"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "profiles",
+     "name": "Users can view own profile"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "anon",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "authenticated",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "public",
+     "table": "analysis_requests",
+     "grantee": "service_role",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_set_updated_at()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_set_updated_at()",
+     "grantee": "anon",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_set_updated_at()",
+     "grantee": "authenticated",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_set_updated_at()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_set_updated_at()",
+     "grantee": "service_role",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001090000_lot1_fixes.sql",
+  "version": "20261001090000",
+  "verdict": "NOT_APPLIED",
+  "changes": 31,
+  "present": 0,
+  "absent": 31,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "claimed_by_key_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "target_agent_key_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_claimed_by_key_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_target_agent_key_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_claimed_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_poll"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_target_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "public",
+     "name": "agent_tasks_keep_updated_at_on_control",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "public",
+     "name": "is_admin",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "update_agent_tasks_updated_at_control"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "Users delete own agent keys"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "Users manage own agent keys"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "Users view own agent keys"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "chat_messages",
+     "name": "Users can create messages"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_versions",
+     "name": "Users create own knowledge versions"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "user_migrations",
+     "name": "Users can create migrations"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "user_roles",
+     "name": "Admins can manage roles"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "user_table_data",
+     "name": "Users can insert own data"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "user_table_data",
+     "name": "Users can update own data"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_keep_updated_at_on_control()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_keep_updated_at_on_control()",
+     "grantee": "anon",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_keep_updated_at_on_control()",
+     "grantee": "authenticated",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_keep_updated_at_on_control()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "agent_tasks_keep_updated_at_on_control()",
+     "grantee": "service_role",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "has_role(_user_id uuid, _role app_role)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "has_role(_user_id uuid, _role app_role)",
+     "grantee": "anon",
+     "privilege": "EXECUTE"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "is_admin()",
+     "grantee": "authenticated",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "is_admin()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "is_admin()",
+     "grantee": "service_role",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001100000_lot1_verif.sql",
+  "version": "20261001100000",
+  "verdict": "PARTIAL",
+  "changes": 13,
+  "present": 1,
+  "absent": 12,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "status"
+    },
+    "change": "different",
+    "note": "ancienne définition encore en place"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_goal_gin_trgm"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "public",
+     "name": "agent_tasks_set_updated_at",
+     "args": ""
+    },
+    "change": "different"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "Users delete own agent memory"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "Users manage own agent memory"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "Users view own agent memory"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "Users can delete own tasks"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "Users can create knowledge"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "Users can delete own knowledge"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "policies",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "Users can update own knowledge"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "public",
+     "function": "has_role(_user_id uuid, _role app_role)",
+     "grantee": "authenticated",
+     "privilege": "EXECUTE"
+    },
+    "change": "extra"
+   },
+   {
+    "section": "extensions",
+    "key": {
+     "name": "pg_trgm"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120000_v2_schema.sql",
+  "version": "20261001120000",
+  "verdict": "NOT_APPLIED",
+  "changes": 13,
+  "present": 0,
+  "absent": 13,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "schemas",
+    "key": {
+     "name": "soulbah"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "is_json_array",
+     "args": "p jsonb"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "is_json_object",
+     "args": "p jsonb"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "is_security_level",
+     "args": "p text"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "set_updated_at",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_json_array(p jsonb)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_json_array(p jsonb)",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_json_object(p jsonb)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_json_object(p jsonb)",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_security_level(p text)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "is_security_level(p text)",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "set_updated_at()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "set_updated_at()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120100_v2_users_sessions.sql",
+  "version": "20261001120100",
+  "verdict": "NOT_APPLIED",
+  "changes": 64,
+  "present": 0,
+  "absent": 64,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "sessions"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "user_settings"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "budget_usd"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "environment"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "error"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "finished_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "goal"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "max_parallel_agents"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "max_security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "plan"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "plan_version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "simulated"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "spent_usd"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "started_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "daily_budget_usd"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "max_parallel_agents"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "max_security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "settings"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_budget_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_environment_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_goal_length"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_max_parallel_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_plan_version_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_spent_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_budget_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_max_parallel_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_settings_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "idx_sessions_active"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "idx_sessions_user_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "sessions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "user_settings_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "sessions",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "user_settings",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120200_v2_agents_runtimes.sql",
+  "version": "20261001120200",
+  "verdict": "NOT_APPLIED",
+  "changes": 69,
+  "present": 0,
+  "absent": 69,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "agents"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "runtimes"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "capabilities"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "kind"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "last_seen_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "scopes"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "name"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "role"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "role_version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "runtime_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "agent_key_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "capabilities"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "hostname"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "last_seen_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "lease_owner"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "max_slots"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "agent_keys_capabilities_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "agent_keys_kind_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_keys",
+     "name": "agent_keys_scopes_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_role_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_runtime_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_agent_key_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_capabilities_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_max_slots_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_one_per_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "idx_agents_busy"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "idx_agents_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "idx_runtimes_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_one_per_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "runtimes_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "runtimes",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120300_v2_tasks.sql",
+  "version": "20261001120300",
+  "verdict": "NOT_APPLIED",
+  "changes": 77,
+  "present": 0,
+  "absent": 77,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "tasks"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "v2_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "current_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "acceptance_criteria"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "blocked_reason"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "error"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "escalate_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "finished_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idempotency_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "lease_expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "lease_owner"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "max_retries"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "next_attempt_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "node_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "parent_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "plan_version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "priority"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "resources"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "result"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "retry_count"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "role"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "simulated"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "spec"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "started_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "title"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "waiting_reason"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "agent_tasks_v2_task_fk"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "agents",
+     "name": "agents_current_task_fk"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_attempt_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_criteria_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_max_retries_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_node_key_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_parent_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_plan_version_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_priority_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_resources_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_retry_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_role_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_simulated_never_completed"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_spec_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_title_length"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_tasks",
+     "name": "idx_agent_tasks_v2_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_lease"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_parent"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_ready"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_retrying"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_session_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "idx_tasks_user_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "tasks_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "uq_tasks_idempotency"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "uq_tasks_node_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "tasks_check_transition",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "check_transition"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tasks",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "tasks_check_transition()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "tasks_check_transition()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120400_v2_task_dependencies.sql",
+  "version": "20261001120400",
+  "verdict": "NOT_APPLIED",
+  "changes": 24,
+  "present": 0,
+  "absent": 24,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "task_dependencies"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "depends_on_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "kind"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_depends_on_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_kind_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_no_self"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "idx_task_dependencies_reverse"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "task_dependencies_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "task_dependencies_check_cycle",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "name": "check_cycle"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "task_dependencies",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "task_dependencies_check_cycle()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "task_dependencies_check_cycle()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120500_v2_messages.sql",
+  "version": "20261001120500",
+  "verdict": "NOT_APPLIED",
+  "changes": 37,
+  "present": 0,
+  "absent": 37,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "messages"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "acked_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "correlation_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "from_agent_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "payload"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "reply_to"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "requires_ack"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "to_agent_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "to_role"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "type"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_from_agent_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_payload_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_payload_size"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_reply_to_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_to_agent_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_to_role_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_type_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "idx_messages_correlation"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "idx_messages_pending_ack"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "idx_messages_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "idx_messages_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "name": "messages_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "messages",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120600_v2_actions_tool_calls.sql",
+  "version": "20261001120600",
+  "verdict": "NOT_APPLIED",
+  "changes": 90,
+  "present": 0,
+  "absent": 90,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "actions"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "tool_calls"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "error"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "evidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "evidence_confidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "finished_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "params"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "simulated"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "started_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "step_index"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "tool"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "action_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "cost_usd"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "error"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "exit_code"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "http_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "input_tokens"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "kind"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "latency_ms"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "metadata"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "model"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "name"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "output_tokens"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "provider"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_attempt_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_confidence_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_evidence_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_idempotency"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_params_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_simulated_never_verified"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_simulated_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_step_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_tool_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_action_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_cost_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_http_status_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_in_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_kind_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_latency_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_metadata_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_name_length"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_out_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_idempotency"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "actions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "idx_actions_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "idx_tool_calls_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "idx_tool_calls_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "idx_tool_calls_user_day"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "name": "tool_calls_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "actions",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "tool_calls",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120700_v2_knowledge.sql",
+  "version": "20261001120700",
+  "verdict": "NOT_APPLIED",
+  "changes": 69,
+  "present": 0,
+  "absent": 69,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "knowledge_chunks"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "doc_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "embedding_model"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "ingest_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "last_written_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "mime"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "source_uri"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "chunk_index"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "content"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "document_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "embedding"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "embedding_model"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "token_count"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "tsv"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "category"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "confidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "content_hash"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "doc_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "doc_status_derived"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "domain"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "embedding_model"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "ingest_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "last_verified_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "last_written_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "mime"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "source"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "source_uri"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "title"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "name": "version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "knowledge_base_doc_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "knowledge_base_ingest_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_content_length"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_document_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_index_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_model_with_embedding"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_tokens_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_unique"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "knowledge_base",
+     "name": "idx_knowledge_base_doc_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "idx_knowledge_chunks_document"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "idx_knowledge_chunks_tsv"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "idx_knowledge_chunks_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "name": "knowledge_chunks_unique"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "views",
+    "key": {
+     "schema": "soulbah",
+     "name": "knowledge_documents"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_chunks",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "knowledge_documents",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120800_v2_memory.sql",
+  "version": "20261001120800",
+  "verdict": "NOT_APPLIED",
+  "changes": 48,
+  "present": 0,
+  "absent": 48,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "confidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "evidence_ids"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "is_simulation"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "scope"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "source_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "validated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "validated_by"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "confidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "content"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "evidence_ids"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "goal"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "is_simulation"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "metadata"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "project_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "scope"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "source_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "stored_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "type"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "validated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "name": "validated_by"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_confidence_range"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_evidence_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_scope_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_session_fk"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_source_task_fk"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "agent_memory_validated_requires_proof"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_expires"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_scope"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "public",
+     "table": "agent_memory",
+     "name": "idx_agent_memory_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "views",
+    "key": {
+     "schema": "soulbah",
+     "name": "memories"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "memories",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001120900_v2_skills_evaluations_checkpoints.sql",
+  "version": "20261001120900",
+  "verdict": "NOT_APPLIED",
+  "changes": 101,
+  "present": 0,
+  "absent": 101,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "checkpoints"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "evaluations"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "skills"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "seq"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "step_cursor"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "variables"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "action_taken"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "confidence"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "criteria"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluator"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evidence_ids"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "results"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "verdict"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "created_by"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "examples"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "known_errors"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "name"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "permissions"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "procedure"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "schema"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "source"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "tests"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_attempt_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_cursor_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_seq_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_unique"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_variables_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_attempt_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_confidence_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_criteria_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_evaluator_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_evidence_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_once_per_attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_results_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_verdict_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_created_by_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_examples_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_known_errors_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_name_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_name_version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_permissions_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_procedure_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_schema_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_source_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_tests_array"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_version_semver"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "name": "checkpoints_unique"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_once_per_attempt"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "name": "evaluations_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "idx_skills_status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_name_version"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "skills_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "checkpoints",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "evaluations",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "skills",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001121000_v2_artifacts_recordings_permissions_leases.sql",
+  "version": "20261001121000",
+  "verdict": "NOT_APPLIED",
+  "changes": 136,
+  "present": 0,
+  "absent": 136,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "artifacts"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "permissions"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "recordings"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "resource_leases"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "kind"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "metadata"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "mime"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "retention_class"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "sha256"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "size_bytes"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "uri"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "action_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "decided_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "decided_by"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "kind"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "payload_presented"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "payload_sha256"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "scope"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "security_level"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "token_hash"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "artifact_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "duration_s"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "fps_effective"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "fps_requested"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "path"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "probe"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "started_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "status"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "stopped_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "expires_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "holder_task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "mode"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_kind_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_metadata_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_retention_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_sha256_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_size_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_unique_per_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_action_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_decided_by_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_decision_consistent"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_kind_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_l3_requires_payload"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_level_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_payload_hash_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_payload_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_scope_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_session_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_token_hash_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_artifact_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_duration_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_fps_eff_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_fps_req_positive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_probe_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_status_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_user_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_leases_holder_task_id_fkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_leases_key_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_leases_mode_check"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_leases_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "artifacts_unique_per_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "idx_artifacts_retention"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "name": "idx_artifacts_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "idx_permissions_pending"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "idx_permissions_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "idx_permissions_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "permissions_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "idx_recordings_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "name": "recordings_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "idx_resource_leases_expires"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "idx_resource_leases_holder"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "resource_leases_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "name": "uq_resource_leases_exclusive"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "name": "set_updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "artifacts",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "permissions",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "recordings",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "resource_leases",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ },
+ {
+  "file": "20261001121100_v2_audit.sql",
+  "version": "20261001121100",
+  "verdict": "NOT_APPLIED",
+  "changes": 66,
+  "present": 0,
+  "absent": 66,
+  "differs": 0,
+  "absent_items": [
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "audit_chain_head"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "tables",
+    "key": {
+     "schema": "soulbah",
+     "name": "audit_logs"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "last_hash"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "last_seq"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "updated_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "action"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "actor"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "created_at"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "data"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "entity"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "entity_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "prev_hash"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "row_hash"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "seq"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "session_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "task_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "columns",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "user_id"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "audit_chain_head_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "audit_chain_head_single"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_action_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_actor_length"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_data_object"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_id_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_prev_hash_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "constraints",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_row_hash_format"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "name": "audit_chain_head_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_id_key"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "audit_logs_pkey"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "idx_audit_logs_action"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "idx_audit_logs_session"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "idx_audit_logs_task"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "indexes",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "idx_audit_logs_user"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "audit_logs_before_insert",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "audit_logs_immutable",
+     "args": ""
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "audit_row_hash",
+     "args": "p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "functions",
+    "key": {
+     "schema": "soulbah",
+     "name": "verify_audit_chain",
+     "args": "OUT ok boolean, OUT checked bigint, OUT broken_at bigint"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "chain_before_insert"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "immutable_rows"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "triggers",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "name": "immutable_table"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_chain_head",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "DELETE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "INSERT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "MAINTAIN"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "REFERENCES"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "SELECT"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "TRIGGER"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "TRUNCATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "table_grants",
+    "key": {
+     "schema": "soulbah",
+     "table": "audit_logs",
+     "grantee": "postgres",
+     "privilege": "UPDATE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_logs_before_insert()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_logs_before_insert()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_logs_immutable()",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_logs_immutable()",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_row_hash(p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "audit_row_hash(p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone)",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "verify_audit_chain(OUT ok boolean, OUT checked bigint, OUT broken_at bigint)",
+     "grantee": "PUBLIC",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   },
+   {
+    "section": "function_grants",
+    "key": {
+     "schema": "soulbah",
+     "function": "verify_audit_chain(OUT ok boolean, OUT checked bigint, OUT broken_at bigint)",
+     "grantee": "postgres",
+     "privilege": "EXECUTE"
+    },
+    "change": "missing"
+   }
+  ],
+  "differs_items": []
+ }
+]

@@ -1,0 +1,1052 @@
+# Schema Drift Report (généré)
+
+Base réelle : 17.6 · schémas applicatifs public
+
+Schéma attendu : 18.1 · schémas public, soulbah
+
+| Écart | Nombre |
+|---|---|
+| `missing_column` | 308 |
+| `missing_grant` | 233 |
+| `missing_check_constraint` | 123 |
+| `missing_index` | 89 |
+| `missing_foreign_key` | 57 |
+| `missing_primary_key` | 20 |
+| `missing_table` | 20 |
+| `migration_drift` | 16 |
+| `missing_trigger` | 14 |
+| `missing_function` | 13 |
+| `extra_policy` | 9 |
+| `extra_grant` | 8 |
+| `missing_policy` | 8 |
+| `missing_unique_constraint` | 8 |
+| `policy_definition_mismatch` | 6 |
+| `extra_extension` | 5 |
+| `extra_index` | 3 |
+| `missing_view` | 2 |
+| `column_definition_mismatch` | 1 |
+| `extra_function` | 1 |
+| `missing_extension` | 1 |
+| `missing_schema` | 1 |
+| `trigger_definition_mismatch` | 1 |
+| `unverified_vector_index` | 1 |
+
+## column_definition_mismatch
+
+- `public.agent_memory.status` — default : attendu "'proposed'::text", réel "'validated'::text"
+
+## extra_extension
+
+- `pg_stat_statements`
+- `pgcrypto`
+- `supabase_vault`
+- `uuid-ossp`
+- `vector`
+
+## extra_function
+
+- `public.rls_auto_enable.`
+
+## extra_grant
+
+- `public.PUBLIC.EXECUTE has_role(_user_id uuid, _role app_role)`
+- `public.anon.EXECUTE has_role(_user_id uuid, _role app_role)`
+- `public.authenticated.EXECUTE has_role(_user_id uuid, _role app_role)`
+- `public.PUBLIC.EXECUTE rls_auto_enable()`
+- `public.anon.EXECUTE rls_auto_enable()`
+- `public.authenticated.EXECUTE rls_auto_enable()`
+- `public.postgres.EXECUTE rls_auto_enable()`
+- `public.service_role.EXECUTE rls_auto_enable()`
+
+## extra_index
+
+- `public.agent_keys.idx_agent_keys_hash`
+- `public.agent_memory.idx_agent_memory_goal_trgm`
+- `public.agent_tasks.idx_agent_tasks_user_status`
+
+## extra_policy
+
+- `public.agent_keys.Users manage own agent keys`
+- `public.agent_memory.Users manage own agent memory`
+- `public.agent_tasks.Users can create tasks`
+- `public.agent_tasks.Users can delete own tasks`
+- `public.agent_tasks.Users can update own tasks`
+- `public.knowledge_base.Users can create knowledge`
+- `public.knowledge_base.Users can delete own knowledge`
+- `public.knowledge_base.Users can update own knowledge`
+- `public.profiles.Users can view all profiles`
+
+## migration_drift
+
+- `historique` — aucune table d'historique (supabase_migrations.schema_migrations ni soulbah.schema_migrations) : l'état appliqué ne peut être déduit que des objets
+- `20261001000000_hardening.sql` — NOT_APPLIED (présents 0, absents 84, différents 0)
+- `20261001090000_lot1_fixes.sql` — NOT_APPLIED (présents 0, absents 31, différents 0)
+- `20261001100000_lot1_verif.sql` — PARTIAL (présents 1, absents 12, différents 0)
+- `20261001120000_v2_schema.sql` — NOT_APPLIED (présents 0, absents 13, différents 0)
+- `20261001120100_v2_users_sessions.sql` — NOT_APPLIED (présents 0, absents 64, différents 0)
+- `20261001120200_v2_agents_runtimes.sql` — NOT_APPLIED (présents 0, absents 69, différents 0)
+- `20261001120300_v2_tasks.sql` — NOT_APPLIED (présents 0, absents 77, différents 0)
+- `20261001120400_v2_task_dependencies.sql` — NOT_APPLIED (présents 0, absents 24, différents 0)
+- `20261001120500_v2_messages.sql` — NOT_APPLIED (présents 0, absents 37, différents 0)
+- `20261001120600_v2_actions_tool_calls.sql` — NOT_APPLIED (présents 0, absents 90, différents 0)
+- `20261001120700_v2_knowledge.sql` — NOT_APPLIED (présents 0, absents 69, différents 0)
+- `20261001120800_v2_memory.sql` — NOT_APPLIED (présents 0, absents 48, différents 0)
+- `20261001120900_v2_skills_evaluations_checkpoints.sql` — NOT_APPLIED (présents 0, absents 101, différents 0)
+- `20261001121000_v2_artifacts_recordings_permissions_leases.sql` — NOT_APPLIED (présents 0, absents 136, différents 0)
+- `20261001121100_v2_audit.sql` — NOT_APPLIED (présents 0, absents 66, différents 0)
+
+## missing_check_constraint
+
+- `public.agent_keys.agent_keys_capabilities_object`
+- `public.agent_keys.agent_keys_kind_check`
+- `public.agent_keys.agent_keys_scopes_array`
+- `public.agent_memory.agent_memory_confidence_range`
+- `public.agent_memory.agent_memory_evidence_array`
+- `public.agent_memory.agent_memory_level_check`
+- `public.agent_memory.agent_memory_scope_check`
+- `public.agent_memory.agent_memory_status_check`
+- `public.agent_memory.agent_memory_validated_requires_proof`
+- `public.agent_tasks.agent_tasks_control_check`
+- `public.agent_tasks.agent_tasks_status_check`
+- `public.analysis_requests.analysis_requests_status_check`
+- `public.knowledge_base.knowledge_base_doc_status_check`
+- `public.knowledge_base.knowledge_base_ingest_status_check`
+- `soulbah.actions.actions_attempt_positive`
+- `soulbah.actions.actions_confidence_check`
+- `soulbah.actions.actions_evidence_array`
+- `soulbah.actions.actions_level_check`
+- `soulbah.actions.actions_params_object`
+- `soulbah.actions.actions_simulated_never_verified`
+- `soulbah.actions.actions_simulated_status`
+- `soulbah.actions.actions_status_check`
+- `soulbah.actions.actions_step_positive`
+- `soulbah.actions.actions_tool_format`
+- `soulbah.agents.agents_role_format`
+- `soulbah.agents.agents_status_check`
+- `soulbah.artifacts.artifacts_kind_check`
+- `soulbah.artifacts.artifacts_metadata_object`
+- `soulbah.artifacts.artifacts_retention_check`
+- `soulbah.artifacts.artifacts_sha256_format`
+- `soulbah.artifacts.artifacts_size_positive`
+- `soulbah.audit_chain_head.audit_chain_head_single`
+- `soulbah.audit_logs.audit_logs_action_format`
+- `soulbah.audit_logs.audit_logs_actor_length`
+- `soulbah.audit_logs.audit_logs_data_object`
+- `soulbah.audit_logs.audit_logs_prev_hash_format`
+- `soulbah.audit_logs.audit_logs_row_hash_format`
+- `soulbah.checkpoints.checkpoints_attempt_positive`
+- `soulbah.checkpoints.checkpoints_cursor_positive`
+- `soulbah.checkpoints.checkpoints_seq_positive`
+- `soulbah.checkpoints.checkpoints_variables_object`
+- `soulbah.evaluations.evaluations_attempt_positive`
+- `soulbah.evaluations.evaluations_confidence_check`
+- `soulbah.evaluations.evaluations_criteria_array`
+- `soulbah.evaluations.evaluations_evaluator_check`
+- `soulbah.evaluations.evaluations_evidence_array`
+- `soulbah.evaluations.evaluations_results_array`
+- `soulbah.evaluations.evaluations_verdict_check`
+- `soulbah.knowledge_chunks.knowledge_chunks_content_length`
+- `soulbah.knowledge_chunks.knowledge_chunks_index_positive`
+- `soulbah.knowledge_chunks.knowledge_chunks_model_with_embedding`
+- `soulbah.knowledge_chunks.knowledge_chunks_tokens_positive`
+- `soulbah.messages.messages_payload_object`
+- `soulbah.messages.messages_payload_size`
+- `soulbah.messages.messages_to_role_format`
+- `soulbah.messages.messages_type_check`
+- `soulbah.permissions.permissions_decision_consistent`
+- `soulbah.permissions.permissions_kind_check`
+- `soulbah.permissions.permissions_l3_requires_payload`
+- `soulbah.permissions.permissions_level_check`
+- `soulbah.permissions.permissions_payload_hash_format`
+- `soulbah.permissions.permissions_payload_object`
+- `soulbah.permissions.permissions_scope_object`
+- `soulbah.permissions.permissions_status_check`
+- `soulbah.permissions.permissions_token_hash_format`
+- `soulbah.recordings.recordings_duration_positive`
+- `soulbah.recordings.recordings_fps_eff_positive`
+- `soulbah.recordings.recordings_fps_req_positive`
+- `soulbah.recordings.recordings_probe_object`
+- `soulbah.recordings.recordings_status_check`
+- `soulbah.resource_leases.resource_leases_key_format`
+- `soulbah.resource_leases.resource_leases_mode_check`
+- `soulbah.runtimes.runtimes_capabilities_object`
+- `soulbah.runtimes.runtimes_max_slots_range`
+- `soulbah.runtimes.runtimes_status_check`
+- `soulbah.sessions.sessions_budget_positive`
+- `soulbah.sessions.sessions_environment_object`
+- `soulbah.sessions.sessions_goal_length`
+- `soulbah.sessions.sessions_level_check`
+- `soulbah.sessions.sessions_max_parallel_range`
+- `soulbah.sessions.sessions_plan_version_positive`
+- `soulbah.sessions.sessions_spent_positive`
+- `soulbah.sessions.sessions_status_check`
+- `soulbah.skills.skills_examples_array`
+- `soulbah.skills.skills_known_errors_array`
+- `soulbah.skills.skills_level_check`
+- `soulbah.skills.skills_name_format`
+- `soulbah.skills.skills_permissions_object`
+- `soulbah.skills.skills_procedure_object`
+- `soulbah.skills.skills_schema_object`
+- `soulbah.skills.skills_source_check`
+- `soulbah.skills.skills_status_check`
+- `soulbah.skills.skills_tests_array`
+- `soulbah.skills.skills_version_semver`
+- `soulbah.task_dependencies.task_dependencies_kind_check`
+- `soulbah.task_dependencies.task_dependencies_no_self`
+- `soulbah.tasks.tasks_attempt_positive`
+- `soulbah.tasks.tasks_criteria_array`
+- `soulbah.tasks.tasks_level_check`
+- `soulbah.tasks.tasks_max_retries_range`
+- `soulbah.tasks.tasks_node_key_format`
+- `soulbah.tasks.tasks_plan_version_positive`
+- `soulbah.tasks.tasks_priority_range`
+- `soulbah.tasks.tasks_resources_array`
+- `soulbah.tasks.tasks_retry_positive`
+- `soulbah.tasks.tasks_role_format`
+- `soulbah.tasks.tasks_simulated_never_completed`
+- `soulbah.tasks.tasks_spec_object`
+- `soulbah.tasks.tasks_status_check`
+- `soulbah.tasks.tasks_title_length`
+- `soulbah.tool_calls.tool_calls_cost_positive`
+- `soulbah.tool_calls.tool_calls_http_status_range`
+- `soulbah.tool_calls.tool_calls_in_positive`
+- `soulbah.tool_calls.tool_calls_kind_check`
+- `soulbah.tool_calls.tool_calls_latency_positive`
+- `soulbah.tool_calls.tool_calls_metadata_object`
+- `soulbah.tool_calls.tool_calls_name_length`
+- `soulbah.tool_calls.tool_calls_out_positive`
+- `soulbah.tool_calls.tool_calls_status_check`
+- `soulbah.user_settings.user_settings_budget_positive`
+- `soulbah.user_settings.user_settings_level_check`
+- `soulbah.user_settings.user_settings_max_parallel_range`
+- `soulbah.user_settings.user_settings_settings_object`
+
+## missing_column
+
+- `public.agent_keys.capabilities`
+- `public.agent_keys.expires_at`
+- `public.agent_keys.kind`
+- `public.agent_keys.last_seen_at`
+- `public.agent_keys.scopes`
+- `public.agent_memory.confidence`
+- `public.agent_memory.evidence_ids`
+- `public.agent_memory.expires_at`
+- `public.agent_memory.is_simulation`
+- `public.agent_memory.scope`
+- `public.agent_memory.session_id`
+- `public.agent_memory.source_task_id`
+- `public.agent_memory.validated_at`
+- `public.agent_memory.validated_by`
+- `public.agent_tasks.claimed_by_key_id`
+- `public.agent_tasks.target_agent_key_id`
+- `public.agent_tasks.v2_task_id`
+- `public.analysis_requests.created_at`
+- `public.analysis_requests.id`
+- `public.analysis_requests.input_text`
+- `public.analysis_requests.result`
+- `public.analysis_requests.status`
+- `public.analysis_requests.user_id`
+- `public.knowledge_base.doc_status`
+- `public.knowledge_base.embedding_model`
+- `public.knowledge_base.ingest_status`
+- `public.knowledge_base.last_written_at`
+- `public.knowledge_base.mime`
+- `public.knowledge_base.source_uri`
+- `soulbah.actions.attempt`
+- `soulbah.actions.created_at`
+- `soulbah.actions.error`
+- `soulbah.actions.evidence`
+- `soulbah.actions.evidence_confidence`
+- `soulbah.actions.finished_at`
+- `soulbah.actions.id`
+- `soulbah.actions.params`
+- `soulbah.actions.security_level`
+- `soulbah.actions.simulated`
+- `soulbah.actions.started_at`
+- `soulbah.actions.status`
+- `soulbah.actions.step_index`
+- `soulbah.actions.task_id`
+- `soulbah.actions.tool`
+- `soulbah.actions.updated_at`
+- `soulbah.actions.user_id`
+- `soulbah.agents.created_at`
+- `soulbah.agents.current_task_id`
+- `soulbah.agents.id`
+- `soulbah.agents.name`
+- `soulbah.agents.role`
+- `soulbah.agents.role_version`
+- `soulbah.agents.runtime_id`
+- `soulbah.agents.session_id`
+- `soulbah.agents.status`
+- `soulbah.agents.updated_at`
+- `soulbah.agents.user_id`
+- `soulbah.artifacts.created_at`
+- `soulbah.artifacts.id`
+- `soulbah.artifacts.kind`
+- `soulbah.artifacts.metadata`
+- `soulbah.artifacts.mime`
+- `soulbah.artifacts.retention_class`
+- `soulbah.artifacts.session_id`
+- `soulbah.artifacts.sha256`
+- `soulbah.artifacts.size_bytes`
+- `soulbah.artifacts.task_id`
+- `soulbah.artifacts.uri`
+- `soulbah.artifacts.user_id`
+- `soulbah.audit_chain_head.id`
+- `soulbah.audit_chain_head.last_hash`
+- `soulbah.audit_chain_head.last_seq`
+- `soulbah.audit_chain_head.updated_at`
+- `soulbah.audit_logs.action`
+- `soulbah.audit_logs.actor`
+- `soulbah.audit_logs.created_at`
+- `soulbah.audit_logs.data`
+- `soulbah.audit_logs.entity`
+- `soulbah.audit_logs.entity_id`
+- `soulbah.audit_logs.id`
+- `soulbah.audit_logs.prev_hash`
+- `soulbah.audit_logs.row_hash`
+- `soulbah.audit_logs.seq`
+- `soulbah.audit_logs.session_id`
+- `soulbah.audit_logs.task_id`
+- `soulbah.audit_logs.user_id`
+- `soulbah.checkpoints.attempt`
+- `soulbah.checkpoints.created_at`
+- `soulbah.checkpoints.id`
+- `soulbah.checkpoints.seq`
+- `soulbah.checkpoints.step_cursor`
+- `soulbah.checkpoints.task_id`
+- `soulbah.checkpoints.variables`
+- `soulbah.evaluations.action_taken`
+- `soulbah.evaluations.attempt`
+- `soulbah.evaluations.confidence`
+- `soulbah.evaluations.created_at`
+- `soulbah.evaluations.criteria`
+- `soulbah.evaluations.evaluator`
+- `soulbah.evaluations.evidence_ids`
+- `soulbah.evaluations.id`
+- `soulbah.evaluations.results`
+- `soulbah.evaluations.task_id`
+- `soulbah.evaluations.user_id`
+- `soulbah.evaluations.verdict`
+- `soulbah.knowledge_chunks.chunk_index`
+- `soulbah.knowledge_chunks.content`
+- `soulbah.knowledge_chunks.created_at`
+- `soulbah.knowledge_chunks.document_id`
+- `soulbah.knowledge_chunks.embedding`
+- `soulbah.knowledge_chunks.embedding_model`
+- `soulbah.knowledge_chunks.id`
+- `soulbah.knowledge_chunks.token_count`
+- `soulbah.knowledge_chunks.tsv`
+- `soulbah.knowledge_chunks.user_id`
+- `soulbah.knowledge_documents.category`
+- `soulbah.knowledge_documents.confidence`
+- `soulbah.knowledge_documents.content_hash`
+- `soulbah.knowledge_documents.created_at`
+- `soulbah.knowledge_documents.doc_status`
+- `soulbah.knowledge_documents.doc_status_derived`
+- `soulbah.knowledge_documents.domain`
+- `soulbah.knowledge_documents.embedding_model`
+- `soulbah.knowledge_documents.id`
+- `soulbah.knowledge_documents.ingest_status`
+- `soulbah.knowledge_documents.last_verified_at`
+- `soulbah.knowledge_documents.last_written_at`
+- `soulbah.knowledge_documents.mime`
+- `soulbah.knowledge_documents.source`
+- `soulbah.knowledge_documents.source_uri`
+- `soulbah.knowledge_documents.title`
+- `soulbah.knowledge_documents.updated_at`
+- `soulbah.knowledge_documents.user_id`
+- `soulbah.knowledge_documents.version`
+- `soulbah.memories.confidence`
+- `soulbah.memories.content`
+- `soulbah.memories.created_at`
+- `soulbah.memories.evidence_ids`
+- `soulbah.memories.expires_at`
+- `soulbah.memories.goal`
+- `soulbah.memories.id`
+- `soulbah.memories.is_simulation`
+- `soulbah.memories.level`
+- `soulbah.memories.metadata`
+- `soulbah.memories.project_id`
+- `soulbah.memories.scope`
+- `soulbah.memories.session_id`
+- `soulbah.memories.source_task_id`
+- `soulbah.memories.status`
+- `soulbah.memories.stored_status`
+- `soulbah.memories.type`
+- `soulbah.memories.updated_at`
+- `soulbah.memories.user_id`
+- `soulbah.memories.validated_at`
+- `soulbah.memories.validated_by`
+- `soulbah.messages.acked_at`
+- `soulbah.messages.correlation_id`
+- `soulbah.messages.created_at`
+- `soulbah.messages.from_agent_id`
+- `soulbah.messages.id`
+- `soulbah.messages.payload`
+- `soulbah.messages.reply_to`
+- `soulbah.messages.requires_ack`
+- `soulbah.messages.session_id`
+- `soulbah.messages.task_id`
+- `soulbah.messages.to_agent_id`
+- `soulbah.messages.to_role`
+- `soulbah.messages.type`
+- `soulbah.permissions.action_id`
+- `soulbah.permissions.created_at`
+- `soulbah.permissions.decided_at`
+- `soulbah.permissions.decided_by`
+- `soulbah.permissions.expires_at`
+- `soulbah.permissions.id`
+- `soulbah.permissions.kind`
+- `soulbah.permissions.payload_presented`
+- `soulbah.permissions.payload_sha256`
+- `soulbah.permissions.scope`
+- `soulbah.permissions.security_level`
+- `soulbah.permissions.session_id`
+- `soulbah.permissions.status`
+- `soulbah.permissions.task_id`
+- `soulbah.permissions.token_hash`
+- `soulbah.permissions.updated_at`
+- `soulbah.permissions.user_id`
+- `soulbah.recordings.artifact_id`
+- `soulbah.recordings.created_at`
+- `soulbah.recordings.duration_s`
+- `soulbah.recordings.fps_effective`
+- `soulbah.recordings.fps_requested`
+- `soulbah.recordings.id`
+- `soulbah.recordings.path`
+- `soulbah.recordings.probe`
+- `soulbah.recordings.started_at`
+- `soulbah.recordings.status`
+- `soulbah.recordings.stopped_at`
+- `soulbah.recordings.task_id`
+- `soulbah.recordings.user_id`
+- `soulbah.resource_leases.created_at`
+- `soulbah.resource_leases.expires_at`
+- `soulbah.resource_leases.holder_task_id`
+- `soulbah.resource_leases.mode`
+- `soulbah.resource_leases.resource_key`
+- `soulbah.runtimes.agent_key_id`
+- `soulbah.runtimes.capabilities`
+- `soulbah.runtimes.created_at`
+- `soulbah.runtimes.hostname`
+- `soulbah.runtimes.id`
+- `soulbah.runtimes.last_seen_at`
+- `soulbah.runtimes.lease_owner`
+- `soulbah.runtimes.max_slots`
+- `soulbah.runtimes.status`
+- `soulbah.runtimes.updated_at`
+- `soulbah.runtimes.user_id`
+- `soulbah.runtimes.version`
+- `soulbah.sessions.budget_usd`
+- `soulbah.sessions.created_at`
+- `soulbah.sessions.environment`
+- `soulbah.sessions.error`
+- `soulbah.sessions.finished_at`
+- `soulbah.sessions.goal`
+- `soulbah.sessions.id`
+- `soulbah.sessions.max_parallel_agents`
+- `soulbah.sessions.max_security_level`
+- `soulbah.sessions.plan`
+- `soulbah.sessions.plan_version`
+- `soulbah.sessions.simulated`
+- `soulbah.sessions.spent_usd`
+- `soulbah.sessions.started_at`
+- `soulbah.sessions.status`
+- `soulbah.sessions.updated_at`
+- `soulbah.sessions.user_id`
+- `soulbah.skills.created_at`
+- `soulbah.skills.created_by`
+- `soulbah.skills.examples`
+- `soulbah.skills.id`
+- `soulbah.skills.known_errors`
+- `soulbah.skills.name`
+- `soulbah.skills.permissions`
+- `soulbah.skills.procedure`
+- `soulbah.skills.schema`
+- `soulbah.skills.security_level`
+- `soulbah.skills.source`
+- `soulbah.skills.status`
+- `soulbah.skills.tests`
+- `soulbah.skills.updated_at`
+- `soulbah.skills.version`
+- `soulbah.task_dependencies.created_at`
+- `soulbah.task_dependencies.depends_on_task_id`
+- `soulbah.task_dependencies.kind`
+- `soulbah.task_dependencies.task_id`
+- `soulbah.tasks.acceptance_criteria`
+- `soulbah.tasks.attempt`
+- `soulbah.tasks.blocked_reason`
+- `soulbah.tasks.created_at`
+- `soulbah.tasks.error`
+- `soulbah.tasks.escalate_at`
+- `soulbah.tasks.finished_at`
+- `soulbah.tasks.id`
+- `soulbah.tasks.idempotency_key`
+- `soulbah.tasks.lease_expires_at`
+- `soulbah.tasks.lease_owner`
+- `soulbah.tasks.max_retries`
+- `soulbah.tasks.next_attempt_at`
+- `soulbah.tasks.node_key`
+- `soulbah.tasks.parent_task_id`
+- `soulbah.tasks.plan_version`
+- `soulbah.tasks.priority`
+- `soulbah.tasks.resources`
+- `soulbah.tasks.result`
+- `soulbah.tasks.retry_count`
+- `soulbah.tasks.role`
+- `soulbah.tasks.security_level`
+- `soulbah.tasks.session_id`
+- `soulbah.tasks.simulated`
+- `soulbah.tasks.spec`
+- `soulbah.tasks.started_at`
+- `soulbah.tasks.status`
+- `soulbah.tasks.title`
+- `soulbah.tasks.updated_at`
+- `soulbah.tasks.user_id`
+- `soulbah.tasks.waiting_reason`
+- `soulbah.tool_calls.action_id`
+- `soulbah.tool_calls.cost_usd`
+- `soulbah.tool_calls.created_at`
+- `soulbah.tool_calls.error`
+- `soulbah.tool_calls.exit_code`
+- `soulbah.tool_calls.http_status`
+- `soulbah.tool_calls.id`
+- `soulbah.tool_calls.input_tokens`
+- `soulbah.tool_calls.kind`
+- `soulbah.tool_calls.latency_ms`
+- `soulbah.tool_calls.metadata`
+- `soulbah.tool_calls.model`
+- `soulbah.tool_calls.name`
+- `soulbah.tool_calls.output_tokens`
+- `soulbah.tool_calls.provider`
+- `soulbah.tool_calls.session_id`
+- `soulbah.tool_calls.status`
+- `soulbah.tool_calls.task_id`
+- `soulbah.tool_calls.user_id`
+- `soulbah.user_settings.created_at`
+- `soulbah.user_settings.daily_budget_usd`
+- `soulbah.user_settings.max_parallel_agents`
+- `soulbah.user_settings.max_security_level`
+- `soulbah.user_settings.settings`
+- `soulbah.user_settings.updated_at`
+- `soulbah.user_settings.user_id`
+
+## missing_extension
+
+- `pg_trgm`
+
+## missing_foreign_key
+
+- `public.agent_events.agent_events_user_id_fkey`
+- `public.agent_memory.agent_memory_session_fk`
+- `public.agent_memory.agent_memory_source_task_fk`
+- `public.agent_tasks.agent_tasks_claimed_by_key_id_fkey`
+- `public.agent_tasks.agent_tasks_target_agent_key_id_fkey`
+- `public.agent_tasks.agent_tasks_user_id_fkey`
+- `public.agent_tasks.agent_tasks_v2_task_fk`
+- `public.analysis_requests.analysis_requests_user_id_fkey`
+- `public.chat_conversations.chat_conversations_user_id_fkey`
+- `public.chat_messages.chat_messages_user_id_fkey`
+- `public.knowledge_base.knowledge_base_user_id_fkey`
+- `public.knowledge_versions.knowledge_versions_user_id_fkey`
+- `public.user_migrations.user_migrations_user_id_fkey`
+- `public.user_schemas.user_schemas_user_id_fkey`
+- `public.user_table_data.user_table_data_user_id_fkey`
+- `soulbah.actions.actions_task_id_fkey`
+- `soulbah.actions.actions_user_id_fkey`
+- `soulbah.agents.agents_current_task_fk`
+- `soulbah.agents.agents_runtime_id_fkey`
+- `soulbah.agents.agents_session_id_fkey`
+- `soulbah.agents.agents_user_id_fkey`
+- `soulbah.artifacts.artifacts_session_id_fkey`
+- `soulbah.artifacts.artifacts_task_id_fkey`
+- `soulbah.artifacts.artifacts_user_id_fkey`
+- `soulbah.checkpoints.checkpoints_task_id_fkey`
+- `soulbah.evaluations.evaluations_task_id_fkey`
+- `soulbah.evaluations.evaluations_user_id_fkey`
+- `soulbah.knowledge_chunks.knowledge_chunks_document_id_fkey`
+- `soulbah.knowledge_chunks.knowledge_chunks_user_id_fkey`
+- `soulbah.messages.messages_from_agent_id_fkey`
+- `soulbah.messages.messages_reply_to_fkey`
+- `soulbah.messages.messages_session_id_fkey`
+- `soulbah.messages.messages_task_id_fkey`
+- `soulbah.messages.messages_to_agent_id_fkey`
+- `soulbah.permissions.permissions_action_id_fkey`
+- `soulbah.permissions.permissions_decided_by_fkey`
+- `soulbah.permissions.permissions_session_id_fkey`
+- `soulbah.permissions.permissions_task_id_fkey`
+- `soulbah.permissions.permissions_user_id_fkey`
+- `soulbah.recordings.recordings_artifact_id_fkey`
+- `soulbah.recordings.recordings_task_id_fkey`
+- `soulbah.recordings.recordings_user_id_fkey`
+- `soulbah.resource_leases.resource_leases_holder_task_id_fkey`
+- `soulbah.runtimes.runtimes_agent_key_id_fkey`
+- `soulbah.runtimes.runtimes_user_id_fkey`
+- `soulbah.sessions.sessions_user_id_fkey`
+- `soulbah.skills.skills_created_by_fkey`
+- `soulbah.task_dependencies.task_dependencies_depends_on_task_id_fkey`
+- `soulbah.task_dependencies.task_dependencies_task_id_fkey`
+- `soulbah.tasks.tasks_parent_task_id_fkey`
+- `soulbah.tasks.tasks_session_id_fkey`
+- `soulbah.tasks.tasks_user_id_fkey`
+- `soulbah.tool_calls.tool_calls_action_id_fkey`
+- `soulbah.tool_calls.tool_calls_session_id_fkey`
+- `soulbah.tool_calls.tool_calls_task_id_fkey`
+- `soulbah.tool_calls.tool_calls_user_id_fkey`
+- `soulbah.user_settings.user_settings_user_id_fkey`
+
+## missing_function
+
+- `public.agent_tasks_keep_updated_at_on_control.`
+- `public.agent_tasks_set_updated_at.`
+- `public.is_admin.`
+- `soulbah.audit_logs_before_insert.`
+- `soulbah.audit_logs_immutable.`
+- `soulbah.audit_row_hash.p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone`
+- `soulbah.is_json_array.p jsonb`
+- `soulbah.is_json_object.p jsonb`
+- `soulbah.is_security_level.p text`
+- `soulbah.set_updated_at.`
+- `soulbah.task_dependencies_check_cycle.`
+- `soulbah.tasks_check_transition.`
+- `soulbah.verify_audit_chain.OUT ok boolean, OUT checked bigint, OUT broken_at bigint`
+
+## missing_grant
+
+- `public.analysis_requests.anon DELETE`
+- `public.analysis_requests.anon INSERT`
+- `public.analysis_requests.anon MAINTAIN`
+- `public.analysis_requests.anon REFERENCES`
+- `public.analysis_requests.anon SELECT`
+- `public.analysis_requests.anon TRIGGER`
+- `public.analysis_requests.anon TRUNCATE`
+- `public.analysis_requests.anon UPDATE`
+- `public.analysis_requests.authenticated DELETE`
+- `public.analysis_requests.authenticated INSERT`
+- `public.analysis_requests.authenticated MAINTAIN`
+- `public.analysis_requests.authenticated REFERENCES`
+- `public.analysis_requests.authenticated SELECT`
+- `public.analysis_requests.authenticated TRIGGER`
+- `public.analysis_requests.authenticated TRUNCATE`
+- `public.analysis_requests.authenticated UPDATE`
+- `public.analysis_requests.postgres DELETE`
+- `public.analysis_requests.postgres INSERT`
+- `public.analysis_requests.postgres MAINTAIN`
+- `public.analysis_requests.postgres REFERENCES`
+- `public.analysis_requests.postgres SELECT`
+- `public.analysis_requests.postgres TRIGGER`
+- `public.analysis_requests.postgres TRUNCATE`
+- `public.analysis_requests.postgres UPDATE`
+- `public.analysis_requests.service_role DELETE`
+- `public.analysis_requests.service_role INSERT`
+- `public.analysis_requests.service_role MAINTAIN`
+- `public.analysis_requests.service_role REFERENCES`
+- `public.analysis_requests.service_role SELECT`
+- `public.analysis_requests.service_role TRIGGER`
+- `public.analysis_requests.service_role TRUNCATE`
+- `public.analysis_requests.service_role UPDATE`
+- `soulbah.actions.postgres DELETE`
+- `soulbah.actions.postgres INSERT`
+- `soulbah.actions.postgres MAINTAIN`
+- `soulbah.actions.postgres REFERENCES`
+- `soulbah.actions.postgres SELECT`
+- `soulbah.actions.postgres TRIGGER`
+- `soulbah.actions.postgres TRUNCATE`
+- `soulbah.actions.postgres UPDATE`
+- `soulbah.agents.postgres DELETE`
+- `soulbah.agents.postgres INSERT`
+- `soulbah.agents.postgres MAINTAIN`
+- `soulbah.agents.postgres REFERENCES`
+- `soulbah.agents.postgres SELECT`
+- `soulbah.agents.postgres TRIGGER`
+- `soulbah.agents.postgres TRUNCATE`
+- `soulbah.agents.postgres UPDATE`
+- `soulbah.artifacts.postgres DELETE`
+- `soulbah.artifacts.postgres INSERT`
+- `soulbah.artifacts.postgres MAINTAIN`
+- `soulbah.artifacts.postgres REFERENCES`
+- `soulbah.artifacts.postgres SELECT`
+- `soulbah.artifacts.postgres TRIGGER`
+- `soulbah.artifacts.postgres TRUNCATE`
+- `soulbah.artifacts.postgres UPDATE`
+- `soulbah.audit_chain_head.postgres DELETE`
+- `soulbah.audit_chain_head.postgres INSERT`
+- `soulbah.audit_chain_head.postgres MAINTAIN`
+- `soulbah.audit_chain_head.postgres REFERENCES`
+- `soulbah.audit_chain_head.postgres SELECT`
+- `soulbah.audit_chain_head.postgres TRIGGER`
+- `soulbah.audit_chain_head.postgres TRUNCATE`
+- `soulbah.audit_chain_head.postgres UPDATE`
+- `soulbah.audit_logs.postgres DELETE`
+- `soulbah.audit_logs.postgres INSERT`
+- `soulbah.audit_logs.postgres MAINTAIN`
+- `soulbah.audit_logs.postgres REFERENCES`
+- `soulbah.audit_logs.postgres SELECT`
+- `soulbah.audit_logs.postgres TRIGGER`
+- `soulbah.audit_logs.postgres TRUNCATE`
+- `soulbah.audit_logs.postgres UPDATE`
+- `soulbah.checkpoints.postgres DELETE`
+- `soulbah.checkpoints.postgres INSERT`
+- `soulbah.checkpoints.postgres MAINTAIN`
+- `soulbah.checkpoints.postgres REFERENCES`
+- `soulbah.checkpoints.postgres SELECT`
+- `soulbah.checkpoints.postgres TRIGGER`
+- `soulbah.checkpoints.postgres TRUNCATE`
+- `soulbah.checkpoints.postgres UPDATE`
+- `soulbah.evaluations.postgres DELETE`
+- `soulbah.evaluations.postgres INSERT`
+- `soulbah.evaluations.postgres MAINTAIN`
+- `soulbah.evaluations.postgres REFERENCES`
+- `soulbah.evaluations.postgres SELECT`
+- `soulbah.evaluations.postgres TRIGGER`
+- `soulbah.evaluations.postgres TRUNCATE`
+- `soulbah.evaluations.postgres UPDATE`
+- `soulbah.knowledge_chunks.postgres DELETE`
+- `soulbah.knowledge_chunks.postgres INSERT`
+- `soulbah.knowledge_chunks.postgres MAINTAIN`
+- `soulbah.knowledge_chunks.postgres REFERENCES`
+- `soulbah.knowledge_chunks.postgres SELECT`
+- `soulbah.knowledge_chunks.postgres TRIGGER`
+- `soulbah.knowledge_chunks.postgres TRUNCATE`
+- `soulbah.knowledge_chunks.postgres UPDATE`
+- `soulbah.knowledge_documents.postgres DELETE`
+- `soulbah.knowledge_documents.postgres INSERT`
+- `soulbah.knowledge_documents.postgres MAINTAIN`
+- `soulbah.knowledge_documents.postgres REFERENCES`
+- `soulbah.knowledge_documents.postgres SELECT`
+- `soulbah.knowledge_documents.postgres TRIGGER`
+- `soulbah.knowledge_documents.postgres TRUNCATE`
+- `soulbah.knowledge_documents.postgres UPDATE`
+- `soulbah.memories.postgres DELETE`
+- `soulbah.memories.postgres INSERT`
+- `soulbah.memories.postgres MAINTAIN`
+- `soulbah.memories.postgres REFERENCES`
+- `soulbah.memories.postgres SELECT`
+- `soulbah.memories.postgres TRIGGER`
+- `soulbah.memories.postgres TRUNCATE`
+- `soulbah.memories.postgres UPDATE`
+- `soulbah.messages.postgres DELETE`
+- `soulbah.messages.postgres INSERT`
+- `soulbah.messages.postgres MAINTAIN`
+- `soulbah.messages.postgres REFERENCES`
+- `soulbah.messages.postgres SELECT`
+- `soulbah.messages.postgres TRIGGER`
+- `soulbah.messages.postgres TRUNCATE`
+- `soulbah.messages.postgres UPDATE`
+- `soulbah.permissions.postgres DELETE`
+- `soulbah.permissions.postgres INSERT`
+- `soulbah.permissions.postgres MAINTAIN`
+- `soulbah.permissions.postgres REFERENCES`
+- `soulbah.permissions.postgres SELECT`
+- `soulbah.permissions.postgres TRIGGER`
+- `soulbah.permissions.postgres TRUNCATE`
+- `soulbah.permissions.postgres UPDATE`
+- `soulbah.recordings.postgres DELETE`
+- `soulbah.recordings.postgres INSERT`
+- `soulbah.recordings.postgres MAINTAIN`
+- `soulbah.recordings.postgres REFERENCES`
+- `soulbah.recordings.postgres SELECT`
+- `soulbah.recordings.postgres TRIGGER`
+- `soulbah.recordings.postgres TRUNCATE`
+- `soulbah.recordings.postgres UPDATE`
+- `soulbah.resource_leases.postgres DELETE`
+- `soulbah.resource_leases.postgres INSERT`
+- `soulbah.resource_leases.postgres MAINTAIN`
+- `soulbah.resource_leases.postgres REFERENCES`
+- `soulbah.resource_leases.postgres SELECT`
+- `soulbah.resource_leases.postgres TRIGGER`
+- `soulbah.resource_leases.postgres TRUNCATE`
+- `soulbah.resource_leases.postgres UPDATE`
+- `soulbah.runtimes.postgres DELETE`
+- `soulbah.runtimes.postgres INSERT`
+- `soulbah.runtimes.postgres MAINTAIN`
+- `soulbah.runtimes.postgres REFERENCES`
+- `soulbah.runtimes.postgres SELECT`
+- `soulbah.runtimes.postgres TRIGGER`
+- `soulbah.runtimes.postgres TRUNCATE`
+- `soulbah.runtimes.postgres UPDATE`
+- `soulbah.sessions.postgres DELETE`
+- `soulbah.sessions.postgres INSERT`
+- `soulbah.sessions.postgres MAINTAIN`
+- `soulbah.sessions.postgres REFERENCES`
+- `soulbah.sessions.postgres SELECT`
+- `soulbah.sessions.postgres TRIGGER`
+- `soulbah.sessions.postgres TRUNCATE`
+- `soulbah.sessions.postgres UPDATE`
+- `soulbah.skills.postgres DELETE`
+- `soulbah.skills.postgres INSERT`
+- `soulbah.skills.postgres MAINTAIN`
+- `soulbah.skills.postgres REFERENCES`
+- `soulbah.skills.postgres SELECT`
+- `soulbah.skills.postgres TRIGGER`
+- `soulbah.skills.postgres TRUNCATE`
+- `soulbah.skills.postgres UPDATE`
+- `soulbah.task_dependencies.postgres DELETE`
+- `soulbah.task_dependencies.postgres INSERT`
+- `soulbah.task_dependencies.postgres MAINTAIN`
+- `soulbah.task_dependencies.postgres REFERENCES`
+- `soulbah.task_dependencies.postgres SELECT`
+- `soulbah.task_dependencies.postgres TRIGGER`
+- `soulbah.task_dependencies.postgres TRUNCATE`
+- `soulbah.task_dependencies.postgres UPDATE`
+- `soulbah.tasks.postgres DELETE`
+- `soulbah.tasks.postgres INSERT`
+- `soulbah.tasks.postgres MAINTAIN`
+- `soulbah.tasks.postgres REFERENCES`
+- `soulbah.tasks.postgres SELECT`
+- `soulbah.tasks.postgres TRIGGER`
+- `soulbah.tasks.postgres TRUNCATE`
+- `soulbah.tasks.postgres UPDATE`
+- `soulbah.tool_calls.postgres DELETE`
+- `soulbah.tool_calls.postgres INSERT`
+- `soulbah.tool_calls.postgres MAINTAIN`
+- `soulbah.tool_calls.postgres REFERENCES`
+- `soulbah.tool_calls.postgres SELECT`
+- `soulbah.tool_calls.postgres TRIGGER`
+- `soulbah.tool_calls.postgres TRUNCATE`
+- `soulbah.tool_calls.postgres UPDATE`
+- `soulbah.user_settings.postgres DELETE`
+- `soulbah.user_settings.postgres INSERT`
+- `soulbah.user_settings.postgres MAINTAIN`
+- `soulbah.user_settings.postgres REFERENCES`
+- `soulbah.user_settings.postgres SELECT`
+- `soulbah.user_settings.postgres TRIGGER`
+- `soulbah.user_settings.postgres TRUNCATE`
+- `soulbah.user_settings.postgres UPDATE`
+- `public.PUBLIC.EXECUTE agent_tasks_keep_updated_at_on_control()`
+- `public.anon.EXECUTE agent_tasks_keep_updated_at_on_control()`
+- `public.authenticated.EXECUTE agent_tasks_keep_updated_at_on_control()`
+- `public.postgres.EXECUTE agent_tasks_keep_updated_at_on_control()`
+- `public.service_role.EXECUTE agent_tasks_keep_updated_at_on_control()`
+- `public.PUBLIC.EXECUTE agent_tasks_set_updated_at()`
+- `public.anon.EXECUTE agent_tasks_set_updated_at()`
+- `public.authenticated.EXECUTE agent_tasks_set_updated_at()`
+- `public.postgres.EXECUTE agent_tasks_set_updated_at()`
+- `public.service_role.EXECUTE agent_tasks_set_updated_at()`
+- `public.authenticated.EXECUTE is_admin()`
+- `public.postgres.EXECUTE is_admin()`
+- `public.service_role.EXECUTE is_admin()`
+- `soulbah.PUBLIC.EXECUTE audit_logs_before_insert()`
+- `soulbah.postgres.EXECUTE audit_logs_before_insert()`
+- `soulbah.PUBLIC.EXECUTE audit_logs_immutable()`
+- `soulbah.postgres.EXECUTE audit_logs_immutable()`
+- `soulbah.PUBLIC.EXECUTE audit_row_hash(p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone)`
+- `soulbah.postgres.EXECUTE audit_row_hash(p_prev text, p_id uuid, p_user uuid, p_session uuid, p_task uuid, p_actor text, p_action text, p_entity text, p_entity_id uuid, p_data jsonb, p_created timestamp with time zone)`
+- `soulbah.PUBLIC.EXECUTE is_json_array(p jsonb)`
+- `soulbah.postgres.EXECUTE is_json_array(p jsonb)`
+- `soulbah.PUBLIC.EXECUTE is_json_object(p jsonb)`
+- `soulbah.postgres.EXECUTE is_json_object(p jsonb)`
+- `soulbah.PUBLIC.EXECUTE is_security_level(p text)`
+- `soulbah.postgres.EXECUTE is_security_level(p text)`
+- `soulbah.PUBLIC.EXECUTE set_updated_at()`
+- `soulbah.postgres.EXECUTE set_updated_at()`
+- `soulbah.PUBLIC.EXECUTE task_dependencies_check_cycle()`
+- `soulbah.postgres.EXECUTE task_dependencies_check_cycle()`
+- `soulbah.PUBLIC.EXECUTE tasks_check_transition()`
+- `soulbah.postgres.EXECUTE tasks_check_transition()`
+- `soulbah.PUBLIC.EXECUTE verify_audit_chain(OUT ok boolean, OUT checked bigint, OUT broken_at bigint)`
+- `soulbah.postgres.EXECUTE verify_audit_chain(OUT ok boolean, OUT checked bigint, OUT broken_at bigint)`
+
+## missing_index
+
+- `public.agent_memory.idx_agent_memory_expires`
+- `public.agent_memory.idx_agent_memory_goal_gin_trgm`
+- `public.agent_memory.idx_agent_memory_scope`
+- `public.agent_memory.idx_agent_memory_session`
+- `public.agent_memory.idx_agent_memory_user_goal`
+- `public.agent_tasks.idx_agent_tasks_claimed_key`
+- `public.agent_tasks.idx_agent_tasks_poll`
+- `public.agent_tasks.idx_agent_tasks_target_key`
+- `public.agent_tasks.idx_agent_tasks_user_status_updated`
+- `public.agent_tasks.idx_agent_tasks_v2_task`
+- `public.analysis_requests.analysis_requests_pkey`
+- `public.analysis_requests.idx_analysis_requests_created_at`
+- `public.analysis_requests.idx_analysis_requests_status`
+- `public.analysis_requests.idx_analysis_requests_user`
+- `public.applications.idx_applications_user`
+- `public.chat_conversations.idx_chat_conversations_user`
+- `public.formations.idx_formations_user`
+- `public.knowledge_base.idx_knowledge_base_doc_status`
+- `public.knowledge_base.idx_knowledge_base_user`
+- `public.system_logs.idx_system_logs_user_created`
+- `public.user_migrations.idx_user_migrations_schema`
+- `public.user_table_data.idx_user_table_data_schema`
+- `soulbah.actions.actions_idempotency`
+- `soulbah.actions.actions_pkey`
+- `soulbah.actions.idx_actions_task`
+- `soulbah.agents.agents_pkey`
+- `soulbah.agents.idx_agents_busy`
+- `soulbah.agents.idx_agents_session`
+- `soulbah.artifacts.artifacts_pkey`
+- `soulbah.artifacts.artifacts_unique_per_user`
+- `soulbah.artifacts.idx_artifacts_retention`
+- `soulbah.artifacts.idx_artifacts_task`
+- `soulbah.audit_chain_head.audit_chain_head_pkey`
+- `soulbah.audit_logs.audit_logs_id_key`
+- `soulbah.audit_logs.audit_logs_pkey`
+- `soulbah.audit_logs.idx_audit_logs_action`
+- `soulbah.audit_logs.idx_audit_logs_session`
+- `soulbah.audit_logs.idx_audit_logs_task`
+- `soulbah.audit_logs.idx_audit_logs_user`
+- `soulbah.checkpoints.checkpoints_pkey`
+- `soulbah.checkpoints.checkpoints_unique`
+- `soulbah.evaluations.evaluations_once_per_attempt`
+- `soulbah.evaluations.evaluations_pkey`
+- `soulbah.knowledge_chunks.idx_knowledge_chunks_document`
+- `soulbah.knowledge_chunks.idx_knowledge_chunks_tsv`
+- `soulbah.knowledge_chunks.idx_knowledge_chunks_user`
+- `soulbah.knowledge_chunks.knowledge_chunks_pkey`
+- `soulbah.knowledge_chunks.knowledge_chunks_unique`
+- `soulbah.messages.idx_messages_correlation`
+- `soulbah.messages.idx_messages_pending_ack`
+- `soulbah.messages.idx_messages_session`
+- `soulbah.messages.idx_messages_task`
+- `soulbah.messages.messages_pkey`
+- `soulbah.permissions.idx_permissions_pending`
+- `soulbah.permissions.idx_permissions_session`
+- `soulbah.permissions.idx_permissions_task`
+- `soulbah.permissions.permissions_pkey`
+- `soulbah.recordings.idx_recordings_task`
+- `soulbah.recordings.recordings_pkey`
+- `soulbah.resource_leases.idx_resource_leases_expires`
+- `soulbah.resource_leases.idx_resource_leases_holder`
+- `soulbah.resource_leases.resource_leases_pkey`
+- `soulbah.resource_leases.uq_resource_leases_exclusive`
+- `soulbah.runtimes.idx_runtimes_user`
+- `soulbah.runtimes.runtimes_one_per_key`
+- `soulbah.runtimes.runtimes_pkey`
+- `soulbah.sessions.idx_sessions_active`
+- `soulbah.sessions.idx_sessions_user_status`
+- `soulbah.sessions.sessions_pkey`
+- `soulbah.skills.idx_skills_status`
+- `soulbah.skills.skills_name_version`
+- `soulbah.skills.skills_pkey`
+- `soulbah.task_dependencies.idx_task_dependencies_reverse`
+- `soulbah.task_dependencies.task_dependencies_pkey`
+- `soulbah.tasks.idx_tasks_lease`
+- `soulbah.tasks.idx_tasks_parent`
+- `soulbah.tasks.idx_tasks_ready`
+- `soulbah.tasks.idx_tasks_retrying`
+- `soulbah.tasks.idx_tasks_session_status`
+- `soulbah.tasks.idx_tasks_user_status`
+- `soulbah.tasks.tasks_pkey`
+- `soulbah.tasks.uq_tasks_idempotency`
+- `soulbah.tasks.uq_tasks_node_key`
+- `soulbah.tool_calls.idx_tool_calls_session`
+- `soulbah.tool_calls.idx_tool_calls_task`
+- `soulbah.tool_calls.idx_tool_calls_user_day`
+- `soulbah.tool_calls.tool_calls_pkey`
+- `soulbah.user_settings.user_settings_pkey`
+- `idx_knowledge_chunks_hnsw_te3s` — index HNSW attendu (migrations) absent de la base
+
+## missing_policy
+
+- `public.agent_keys.Users view own agent keys`
+- `public.agent_memory.Users delete own agent memory`
+- `public.agent_memory.Users view own agent memory`
+- `public.analysis_requests.Users create own analysis requests`
+- `public.analysis_requests.Users delete own analysis requests`
+- `public.analysis_requests.Users update own analysis requests`
+- `public.analysis_requests.Users view own analysis requests`
+- `public.profiles.Users can view own profile`
+
+## missing_primary_key
+
+- `public.analysis_requests.analysis_requests_pkey`
+- `soulbah.actions.actions_pkey`
+- `soulbah.agents.agents_pkey`
+- `soulbah.artifacts.artifacts_pkey`
+- `soulbah.audit_chain_head.audit_chain_head_pkey`
+- `soulbah.audit_logs.audit_logs_pkey`
+- `soulbah.checkpoints.checkpoints_pkey`
+- `soulbah.evaluations.evaluations_pkey`
+- `soulbah.knowledge_chunks.knowledge_chunks_pkey`
+- `soulbah.messages.messages_pkey`
+- `soulbah.permissions.permissions_pkey`
+- `soulbah.recordings.recordings_pkey`
+- `soulbah.resource_leases.resource_leases_pkey`
+- `soulbah.runtimes.runtimes_pkey`
+- `soulbah.sessions.sessions_pkey`
+- `soulbah.skills.skills_pkey`
+- `soulbah.task_dependencies.task_dependencies_pkey`
+- `soulbah.tasks.tasks_pkey`
+- `soulbah.tool_calls.tool_calls_pkey`
+- `soulbah.user_settings.user_settings_pkey`
+
+## missing_schema
+
+- `soulbah`
+
+## missing_table
+
+- `public.analysis_requests`
+- `soulbah.actions`
+- `soulbah.agents`
+- `soulbah.artifacts`
+- `soulbah.audit_chain_head`
+- `soulbah.audit_logs`
+- `soulbah.checkpoints`
+- `soulbah.evaluations`
+- `soulbah.knowledge_chunks`
+- `soulbah.messages`
+- `soulbah.permissions`
+- `soulbah.recordings`
+- `soulbah.resource_leases`
+- `soulbah.runtimes`
+- `soulbah.sessions`
+- `soulbah.skills`
+- `soulbah.task_dependencies`
+- `soulbah.tasks`
+- `soulbah.tool_calls`
+- `soulbah.user_settings`
+
+## missing_trigger
+
+- `public.agent_tasks.update_agent_tasks_updated_at_control`
+- `soulbah.actions.set_updated_at`
+- `soulbah.agents.set_updated_at`
+- `soulbah.audit_logs.chain_before_insert`
+- `soulbah.audit_logs.immutable_rows`
+- `soulbah.audit_logs.immutable_table`
+- `soulbah.permissions.set_updated_at`
+- `soulbah.runtimes.set_updated_at`
+- `soulbah.sessions.set_updated_at`
+- `soulbah.skills.set_updated_at`
+- `soulbah.task_dependencies.check_cycle`
+- `soulbah.tasks.check_transition`
+- `soulbah.tasks.set_updated_at`
+- `soulbah.user_settings.set_updated_at`
+
+## missing_unique_constraint
+
+- `soulbah.actions.actions_idempotency`
+- `soulbah.artifacts.artifacts_unique_per_user`
+- `soulbah.audit_logs.audit_logs_id_key`
+- `soulbah.checkpoints.checkpoints_unique`
+- `soulbah.evaluations.evaluations_once_per_attempt`
+- `soulbah.knowledge_chunks.knowledge_chunks_unique`
+- `soulbah.runtimes.runtimes_one_per_key`
+- `soulbah.skills.skills_name_version`
+
+## missing_view
+
+- `soulbah.knowledge_documents`
+- `soulbah.memories`
+
+## policy_definition_mismatch
+
+- `public.chat_messages.Users can create messages` — roles : attendu ['authenticated'], réel ['public']; check_norm : attendu '((auth.uid() = user_id) AND (EXISTS ( SELECT 1 FROM chat_conversations c WHERE ((c.id = chat_messages.conversation_id) AND (c.user_id = auth.uid())))))', réel '(auth.uid() = user_id)'
+- `public.knowledge_versions.Users create own knowledge versions` — check_norm : attendu '((auth.uid() = user_id) AND (EXISTS ( SELECT 1 FROM knowledge_base kb WHERE ((kb.id = knowledge_versions.entry_id) AND (kb.user_id = auth.uid())))))', réel '(auth.uid() = user_id)'
+- `public.user_migrations.Users can create migrations` — check_norm : attendu '((auth.uid() = user_id) AND (EXISTS ( SELECT 1 FROM user_schemas s WHERE ((s.id = user_migrations.schema_id) AND (s.user_id = auth.uid())))))', réel '(auth.uid() = user_id)'
+- `public.user_roles.Admins can manage roles` — using_norm : attendu 'is_admin()', réel "has_role(auth.uid(), 'admin'::app_role)"
+- `public.user_table_data.Users can insert own data` — check_norm : attendu '((auth.uid() = user_id) AND (EXISTS ( SELECT 1 FROM user_schemas s WHERE ((s.id = user_table_data.schema_id) AND (s.user_id = auth.uid())))))', réel '(auth.uid() = user_id)'
+- `public.user_table_data.Users can update own data` — check_norm : attendu '((auth.uid() = user_id) AND (EXISTS ( SELECT 1 FROM user_schemas s WHERE ((s.id = user_table_data.schema_id) AND (s.user_id = auth.uid())))))', réel None
+
+## trigger_definition_mismatch
+
+- `public.agent_tasks.update_agent_tasks_updated_at` — definition : attendu 'CREATE TRIGGER update_agent_tasks_updated_at BEFORE UPDATE ON agent_tasks FOR EACH ROW EXECUTE FUNCTION agent_tasks_set_updated_at()', réel 'CREATE TRIGGER update_agent_tasks_updated_at BEFORE UPDATE ON agent_tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+
+## unverified_vector_index
+
+- `public.knowledge_base.idx_knowledge_base_embedding` — index HNSW : attendu, non vérifiable localement (pgvector simulé)

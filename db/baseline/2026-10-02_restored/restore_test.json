@@ -1,0 +1,127 @@
+{
+ "backup": "soulbah_20261002_1239.sql.gpg",
+ "target": "postgres@127.0.0.1:54329/soulbah_restored_copy",
+ "steps": {
+  "dump_readable": {
+   "ok": true,
+   "toc_entries": 490
+  },
+  "decrypted": {
+   "ok": true,
+   "sql_bytes": 887352
+  },
+  "target_prepared": {
+   "ok": true,
+   "roles_created_nologin": [],
+   "vector": "simulé (real[])"
+  },
+  "restore": {
+   "ok": true,
+   "errors": 0,
+   "error_lines": []
+  },
+  "known_differences": {
+   "ok": true,
+   "items": [
+    {
+     "section": "columns",
+     "key": {
+      "schema": "public",
+      "table": "knowledge_base",
+      "name": "embedding"
+     },
+     "kind": "different",
+     "diff": {
+      "type": {
+       "expected": "vector(1536)",
+       "actual": "real[]"
+      }
+     },
+     "known": "pgvector simulé localement"
+    },
+    {
+     "section": "indexes",
+     "key": {
+      "schema": "public",
+      "table": "knowledge_base",
+      "name": "idx_knowledge_base_embedding"
+     },
+     "kind": "missing",
+     "expected": {
+      "bytes": 16384,
+      "columns": [
+       "CREATE INDEX idx_knowledge_base_embedding ON knowledge_base USING hnsw (embedding vector_cosine_ops)"
+      ],
+      "constraint": null,
+      "definition": "CREATE INDEX idx_knowledge_base_embedding ON public.knowledge_base USING hnsw (embedding vector_cosine_ops)",
+      "name": "idx_knowledge_base_embedding",
+      "predicate": null,
+      "primary": false,
+      "ready": true,
+      "scans": 0,
+      "schema": "public",
+      "table": "knowledge_base",
+      "unique": false,
+      "valid": true
+     },
+     "known": "pgvector simulé localement"
+    },
+    {
+     "section": "extensions",
+     "key": {
+      "name": "pg_stat_statements"
+     },
+     "kind": "missing",
+     "expected": {
+      "name": "pg_stat_statements",
+      "schema": "extensions",
+      "version": "1.11"
+     },
+     "known": "extension propre à Supabase, non restaurée localement"
+    },
+    {
+     "section": "extensions",
+     "key": {
+      "name": "supabase_vault"
+     },
+     "kind": "missing",
+     "expected": {
+      "name": "supabase_vault",
+      "schema": "vault",
+      "version": "0.3.1"
+     },
+     "known": "extension propre à Supabase, non restaurée localement"
+    },
+    {
+     "section": "extensions",
+     "key": {
+      "name": "vector"
+     },
+     "kind": "missing",
+     "expected": {
+      "name": "vector",
+      "schema": "public",
+      "version": "0.8.0"
+     },
+     "known": "pgvector simulé localement"
+    }
+   ]
+  },
+  "structure": {
+   "ok": true,
+   "differences": []
+  },
+  "grants": {
+   "ok": true,
+   "differences": []
+  },
+  "rows": {
+   "ok": true,
+   "tables": 18,
+   "rows_total": 211,
+   "mismatch": {}
+  }
+ },
+ "restore_verified": true,
+ "plaintext_removed": true
+}

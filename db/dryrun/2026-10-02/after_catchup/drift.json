@@ -1,0 +1,1702 @@
+{
+ "counts": {
+  "orphan_table": 2,
+  "extra_column": 23,
+  "constraint_definition_mismatch": 1,
+  "extra_check_constraint": 13,
+  "extra_primary_key": 2,
+  "extra_index": 3,
+  "extra_function": 2,
+  "extra_trigger": 2,
+  "extra_grant": 23,
+  "extra_extension": 2,
+  "publications_missing": 4,
+  "missing_index": 2
+ },
+ "items": [
+  {
+   "section": "tables",
+   "key": {
+    "schema": "soulbah",
+    "name": "schema_migration_runs"
+   },
+   "kind": "extra",
+   "actual": {
+    "acl": [
+     "postgres=arwdDxtm/postgres"
+    ],
+    "comment": "Soulbah DB LOT 0b : chaque tentative de migration, en ajout seul (UPDATE, DELETE, TRUNCATE refusés).",
+    "is_partition": false,
+    "kind": "r",
+    "name": "schema_migration_runs",
+    "owner": "postgres",
+    "persistence": "p",
+    "reloptions": null,
+    "reltuples": -1,
+    "rls_enabled": true,
+    "rls_forced": false,
+    "schema": "soulbah",
+    "table_bytes": 8192,
+    "total_bytes": 49152
+   },
+   "drift": "orphan_table"
+  },
+  {
+   "section": "tables",
+   "key": {
+    "schema": "soulbah",
+    "name": "schema_migrations"
+   },
+   "kind": "extra",
+   "actual": {
+    "acl": [
+     "postgres=arwdDxtm/postgres"
+    ],
+    "comment": "Soulbah DB LOT 0b : état de chaque migration (empreinte, durée, statut, retour arrière). Écrit par scripts/db/migrate.py.",
+    "is_partition": false,
+    "kind": "r",
+    "name": "schema_migrations",
+    "owner": "postgres",
+    "persistence": "p",
+    "reloptions": null,
+    "reltuples": -1,
+    "rls_enabled": true,
+    "rls_forced": false,
+    "schema": "soulbah",
+    "table_bytes": 16384,
+    "total_bytes": 65536
+   },
+   "drift": "orphan_table"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "action"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "action",
+    "not_null": true,
+    "position": 3,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "app_commit"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "app_commit",
+    "not_null": false,
+    "position": 10,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "checksum"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "checksum",
+    "not_null": false,
+    "position": 5,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "details"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "'{}'::jsonb",
+    "generated": null,
+    "identity": null,
+    "name": "details",
+    "not_null": true,
+    "position": 11,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "jsonb"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "error"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "error",
+    "not_null": false,
+    "position": 8,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "execution_ms"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "execution_ms",
+    "not_null": false,
+    "position": 7,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "integer"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "id"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": "a",
+    "name": "id",
+    "not_null": true,
+    "position": 1,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "bigint"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "run_by"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "CURRENT_USER",
+    "generated": null,
+    "identity": null,
+    "name": "run_by",
+    "not_null": true,
+    "position": 9,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "started_at"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "now()",
+    "generated": null,
+    "identity": null,
+    "name": "started_at",
+    "not_null": true,
+    "position": 6,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "timestamp with time zone"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "status"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "status",
+    "not_null": true,
+    "position": 4,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "version"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "version",
+    "not_null": true,
+    "position": 2,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "app_commit"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "app_commit",
+    "not_null": false,
+    "position": 11,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "applied_by"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "CURRENT_USER",
+    "generated": null,
+    "identity": null,
+    "name": "applied_by",
+    "not_null": true,
+    "position": 10,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "checksum"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "checksum",
+    "not_null": true,
+    "position": 3,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "executed_at"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "now()",
+    "generated": null,
+    "identity": null,
+    "name": "executed_at",
+    "not_null": true,
+    "position": 8,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "timestamp with time zone"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "execution_ms"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "execution_ms",
+    "not_null": false,
+    "position": 9,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "integer"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "name"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "name",
+    "not_null": true,
+    "position": 2,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "notes"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "notes",
+    "not_null": false,
+    "position": 12,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "recovery"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "recovery",
+    "not_null": false,
+    "position": 7,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "rollback"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": "'NO'::text",
+    "generated": null,
+    "identity": null,
+    "name": "rollback",
+    "not_null": true,
+    "position": 6,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "source"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "source",
+    "not_null": true,
+    "position": 4,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "status"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "status",
+    "not_null": true,
+    "position": 5,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "columns",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "version"
+   },
+   "kind": "extra",
+   "actual": {
+    "collation": null,
+    "comment": null,
+    "default": null,
+    "generated": null,
+    "identity": null,
+    "name": "version",
+    "not_null": true,
+    "position": 1,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "text"
+   },
+   "drift": "extra_column"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "public",
+    "table": "agent_memory",
+    "name": "agent_memory_validated_requires_proof"
+   },
+   "kind": "different",
+   "diff": {
+    "definition": {
+     "expected": "CHECK (status <> 'validated'::text OR validated_by IS NOT NULL OR metadata ? 'validated_by'::text OR jsonb_typeof(evidence_ids) = 'array'::text AND jsonb_array_length(evidence_ids) > 0)",
+     "actual": "CHECK (status <> 'validated'::text OR validated_by IS NOT NULL OR metadata ? 'validated_by'::text OR jsonb_typeof(evidence_ids) = 'array'::text AND jsonb_array_length(evidence_ids) > 0) NOT VALID"
+    }
+   },
+   "drift": "constraint_definition_mismatch"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_action_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "action"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (action = ANY (ARRAY['apply'::text, 'baseline'::text, 'rollback'::text, 'verify'::text]))",
+    "name": "schema_migration_runs_action_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_checksum_format"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "checksum"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (checksum IS NULL OR checksum ~ '^[0-9a-f]{64}$'::text)",
+    "name": "schema_migration_runs_checksum_format",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_details_object"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "details"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (jsonb_typeof(details) = 'object'::text)",
+    "name": "schema_migration_runs_details_object",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_execution_ms_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "execution_ms"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (execution_ms IS NULL OR execution_ms >= 0)",
+    "name": "schema_migration_runs_execution_ms_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_pkey"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "id"
+    ],
+    "deferrable": false,
+    "definition": "PRIMARY KEY (id)",
+    "name": "schema_migration_runs_pkey",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "p",
+    "validated": true
+   },
+   "drift": "extra_primary_key"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_status_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "status"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (status = ANY (ARRAY['succeeded'::text, 'failed'::text, 'skipped'::text]))",
+    "name": "schema_migration_runs_status_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_version_format"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "version"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (version ~ '^[0-9]{14}$'::text)",
+    "name": "schema_migration_runs_version_format",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_checksum_format"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "checksum"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (checksum ~ '^[0-9a-f]{64}$'::text)",
+    "name": "schema_migrations_checksum_format",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_execution_ms_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "execution_ms"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (execution_ms >= 0)",
+    "name": "schema_migrations_execution_ms_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_name_length"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "name"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (length(name) >= 1 AND length(name) <= 200)",
+    "name": "schema_migrations_name_length",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_pkey"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "version"
+    ],
+    "deferrable": false,
+    "definition": "PRIMARY KEY (version)",
+    "name": "schema_migrations_pkey",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "p",
+    "validated": true
+   },
+   "drift": "extra_primary_key"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_rollback_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "rollback"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (rollback = ANY (ARRAY['YES'::text, 'PARTIAL'::text, 'NO'::text]))",
+    "name": "schema_migrations_rollback_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_source_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "source"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (source = ANY (ARRAY['repo'::text, 'pending'::text, 'manual'::text]))",
+    "name": "schema_migrations_source_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_status_check"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "status"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (status = ANY (ARRAY['applied'::text, 'baselined'::text, 'rolled_back'::text]))",
+    "name": "schema_migrations_status_check",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "constraints",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_version_format"
+   },
+   "kind": "extra",
+   "actual": {
+    "columns": [
+     "version"
+    ],
+    "deferrable": false,
+    "definition": "CHECK (version ~ '^[0-9]{14}$'::text)",
+    "name": "schema_migrations_version_format",
+    "on_delete": null,
+    "on_update": null,
+    "ref_columns": null,
+    "ref_table": null,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "type": "c",
+    "validated": true
+   },
+   "drift": "extra_check_constraint"
+  },
+  {
+   "section": "indexes",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "idx_schema_migration_runs_version"
+   },
+   "kind": "extra",
+   "actual": {
+    "bytes": 16384,
+    "columns": [
+     "CREATE INDEX idx_schema_migration_runs_version ON soulbah.schema_migration_runs USING btree (version, id)",
+     "version"
+    ],
+    "constraint": null,
+    "definition": "CREATE INDEX idx_schema_migration_runs_version ON soulbah.schema_migration_runs USING btree (version, id)",
+    "name": "idx_schema_migration_runs_version",
+    "predicate": null,
+    "primary": false,
+    "ready": true,
+    "scans": 0,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "unique": false,
+    "valid": true
+   },
+   "drift": "extra_index"
+  },
+  {
+   "section": "indexes",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_pkey"
+   },
+   "kind": "extra",
+   "actual": {
+    "bytes": 16384,
+    "columns": [
+     "CREATE UNIQUE INDEX schema_migration_runs_pkey ON soulbah.schema_migration_runs USING btree (id)"
+    ],
+    "constraint": "schema_migration_runs_pkey",
+    "definition": "CREATE UNIQUE INDEX schema_migration_runs_pkey ON soulbah.schema_migration_runs USING btree (id)",
+    "name": "schema_migration_runs_pkey",
+    "predicate": null,
+    "primary": true,
+    "ready": true,
+    "scans": 0,
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "unique": true,
+    "valid": true
+   },
+   "drift": "extra_index"
+  },
+  {
+   "section": "indexes",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "name": "schema_migrations_pkey"
+   },
+   "kind": "extra",
+   "actual": {
+    "bytes": 16384,
+    "columns": [
+     "CREATE UNIQUE INDEX schema_migrations_pkey ON soulbah.schema_migrations USING btree (version)"
+    ],
+    "constraint": "schema_migrations_pkey",
+    "definition": "CREATE UNIQUE INDEX schema_migrations_pkey ON soulbah.schema_migrations USING btree (version)",
+    "name": "schema_migrations_pkey",
+    "predicate": null,
+    "primary": true,
+    "ready": true,
+    "scans": 47,
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "unique": true,
+    "valid": true
+   },
+   "drift": "extra_index"
+  },
+  {
+   "section": "functions",
+   "key": {
+    "schema": "public",
+    "name": "rls_auto_enable",
+    "args": ""
+   },
+   "kind": "extra",
+   "actual": {
+    "acl": [
+     "=X/postgres",
+     "postgres=X/postgres",
+     "anon=X/postgres",
+     "authenticated=X/postgres",
+     "service_role=X/postgres"
+    ],
+    "args": "",
+    "config": [
+     "search_path=pg_catalog"
+    ],
+    "extension": null,
+    "kind": "f",
+    "language": "plpgsql",
+    "leakproof": false,
+    "name": "rls_auto_enable",
+    "owner": "postgres",
+    "returns": "event_trigger",
+    "schema": "public",
+    "security_definer": true,
+    "source_has_crlf": false,
+    "source_md5": "d6bc17a37baf1b0394c2b850789d34bb",
+    "source_md5_raw": "99be20677b456ea8d3be47bdd44fb369",
+    "volatility": "v"
+   },
+   "drift": "extra_function"
+  },
+  {
+   "section": "functions",
+   "key": {
+    "schema": "soulbah",
+    "name": "schema_migration_runs_append_only",
+    "args": ""
+   },
+   "kind": "extra",
+   "actual": {
+    "acl": null,
+    "args": "",
+    "config": [
+     "search_path=soulbah, pg_temp"
+    ],
+    "extension": null,
+    "kind": "f",
+    "language": "plpgsql",
+    "leakproof": false,
+    "name": "schema_migration_runs_append_only",
+    "owner": "postgres",
+    "returns": "trigger",
+    "schema": "soulbah",
+    "security_definer": false,
+    "source_has_crlf": true,
+    "source_md5": "2e2a1809ca18bb867236fe6d1d6efc3f",
+    "source_md5_raw": "50787845a107e579b1327635cda921fb",
+    "volatility": "v"
+   },
+   "drift": "extra_function"
+  },
+  {
+   "section": "triggers",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_no_truncate"
+   },
+   "kind": "extra",
+   "actual": {
+    "definition": "CREATE TRIGGER schema_migration_runs_no_truncate BEFORE TRUNCATE ON soulbah.schema_migration_runs FOR EACH STATEMENT EXECUTE FUNCTION soulbah.schema_migration_runs_append_only()",
+    "enabled": "O",
+    "function": "soulbah.schema_migration_runs_append_only()",
+    "name": "schema_migration_runs_no_truncate",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_trigger"
+  },
+  {
+   "section": "triggers",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "name": "schema_migration_runs_no_update"
+   },
+   "kind": "extra",
+   "actual": {
+    "definition": "CREATE TRIGGER schema_migration_runs_no_update BEFORE DELETE OR UPDATE ON soulbah.schema_migration_runs FOR EACH ROW EXECUTE FUNCTION soulbah.schema_migration_runs_append_only()",
+    "enabled": "O",
+    "function": "soulbah.schema_migration_runs_append_only()",
+    "name": "schema_migration_runs_no_update",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_trigger"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "DELETE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "DELETE",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "INSERT"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "INSERT",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "MAINTAIN"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "MAINTAIN",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "REFERENCES"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "REFERENCES",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "SELECT"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "SELECT",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "TRIGGER"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "TRIGGER",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "TRUNCATE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "TRUNCATE",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migration_runs",
+    "grantee": "postgres",
+    "privilege": "UPDATE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "UPDATE",
+    "schema": "soulbah",
+    "table": "schema_migration_runs"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "DELETE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "DELETE",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "INSERT"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "INSERT",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "MAINTAIN"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "MAINTAIN",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "REFERENCES"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "REFERENCES",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "SELECT"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "SELECT",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "TRIGGER"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "TRIGGER",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "TRUNCATE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "TRUNCATE",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "table_grants",
+   "key": {
+    "schema": "soulbah",
+    "table": "schema_migrations",
+    "grantee": "postgres",
+    "privilege": "UPDATE"
+   },
+   "kind": "extra",
+   "actual": {
+    "grantable": false,
+    "grantee": "postgres",
+    "privilege": "UPDATE",
+    "schema": "soulbah",
+    "table": "schema_migrations"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "public",
+    "function": "rls_auto_enable()",
+    "grantee": "PUBLIC",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "rls_auto_enable()",
+    "grantee": "PUBLIC",
+    "privilege": "EXECUTE",
+    "schema": "public"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "public",
+    "function": "rls_auto_enable()",
+    "grantee": "anon",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "rls_auto_enable()",
+    "grantee": "anon",
+    "privilege": "EXECUTE",
+    "schema": "public"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "public",
+    "function": "rls_auto_enable()",
+    "grantee": "authenticated",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "rls_auto_enable()",
+    "grantee": "authenticated",
+    "privilege": "EXECUTE",
+    "schema": "public"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "public",
+    "function": "rls_auto_enable()",
+    "grantee": "postgres",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "rls_auto_enable()",
+    "grantee": "postgres",
+    "privilege": "EXECUTE",
+    "schema": "public"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "public",
+    "function": "rls_auto_enable()",
+    "grantee": "service_role",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "rls_auto_enable()",
+    "grantee": "service_role",
+    "privilege": "EXECUTE",
+    "schema": "public"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "soulbah",
+    "function": "schema_migration_runs_append_only()",
+    "grantee": "PUBLIC",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "schema_migration_runs_append_only()",
+    "grantee": "PUBLIC",
+    "privilege": "EXECUTE",
+    "schema": "soulbah"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "function_grants",
+   "key": {
+    "schema": "soulbah",
+    "function": "schema_migration_runs_append_only()",
+    "grantee": "postgres",
+    "privilege": "EXECUTE"
+   },
+   "kind": "extra",
+   "actual": {
+    "function": "schema_migration_runs_append_only()",
+    "grantee": "postgres",
+    "privilege": "EXECUTE",
+    "schema": "soulbah"
+   },
+   "drift": "extra_grant"
+  },
+  {
+   "section": "extensions",
+   "key": {
+    "name": "pgcrypto"
+   },
+   "kind": "extra",
+   "actual": {
+    "name": "pgcrypto",
+    "schema": "extensions",
+    "version": "1.4"
+   },
+   "drift": "extra_extension"
+  },
+  {
+   "section": "extensions",
+   "key": {
+    "name": "uuid-ossp"
+   },
+   "kind": "extra",
+   "actual": {
+    "name": "uuid-ossp",
+    "schema": "extensions",
+    "version": "1.1"
+   },
+   "drift": "extra_extension"
+  },
+  {
+   "section": "publications",
+   "key": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "agent_events"
+   },
+   "kind": "missing",
+   "expected": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "agent_events"
+   },
+   "drift": "publications_missing"
+  },
+  {
+   "section": "publications",
+   "key": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "agent_tasks"
+   },
+   "kind": "missing",
+   "expected": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "agent_tasks"
+   },
+   "drift": "publications_missing"
+  },
+  {
+   "section": "publications",
+   "key": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "formations"
+   },
+   "kind": "missing",
+   "expected": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "formations"
+   },
+   "drift": "publications_missing"
+  },
+  {
+   "section": "publications",
+   "key": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "system_logs"
+   },
+   "kind": "missing",
+   "expected": {
+    "publication": "supabase_realtime",
+    "schema": "public",
+    "table": "system_logs"
+   },
+   "drift": "publications_missing"
+  },
+  {
+   "section": "indexes",
+   "key": {
+    "name": "idx_knowledge_base_embedding"
+   },
+   "kind": "missing",
+   "note": "index HNSW attendu (migrations) absent de la base",
+   "drift": "missing_index"
+  },
+  {
+   "section": "indexes",
+   "key": {
+    "name": "idx_knowledge_chunks_hnsw_te3s"
+   },
+   "kind": "missing",
+   "note": "index HNSW attendu (migrations) absent de la base",
+   "drift": "missing_index"
+  }
+ ]
+}

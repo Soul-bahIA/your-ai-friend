@@ -1,0 +1,58 @@
+{
+ "baseline": "SoulbahDatabaseBaseline",
+ "label": "schéma attendu par le code (31 migrations, pgvector simulé)",
+ "taken_at": "2026-10-02T10:59:30+00:00",
+ "connection": "postgres@127.0.0.1:54329/soulbah_expected",
+ "server_version": "18.1",
+ "database": "soulbah_expected",
+ "size_bytes": 12080831,
+ "schema_hash": "36200dea5f040fddc3d3a8295996a308659055ee1e260043f1eb3672a7d091a7",
+ "schema_hash_app": "31884ec1f975b2dcec02b94d14b588f2ff92b6d20714891c0a952719906724f3",
+ "schema_hash_by_schema": {
+  "auth": "9f4f506cf7d16d8f37db29abf8b2e094e0d40d364cbe63d7a6c5e48e4da0e881",
+  "extensions": "914ba26a2ead26cad2514688da085e0c0dda6139908757b25b7b98d91c68c393",
+  "public": "633fd364c276dd61ea471923d5f53a74f24b42b769ca395cf3a0055825608342",
+  "soulbah": "d51d1c73de68de75965d9933eaea70631e6e52343d28634e3119a222f38c1cbb"
+ },
+ "app_schemas": [
+  "public",
+  "soulbah"
+ ],
+ "managed_schemas": [
+  "auth",
+  "extensions"
+ ],
+ "migration_state": {
+  "supabase_migrations": "absent",
+  "soulbah_migrations": "absent"
+ },
+ "objects_app": {
+  "tables": 38,
+  "columns": 454,
+  "constraints": 528,
+  "indexes": 127,
+  "views": 2,
+  "sequences": 0,
+  "types": 1,
+  "functions": 16,
+  "triggers": 22,
+  "policies": 48
+ },
+ "objects_all": {
+  "tables": 39,
+  "indexes": 128,
+  "functions": 17,
+  "triggers": 23,
+  "policies": 48
+ },
+ "extension_functions_in_app_schemas": 0,
+ "extensions": [
+  "pg_trgm 1.6 (extensions)",
+  "plpgsql 1.0 (pg_catalog)"
+ ],
+ "row_counts": {},
+ "managed_row_counts": {},
+ "errors": {
+  "top_queries": "ERROR:  relation \"extensions.pg_stat_statements\" does not exist\nLIGNE 5 :   FROM extensions.pg_stat_statements\n                 ^"
+ }
+}

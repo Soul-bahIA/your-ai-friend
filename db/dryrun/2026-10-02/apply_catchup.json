@@ -1,0 +1,111 @@
+{
+ "target": "postgres@127.0.0.1:54329/soulbah_dryrun_copy",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261001000000",
+   "name": "hardening",
+   "status": "applied",
+   "ms": 218,
+   "error": null
+  },
+  {
+   "version": "20261001090000",
+   "name": "lot1_fixes",
+   "status": "applied",
+   "ms": 171,
+   "error": null
+  },
+  {
+   "version": "20261001100000",
+   "name": "lot1_verif",
+   "status": "applied",
+   "ms": 156,
+   "error": null
+  },
+  {
+   "version": "20261001120000",
+   "name": "v2_schema",
+   "status": "applied",
+   "ms": 139,
+   "error": null
+  },
+  {
+   "version": "20261001120100",
+   "name": "v2_users_sessions",
+   "status": "applied",
+   "ms": 235,
+   "error": null
+  },
+  {
+   "version": "20261001120200",
+   "name": "v2_agents_runtimes",
+   "status": "applied",
+   "ms": 141,
+   "error": null
+  },
+  {
+   "version": "20261001120300",
+   "name": "v2_tasks",
+   "status": "applied",
+   "ms": 171,
+   "error": null
+  },
+  {
+   "version": "20261001120400",
+   "name": "v2_task_dependencies",
+   "status": "applied",
+   "ms": 125,
+   "error": null
+  },
+  {
+   "version": "20261001120500",
+   "name": "v2_messages",
+   "status": "applied",
+   "ms": 125,
+   "error": null
+  },
+  {
+   "version": "20261001120600",
+   "name": "v2_actions_tool_calls",
+   "status": "applied",
+   "ms": 203,
+   "error": null
+  },
+  {
+   "version": "20261001120700",
+   "name": "v2_knowledge",
+   "status": "applied",
+   "ms": 125,
+   "error": null
+  },
+  {
+   "version": "20261001120800",
+   "name": "v2_memory",
+   "status": "applied",
+   "ms": 233,
+   "error": null
+  },
+  {
+   "version": "20261001120900",
+   "name": "v2_skills_evaluations_checkpoints",
+   "status": "applied",
+   "ms": 171,
+   "error": null
+  },
+  {
+   "version": "20261001121000",
+   "name": "v2_artifacts_recordings_permissions_leases",
+   "status": "applied",
+   "ms": 360,
+   "error": null
+  },
+  {
+   "version": "20261001121100",
+   "name": "v2_audit",
+   "status": "applied",
+   "ms": 390,
+   "error": null
+  }
+ ]
+}
