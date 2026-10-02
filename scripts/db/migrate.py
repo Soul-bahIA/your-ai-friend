@@ -47,6 +47,9 @@ from db_connect import Conn, DbError, connect, run_sql  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 REPO_DIR = Path(os.environ.get("SOULBAH_MIGRATIONS_DIR") or ROOT / "supabase" / "migrations")
 PENDING_DIR = Path(os.environ.get("SOULBAH_MIGRATIONS_PENDING_DIR") or ROOT / "supabase" / "migrations_pending")
+# Retours arrière (<version>_<nom>.down.sql) : dossier dédié — la CLI Supabase lirait un .down.sql placé dans
+# supabase/migrations comme une migration en double. Repli : à côté de la migration (migrations préparées).
+ROLLBACKS_DIR = Path(os.environ.get("SOULBAH_ROLLBACKS_DIR") or ROOT / "supabase" / "rollbacks")
 HISTORY_BOOTSTRAP = "20261002100000"
 # --stub-vector (bases LOCALES sans pgvector seulement) : DDL vectoriel réécrit comme en CI, noté dans l'historique.
 STUB_VECTOR = False
@@ -426,7 +429,9 @@ def cmd_apply(conn: Conn, a) -> int:
 
 
 def down_path(m: Migration) -> Path:
-    return m.path.with_name(m.path.name[:-4] + ".down.sql")
+    name = m.path.name[:-4] + ".down.sql"
+    dedicated = ROLLBACKS_DIR / name
+    return dedicated if dedicated.exists() else m.path.with_name(name)
 
 
 def cmd_rollback(conn: Conn, a) -> int:

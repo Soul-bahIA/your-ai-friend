@@ -1,0 +1,34 @@
+# Configuration gitleaks du dépôt (lue automatiquement à la racine par `gitleaks git .` dans le job CI `security`).
+# Règles par défaut de gitleaks + exceptions DOCUMENTÉES ci-dessous, chacune ciblée : un vrai secret commité ailleurs
+# reste détecté. Ne jamais ajouter ici un chemin de configuration (.env, *.pem…) ni un motif large.
+title = "Soulbah — gitleaks (règles par défaut + faux positifs documentés)"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Faux positifs documentés (audit DB LOT 0, 2026-10-02)"
+# 1. Canaris de rédaction : faux secrets VOLONTAIRES (préfixes AKIA, ghp_, eyJ…, BEGIN PRIVATE KEY) servant à
+#    prouver que la rédaction des journaux, des prompts et des réponses les masque (V2 LOT 6). Aucun n'est valide.
+# 2. Jetons de test factices (dev-local, HMAC d'approbation, clés agent de test).
+paths = [
+  '''^agent/tests/test_lot6_canary\.py$''',
+  '''^agent/tests/test_lot6_secrets\.py$''',
+  '''^agent/tests/test_lot6_approvals\.py$''',
+  '''^agent/tests/test_lot1_flow\.py$''',
+  '''^backend/node-api/test/v2Security\.test\.ts$''',
+  '''^backend/node-api/test/devLocalAuth\.test\.ts$''',
+]
+# 3. Catalogues de schéma générés (db/baseline, db/dryrun, db/analysis) et migrations : les valeurs signalées par
+#    la règle générique sont des listes de droits PostgreSQL (« authenticated=arwdDxtm/postgres »), des empreintes
+#    SHA-256 de sections de catalogue, des identifiants de constats (« policy.agent_tasks.… ») et des clés du
+#    registre local de modèles (« qwen2.5-1.5b-instruct-q4_k_m »). Ciblé sur la VALEUR (regexTarget = secret).
+regexTarget = "secret"
+regexes = [
+  '''^(?:anon|authenticated|service_role|postgres|supabase_admin|dashboard_user|soulbah_api)=[a-zA-Z*]+/[a-z_]+$''',
+  '''^[0-9a-f]{64}$''',
+  '''^(?:policy|table|function|index|trigger|constraint|grant|column|extension|view|public|soulbah|auth|storage)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$''',
+  '''^(?:qwen|nomic-embed|llama|mistral|phi|gemma|deepseek)[a-z0-9._-]*$''',
+  # 4. Commentaire de agent/redaction.py (« Clés d'API : OpenAI/Anthropic (sk-…) ») : noms de fournisseurs.
+  '''^OpenAI/Anthropic$''',
+]

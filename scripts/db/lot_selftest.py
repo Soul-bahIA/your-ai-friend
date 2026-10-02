@@ -2,7 +2,9 @@
 
     python scripts/db/lot_selftest.py --name <étiquette> --lots 01,02[,…] [--keep] [--report fichier.json]
 
-Pour les lots demandés (fichiers supabase/migrations_pending/<version>_dbNN_*.sql) :
+Pour les lots demandés (fichiers supabase/migrations/<version>_dbNN_*.sql ; retours arrière dans
+supabase/rollbacks, tests dans supabase/migration_tests ; dossier supabase/migrations_pending pris en compte
+pour une migration préparée non encore intégrée) :
   1. copie jetable `soulbah_scratch_<étiquette>` du modèle figé `soulbah_catchup_template` (base restaurée +
      rattrapage des 15 migrations du dépôt ; réessais si le modèle est momentanément occupé) ;
   2. application, avec scripts/db/migrate.py et pgvector simulé, de l'historique (db00) et des lots demandés —
@@ -34,7 +36,11 @@ from db_connect import DbError, client_env, parse, psql_path, run_sql  # noqa: E
 from migration_state import stub_vector  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
+REPO = ROOT / "supabase" / "migrations"
 PENDING = ROOT / "supabase" / "migrations_pending"
+ROLLBACKS = ROOT / "supabase" / "rollbacks"
+TESTS = ROOT / "supabase" / "migration_tests"
+LOTS_FROM = "20261002100000"  # db00 : tout ce qui suit est un lot DB (le modèle figé s'arrête juste avant)
 TEMPLATE = "soulbah_catchup_template"
 ADMIN = os.environ.get("SOULBAH_TEST_PG", "postgresql://postgres@127.0.0.1:54329/postgres")
 PY = sys.executable
@@ -43,9 +49,10 @@ PY = sys.executable
 def lot_files(lots: list[str]) -> list[Path]:
     files = []
     for lot in lots:
-        found = sorted(p for p in PENDING.glob(f"*_db{lot}_*.sql") if not p.name.endswith(".down.sql"))
+        found = sorted(p for d in (REPO, PENDING) for p in d.glob(f"*_db{lot}_*.sql")
+                       if not p.name.endswith((".down.sql", ".test.sql")))
         if not found:
-            raise DbError(f"aucun fichier pour le lot db{lot} dans {PENDING}")
+            raise DbError(f"aucun fichier pour le lot db{lot} dans {REPO} ni {PENDING}")
         files += found
     return sorted(files, key=lambda p: p.name)
 
@@ -101,8 +108,22 @@ def schema_diff(before: str, after: str, limit: int = 200) -> str:
     return "\n".join(lines[:limit]) + ("" if len(lines) <= limit else f"\n… ({len(lines) - limit} lignes de plus)")
 
 
+def down_of(f: Path) -> Path:
+    name = f.name[:-4] + ".down.sql"
+    return ROLLBACKS / name if (ROLLBACKS / name).exists() else f.with_name(name)
+
+
+def test_of(f: Path) -> Path:
+    name = f.name.replace(".sql", ".test.sql")
+    return TESTS / name if (TESTS / name).exists() else PENDING / "tests" / name
+
+
 def migrate(url: str, pending_dir: Path, *extra: str, command: str = "apply") -> tuple[int, str]:
-    env = dict(os.environ, SOULBAH_MIGRATIONS_PENDING_DIR=str(pending_dir), PYTHONIOENCODING="utf-8")
+    # Dépôt isolé : seulement les migrations antérieures aux lots (celles du modèle figé) ; les lots demandés
+    # (et db00) sont dans le dossier « préparé » temporaire, avec leurs .down.sql.
+    env = dict(os.environ, SOULBAH_MIGRATIONS_DIR=str(pending_dir.with_name(pending_dir.name + "_repo")),
+               SOULBAH_MIGRATIONS_PENDING_DIR=str(pending_dir), SOULBAH_ROLLBACKS_DIR=str(pending_dir),
+               PYTHONIOENCODING="utf-8")
     p = subprocess.run([PY, str(ROOT / "scripts" / "db" / "migrate.py"), command, "--target", url, "--pending",
                         "--stub-vector", *extra], capture_output=True, text=True, encoding="utf-8", errors="replace",
                        env=env, timeout=3600)
@@ -122,14 +143,19 @@ def main(argv: list[str]) -> int:
     url = clone(a.name)
     report["scratch"] = parse(url).dbname
     tmp = Path(tempfile.mkdtemp(prefix="soulbah_lots_"))
+    tmp_repo = tmp.with_name(tmp.name + "_repo")
+    tmp_repo.mkdir()
     ok = True
     try:
-        for f in PENDING.glob("*_db00_*.sql"):
-            if not f.name.endswith(".down.sql"):
+        for f in REPO.glob("*.sql"):
+            if f.name.split("_", 1)[0] < LOTS_FROM:
+                shutil.copy(f, tmp_repo / f.name)
+        for f in list(REPO.glob("*_db00_*.sql")) + list(PENDING.glob("*_db00_*.sql")):
+            if not f.name.endswith((".down.sql", ".test.sql")):
                 shutil.copy(f, tmp / f.name)
         for f in files:
             shutil.copy(f, tmp / f.name)
-            down = f.with_name(f.name[:-4] + ".down.sql")
+            down = down_of(f)
             if down.exists():
                 shutil.copy(down, tmp / down.name)
         before_lots = schema_dump(url)
@@ -138,7 +164,7 @@ def main(argv: list[str]) -> int:
         ok &= code == 0
         if ok:
             for f in files:
-                test = PENDING / "tests" / f.name.replace(".sql", ".test.sql")
+                test = test_of(f)
                 if not test.exists():
                     report["steps"].append({"step": f"test {f.name}", "ok": False, "output": "fichier de test absent"})
                     ok = False
@@ -159,7 +185,7 @@ def main(argv: list[str]) -> int:
             # Retour arrière de TOUTE la séquence (ordre inverse, via le gestionnaire : historique tenu), schéma
             # comparé à l'état d'avant les lots, puis réapplication complète et tests. Les lots sans fichier
             # .down.sql (rollback=NO) rendent ce contrôle impossible : signalé, pas masqué.
-            missing = [f.name for f in files if not f.with_name(f.name[:-4] + ".down.sql").exists()]
+            missing = [f.name for f in files if not down_of(f).exists()]
             if missing:
                 report["rollback_untested"] = missing
                 report["steps"].append({"step": "retour arrière", "ok": True,
@@ -178,13 +204,14 @@ def main(argv: list[str]) -> int:
                     report["steps"].append({"step": "réapplication complète", "ok": code == 0, "output": out})
                     ok &= code == 0
                     for f in files:
-                        test = PENDING / "tests" / f.name.replace(".sql", ".test.sql")
+                        test = test_of(f)
                         if test.exists():
                             passed, out = psql_file(url, test, wrap_rollback=True)
                             report["steps"].append({"step": f"test après réapplication {f.name}", "ok": passed, "output": out})
                             ok &= passed
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp_repo, ignore_errors=True)
         if not a.keep:
             drop(url)
     report["ok"] = bool(ok)

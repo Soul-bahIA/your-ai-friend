@@ -28,7 +28,7 @@ import catalog_diff as CD  # noqa: E402
 import db_connect  # noqa: E402
 
 ADMIN_URL = os.environ.get("SOULBAH_TEST_PG", "postgresql://postgres@127.0.0.1:54329/postgres")
-BOOTSTRAP = HERE.parents[2] / "supabase" / "migrations_pending" / "20261002100000_db00_migration_history.sql"
+BOOTSTRAP = HERE.parents[2] / "supabase" / "migrations" / "20261002100000_db00_migration_history.sql"
 
 
 def pg_available() -> bool:
@@ -67,11 +67,13 @@ def migrations(tmp_path, monkeypatch):
         "CREATE TABLE IF NOT EXISTS public.t_second (id int PRIMARY KEY REFERENCES public.t_first(id));\n", "utf-8")
     monkeypatch.setenv("SOULBAH_MIGRATIONS_DIR", str(repo))
     monkeypatch.setenv("SOULBAH_MIGRATIONS_PENDING_DIR", str(pending))
+    monkeypatch.setenv("SOULBAH_ROLLBACKS_DIR", str(tmp_path / "rollbacks"))
     import migrate
     importlib.reload(migrate)
     yield SimpleNamespace(repo=repo, pending=pending, migrate=migrate)
     monkeypatch.delenv("SOULBAH_MIGRATIONS_DIR")
     monkeypatch.delenv("SOULBAH_MIGRATIONS_PENDING_DIR")
+    monkeypatch.delenv("SOULBAH_ROLLBACKS_DIR")
     importlib.reload(migrate)
 
 

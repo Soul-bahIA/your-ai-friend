@@ -17,7 +17,9 @@
 #   bash scripts/dev_db/dev_db.sh seed      utilisateur de dev + clé agent → .dev_db/dev.env (idempotent)
 #   bash scripts/dev_db/dev_db.sh url       affiche DATABASE_URL
 #   bash scripts/dev_db/dev_db.sh env       affiche le contenu de .dev_db/dev.env (à `source`)
-#   bash scripts/dev_db/dev_db.sh test      tests d'intégration node-api (Fastify inject sur ce Postgres)
+#   bash scripts/dev_db/dev_db.sh test      tests d'intégration node-api sur la base de TEST soulbah_test
+#                                           (recréée si absente : n'interfère pas avec l'appli qui tourne)
+#   bash scripts/dev_db/dev_db.sh testdb    (re)crée soulbah_test : stub + migrations ×2 + contrôles + tests
 #   bash scripts/dev_db/dev_db.sh psql [..] ouvre psql sur la base
 #   bash scripts/dev_db/dev_db.sh reset     stop + suppression du cluster + up (dev.env conservé : jeton stable)
 #   bash scripts/dev_db/dev_db.sh destroy   stop + suppression de .dev_db/ entier (dev.env compris)
@@ -149,10 +151,6 @@ cmd_status() {
 
 cmd_migrate() {
   is_running || die "base non démarrée (« start »)"
-  if is_migrated; then
-    info "schéma déjà appliqué (les 4 migrations de février 2026 ne sont pas rejouables : « reset » pour repartir de zéro)"
-    return
-  fi
   local stub=1
   if [[ "$(psql_db -At -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'")" == "1" ]]; then
     stub=0; info "pgvector disponible : DDL vectoriel appliqué tel quel"
@@ -161,6 +159,12 @@ cmd_migrate() {
   fi
   local args=(--checks)
   (( stub )) && args+=(--stub-vector)
+  if is_migrated; then
+    # Les 4 migrations de février ne sont pas rejouables : on rejoue seulement les migrations rejouables
+    # (>= 20260703000000), ce qui applique les nouvelles (idempotence prouvée par la CI).
+    info "schéma déjà appliqué : mise à niveau (rejeu des migrations rejouables, nouvelles comprises)"
+    args+=(--upgrade)
+  fi
   PGHOST=127.0.0.1 PGPORT="$PORT" PGUSER="$DB_USER" PGDATABASE="$DB_NAME" PSQL=psql PG_DUMP=pg_dump \
     bash "$ROOT/scripts/ci/apply_migrations.sh" "${args[@]}"
 }
@@ -210,13 +214,26 @@ EOF
   echo "   Appel JWT de dev : curl -H \"Authorization: Bearer \$DEV_LOCAL_TOKEN\" http://127.0.0.1:3000/api/agent-tasks"
 }
 
+TEST_DB=soulbah_test
+test_db_url() { echo "postgresql://$DB_USER@127.0.0.1:$PORT/$TEST_DB"; }
+
+cmd_testdb() {
+  is_running || die "base non démarrée (« start »)"
+  info "base de test $TEST_DB : recréation (stub Supabase + migrations ×2 + contrôles + tests des migrations)"
+  psql_db -q -c "DROP DATABASE IF EXISTS $TEST_DB WITH (FORCE)" -c "CREATE DATABASE $TEST_DB"
+  local args=(--checks)
+  if [[ "$(psql_db -At -c "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'")" != "1" ]]; then args+=(--stub-vector); fi
+  PGHOST=127.0.0.1 PGPORT="$PORT" PGUSER="$DB_USER" PGDATABASE="$TEST_DB" PSQL=psql PG_DUMP=pg_dump \
+    bash "$ROOT/scripts/ci/apply_migrations.sh" "${args[@]}"
+}
+
 cmd_test() {
   is_running || die "base non démarrée (« start »)"
-  is_migrated || die "schéma absent (« migrate »)"
-  info "tests d'intégration node-api sur $(db_url)"
-  # Fichiers en série, comme la CI (npm run test:pg) : le scheduler V2 est global, un fichier qui le fait
-  # tourner agit aussi sur les tâches d'un autre fichier lancé en parallèle (faux échecs).
-  ( cd "$ROOT/backend/node-api" && TEST_DATABASE_URL="$(db_url)" npx vitest run test/integration --no-file-parallelism "$@" )
+  if [[ "$(psql_db -At -c "SELECT count(*) FROM pg_database WHERE datname = '$TEST_DB'")" != "1" ]]; then cmd_testdb; fi
+  info "tests d'intégration node-api sur $(test_db_url)"
+  # Base de test DISTINCTE de la base de dev : l'appli locale (scheduler, relecteur P1) qui tourne sur la base
+  # de dev n'agit pas sur les tâches des tests. Fichiers en série, comme la CI (npm run test:pg).
+  ( cd "$ROOT/backend/node-api" && TEST_DATABASE_URL="$(test_db_url)" npx vitest run test/integration --no-file-parallelism "$@" )
 }
 
 cmd_up() {
@@ -253,6 +270,7 @@ case "$cmd" in
   url)      db_url ;;
   env)      [[ -f "$ENV_FILE" ]] && cat "$ENV_FILE" || die "dev.env absent (« seed »)" ;;
   test)     cmd_test "$@" ;;
+  testdb)   cmd_testdb ;;
   psql)     is_running || die "base non démarrée"; exec psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d "$DB_NAME" "$@" ;;
   reset)    cmd_reset ;;
   destroy)  cmd_destroy ;;

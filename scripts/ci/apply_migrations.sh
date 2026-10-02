@@ -8,6 +8,8 @@
 #   3. passage 2 : rejeu des migrations >= REPLAY_FROM (défaut 20260703000000)
 #   4. comparaison des schémas (pg_dump --schema-only) après passage 1 et passage 2
 #   5. --checks : assertions scripts/ci/schema_checks.sql (exécutées puis annulées),
+#                 tests des migrations supabase/migration_tests/*.test.sql (chacun dans une transaction
+#                 annulée : gardes, semences, droits, RLS des lots DB),
 #                 contrôles post-restauration scripts/sql/post_restore_checks.sql (lecture
 #                 seule) et rôle soulbah_api (scripts/ci/api_role_checks.sql, avec les
 #                 droits de scripts/sql/soulbah_api_grants.sql ; annulé)
@@ -17,7 +19,10 @@
 # les migrations suivantes doivent l'être (règle des migrations LOT 1+).
 #
 # Usage (connexion par les variables libpq PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE) :
-#   bash scripts/ci/apply_migrations.sh [--stub-vector] [--checks]
+#   bash scripts/ci/apply_migrations.sh [--stub-vector] [--checks] [--upgrade]
+#
+# --upgrade : base DÉJÀ migrée (dev local) : ni stub Supabase ni passage 1 ; rejoue seulement les migrations
+#             rejouables (>= REPLAY_FROM), ce qui applique les nouvelles et laisse les autres inchangées.
 #
 # Variables :
 #   PSQL         commande psql      (défaut : psql)
@@ -40,12 +45,15 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MIG_DIR="$ROOT/supabase/migrations"
 STUB_VECTOR="${STUB_VECTOR:-0}"
 RUN_CHECKS=0
+UPGRADE=0
+TESTS_DIR="$ROOT/supabase/migration_tests"
 REPLAY_FROM="${REPLAY_FROM:-20260703000000}"
 
 for arg in "$@"; do
   case "$arg" in
     --stub-vector) STUB_VECTOR=1 ;;
     --checks)      RUN_CHECKS=1 ;;
+    --upgrade)     UPGRADE=1 ;;
     -h|--help)     sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "Option inconnue : $arg" >&2; exit 2 ;;
   esac
@@ -102,19 +110,24 @@ shopt -s nullglob
 MIGRATIONS=("$MIG_DIR"/*.sql)
 (( ${#MIGRATIONS[@]} > 0 )) || { echo "Aucune migration dans $MIG_DIR" >&2; exit 1; }
 
-echo "== Stub Supabase (auth, rôles, publication)"
-psql_run -f - < "$ROOT/scripts/ci/auth_stub.sql"
-
-echo "== Passage 1 : ${#MIGRATIONS[@]} migrations (stub-vector=$STUB_VECTOR)"
-for f in "${MIGRATIONS[@]}"; do
-  echo "   + $(basename "$f")"
-  apply_file "$f"
-done
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-if [[ "${PG_DUMP:-}" != "none" ]]; then
-  dump_schema "$TMP/pass1.sql"
+if [[ "$UPGRADE" == "1" ]]; then
+  echo "== Mise à niveau d'une base déjà migrée : rejeu des migrations >= $REPLAY_FROM (stub-vector=$STUB_VECTOR)"
+  PG_DUMP=none
+else
+  echo "== Stub Supabase (auth, rôles, publication)"
+  psql_run -f - < "$ROOT/scripts/ci/auth_stub.sql"
+
+  echo "== Passage 1 : ${#MIGRATIONS[@]} migrations (stub-vector=$STUB_VECTOR)"
+  for f in "${MIGRATIONS[@]}"; do
+    echo "   + $(basename "$f")"
+    apply_file "$f"
+  done
+
+  if [[ "${PG_DUMP:-}" != "none" ]]; then
+    dump_schema "$TMP/pass1.sql"
+  fi
 fi
 
 echo "== Passage 2 : rejeu des migrations >= $REPLAY_FROM"
@@ -140,8 +153,14 @@ if [[ "${PG_DUMP:-}" != "none" ]]; then
 fi
 
 if [[ "$RUN_CHECKS" == "1" ]]; then
-  echo "== Assertions (scripts/ci/schema_checks.sql)"
-  psql_run -f - < "$ROOT/scripts/ci/schema_checks.sql"
+  if [[ "$UPGRADE" == "1" ]]; then
+    # schema_checks.sql suppose une base NEUVE (jeu de données fixe, chaîne d'audit vide) : sauté sur une base
+    # de dev peuplée ; la CI et `dev_db.sh testdb` l'exécutent sur une base neuve.
+    echo "== Assertions (scripts/ci/schema_checks.sql) : sautées en mise à niveau (base peuplée)"
+  else
+    echo "== Assertions (scripts/ci/schema_checks.sql)"
+    psql_run -f - < "$ROOT/scripts/ci/schema_checks.sql"
+  fi
   echo "== Contrôles post-restauration (scripts/sql/post_restore_checks.sql)"
   psql_run -f - < "$ROOT/scripts/sql/post_restore_checks.sql"
   echo "== Rôle soulbah_api (scripts/ci/api_role_checks.sql + scripts/sql/soulbah_api_grants.sql)"
@@ -151,6 +170,12 @@ if [[ "$RUN_CHECKS" == "1" ]]; then
     /^-- @@SOULBAH_API_GRANTS@@\r?$/ { while ((getline line < grants) > 0) print line; next }
     { print }
   ' "$ROOT/scripts/ci/api_role_checks.sql" | psql_run -f -
+  TESTS=("$TESTS_DIR"/*.test.sql)
+  echo "== Tests des migrations (${#TESTS[@]} fichiers de supabase/migration_tests, transactions annulées)"
+  for t in "${TESTS[@]}"; do
+    echo "   ? $(basename "$t")"
+    { echo "BEGIN;"; echo "SET client_min_messages = warning;"; cat "$t"; echo ";"; echo "ROLLBACK;"; } | psql_run -f -
+  done
 fi
 
 echo "OK : ${#MIGRATIONS[@]} migrations appliquées, $replayed rejouées sans erreur."

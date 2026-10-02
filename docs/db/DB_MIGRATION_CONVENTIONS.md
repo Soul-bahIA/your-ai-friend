@@ -1,14 +1,24 @@
 # Conventions des migrations Soulbah (DB LOT 0)
 
-Contrat commun à toutes les migrations préparées dans `supabase/migrations_pending/`. Il prolonge les
-conventions des migrations V2 (`supabase/migrations/20261001120000_v2_schema.sql` à `20261001121100_v2_audit.sql`)
-au lieu de les remplacer.
+Contrat commun à toutes les migrations de Soulbah à partir du DB LOT 0. Il prolonge les conventions des
+migrations V2 (`supabase/migrations/20261001120000_v2_schema.sql` à `20261001121100_v2_audit.sql`) au lieu de les
+remplacer.
 
 ## 1. Emplacement et nom
 
-- Fichier : `supabase/migrations_pending/<AAAAMMJJHHMMSS>_dbNN_<sujet>.sql`, une migration par sujet cohérent.
-- Test : `supabase/migrations_pending/tests/<même nom>.test.sql`.
-- Retour arrière quand il est possible : `supabase/migrations_pending/<même nom>.down.sql`.
+Depuis le 2026-10-02 (lots DB 00 à 16 appliqués sur Supabase), une migration **validée** vit avec les autres :
+
+- Fichier : `supabase/migrations/<AAAAMMJJHHMMSS>_<sujet>.sql` (lots DB : `_dbNN_<sujet>`), une migration par sujet
+  cohérent ; appliquée par `supabase db push`, la CI (`scripts/ci/apply_migrations.sh`, deux passages) et
+  `scripts/dev_db/dev_db.sh migrate` (mise à niveau par rejeu sur la base de dev).
+- Test : `supabase/migration_tests/<même nom>.test.sql`, joué par la CI après toutes les migrations, dans une
+  transaction annulée. (Pas `supabase/tests/` : la CLI y attend des tests pgTAP.)
+- Retour arrière quand il est possible : `supabase/rollbacks/<même nom>.down.sql`, lu par `migrate.py rollback`
+  (jamais dans `supabase/migrations/`, que la CLI lirait comme une migration en double).
+- Une migration **préparée, pas encore validée** (risquée, ou destinée d'abord à une copie) commence dans
+  `supabase/migrations_pending/` avec son test (`tests/`) et son `.down.sql`, appliquée seulement par
+  `migrate.py --pending` ; une fois validée et appliquée, elle rejoint les trois dossiers ci-dessus et l'historique
+  de la CLI est réparé (`supabase migration repair --status applied <version>`).
 - En-têtes obligatoires, lus par `scripts/db/migrate.py` :
   ```sql
   -- soulbah:rollback=YES|PARTIAL|NO
