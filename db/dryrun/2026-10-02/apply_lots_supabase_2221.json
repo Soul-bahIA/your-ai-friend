@@ -1,0 +1,114 @@
+{
+ "started_at": "2026-10-02T22:17:44",
+ "lots": [
+  {
+   "version": "20261002110800",
+   "name": "db07_project_brain",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 7.2,
+   "dry_run_output": "dry_run_ok                 20261002110800  db07_project_brain\nessai à blanc réussi en 5077 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 10.9,
+   "apply_output": "applied           6734 ms  20261002110800  db07_project_brain\n"
+  },
+  {
+   "version": "20261002110900",
+   "name": "db08_code_db_api_ui_intelligence",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 18.2,
+   "dry_run_output": "dry_run_ok                 20261002110900  db08_code_db_api_ui_intelligence\nessai à blanc réussi en 15703 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 20.2,
+   "apply_output": "applied          15735 ms  20261002110900  db08_code_db_api_ui_intelligence\n"
+  },
+  {
+   "version": "20261002111000",
+   "name": "db09_skills_tools",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 12.6,
+   "dry_run_output": "dry_run_ok                 20261002111000  db09_skills_tools\nessai à blanc réussi en 9187 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 19.6,
+   "apply_output": "applied          11218 ms  20261002111000  db09_skills_tools\n"
+  },
+  {
+   "version": "20261002111100",
+   "name": "db10_models_benchmarks",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 24.6,
+   "dry_run_output": "dry_run_ok                 20261002111100  db10_models_benchmarks\nessai à blanc réussi en 18375 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 22.2,
+   "apply_output": "applied          17578 ms  20261002111100  db10_models_benchmarks\n"
+  },
+  {
+   "version": "20261002111200",
+   "name": "db11_security_immune",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 12.2,
+   "dry_run_output": "dry_run_ok                 20261002111200  db11_security_immune\nessai à blanc réussi en 10156 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 15.1,
+   "apply_output": "applied          11031 ms  20261002111200  db11_security_immune\n"
+  },
+  {
+   "version": "20261002111300",
+   "name": "db12_missions_checkpoints",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 9.9,
+   "dry_run_output": "dry_run_ok                 20261002111300  db12_missions_checkpoints\nessai à blanc réussi en 7344 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 12.4,
+   "apply_output": "applied           7233 ms  20261002111300  db12_missions_checkpoints\n"
+  },
+  {
+   "version": "20261002111400",
+   "name": "db13_self_improvement",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 7.6,
+   "dry_run_output": "dry_run_ok                 20261002111400  db13_self_improvement\nessai à blanc réussi en 5235 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 13.5,
+   "apply_output": "applied           6764 ms  20261002111400  db13_self_improvement\n"
+  },
+  {
+   "version": "20261002111500",
+   "name": "db14_observability",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 8.6,
+   "dry_run_output": "dry_run_ok                 20261002111500  db14_observability\nessai à blanc réussi en 5796 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 10.7,
+   "apply_output": "applied           5250 ms  20261002111500  db14_observability\n"
+  },
+  {
+   "version": "20261002111600",
+   "name": "db15_indexes_performance",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 5.6,
+   "dry_run_output": "dry_run_ok                 20261002111600  db15_indexes_performance\nessai à blanc réussi en 3375 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 10.2,
+   "apply_output": "applied           3890 ms  20261002111600  db15_indexes_performance\n"
+  }
+ ],
+ "ok": true
+}

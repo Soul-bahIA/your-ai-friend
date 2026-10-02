@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002111600",
+   "name": "db15_indexes_performance",
+   "status": "applied",
+   "ms": 3890,
+   "error": null
+  }
+ ]
+}

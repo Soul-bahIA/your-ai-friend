@@ -5,7 +5,7 @@ DECLARE
   has_vector boolean := EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector');
 BEGIN
   PERFORM soulbah.assert_table_shape('soulbah.knowledge_chunks', '{"embedding_model_id": "uuid", "embedding_dims": "integer"}');
-  PERFORM soulbah.assert_table_shape('soulbah.memory_items', '{"embedding": "vector", "embedding_model_id": "uuid", "embedding_dims": "integer"}');
+  PERFORM soulbah.assert_table_shape('soulbah.memory_items', '{"embedding_model_id": "uuid", "embedding_dims": "integer"}');
   SELECT id INTO m FROM soulbah.embedding_models WHERE name = 'nomic-embed-text-v1.5-q8_0';
   INSERT INTO soulbah.memory_items (type, title, content, source) VALUES ('SEMANTIC', 'v', 'x', 'test') RETURNING id INTO mi;
   -- Un vecteur sans modèle ni dimension est refusé

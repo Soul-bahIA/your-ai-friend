@@ -1,0 +1,111 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261001000000",
+   "name": "hardening",
+   "status": "applied",
+   "ms": 4577,
+   "error": null
+  },
+  {
+   "version": "20261001090000",
+   "name": "lot1_fixes",
+   "status": "applied",
+   "ms": 4812,
+   "error": null
+  },
+  {
+   "version": "20261001100000",
+   "name": "lot1_verif",
+   "status": "applied",
+   "ms": 3078,
+   "error": null
+  },
+  {
+   "version": "20261001120000",
+   "name": "v2_schema",
+   "status": "applied",
+   "ms": 2405,
+   "error": null
+  },
+  {
+   "version": "20261001120100",
+   "name": "v2_users_sessions",
+   "status": "applied",
+   "ms": 2577,
+   "error": null
+  },
+  {
+   "version": "20261001120200",
+   "name": "v2_agents_runtimes",
+   "status": "applied",
+   "ms": 3015,
+   "error": null
+  },
+  {
+   "version": "20261001120300",
+   "name": "v2_tasks",
+   "status": "applied",
+   "ms": 3561,
+   "error": null
+  },
+  {
+   "version": "20261001120400",
+   "name": "v2_task_dependencies",
+   "status": "applied",
+   "ms": 2641,
+   "error": null
+  },
+  {
+   "version": "20261001120500",
+   "name": "v2_messages",
+   "status": "applied",
+   "ms": 2235,
+   "error": null
+  },
+  {
+   "version": "20261001120600",
+   "name": "v2_actions_tool_calls",
+   "status": "applied",
+   "ms": 2531,
+   "error": null
+  },
+  {
+   "version": "20261001120700",
+   "name": "v2_knowledge",
+   "status": "applied",
+   "ms": 2608,
+   "error": null
+  },
+  {
+   "version": "20261001120800",
+   "name": "v2_memory",
+   "status": "applied",
+   "ms": 2406,
+   "error": null
+  },
+  {
+   "version": "20261001120900",
+   "name": "v2_skills_evaluations_checkpoints",
+   "status": "applied",
+   "ms": 2562,
+   "error": null
+  },
+  {
+   "version": "20261001121000",
+   "name": "v2_artifacts_recordings_permissions_leases",
+   "status": "applied",
+   "ms": 3281,
+   "error": null
+  },
+  {
+   "version": "20261001121100",
+   "name": "v2_audit",
+   "status": "applied",
+   "ms": 3264,
+   "error": null
+  }
+ ]
+}

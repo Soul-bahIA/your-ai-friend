@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002111000",
+   "name": "db09_skills_tools",
+   "status": "applied",
+   "ms": 11218,
+   "error": null
+  }
+ ]
+}

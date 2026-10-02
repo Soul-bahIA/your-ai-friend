@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002110600",
+   "name": "db06_knowledge_research",
+   "status": "applied",
+   "ms": 14047,
+   "error": null
+  }
+ ]
+}

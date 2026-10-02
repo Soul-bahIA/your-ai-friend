@@ -1,0 +1,25 @@
+{
+ "target": "supabase (URL masquée)",
+ "started_at": "2026-10-02T22:23:54",
+ "ok": true,
+ "steps": [
+  {
+   "step": "schema_checks (partie structurelle)",
+   "ok": true,
+   "seconds": 1.0,
+   "output": "NOTICE:  pgvector présent : colonne et index HNSW vérifiés\n"
+  },
+  {
+   "step": "post_restore_checks",
+   "ok": true,
+   "seconds": 0.7,
+   "output": "NOTICE:  post_restore_checks : droits, RLS et policies conformes\n"
+  },
+  {
+   "step": "api_role_checks",
+   "ok": true,
+   "seconds": 4.0,
+   "output": "api_role_checks : soulbah_api couvre les requêtes de node-api\nNOTICE:  role \"postgres\" has already been granted membership in role \"soulbah_api\" by role \"postgres\"\n"
+  }
+ ]
+}

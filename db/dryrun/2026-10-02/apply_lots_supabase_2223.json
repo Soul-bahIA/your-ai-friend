@@ -1,0 +1,18 @@
+{
+ "started_at": "2026-10-02T22:22:48",
+ "lots": [
+  {
+   "version": "20261002111700",
+   "name": "db16_hardening",
+   "dry_run_attempts": 1,
+   "apply_attempts": 1,
+   "dry_run_ok": true,
+   "dry_run_s": 6.1,
+   "dry_run_output": "dry_run_ok                 20261002111700  db16_hardening\nessai à blanc réussi en 3515 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 9.4,
+   "apply_output": "applied           4484 ms  20261002111700  db16_hardening\n"
+  }
+ ],
+ "ok": true
+}

@@ -223,3 +223,5 @@ Toutes les semences utilisent `ON CONFLICT DO NOTHING` sur une clé naturelle : 
 Semences ajoutées au tableau du §4 : lot 10 (ci-dessus) ; lot 16 (`system_versions` : `database.schema`
 `2026-10-02.lots-01-16`). Les 4 leçons V1 copiées par le lot 5 et les 2 modèles d'embeddings du lot 6 sont
 confirmés sur la copie intégrée (`db/baseline/2026-10-02_integrated/`).
+
+| Lot 06v : `assert_table_shape(…, '{"embedding": "vector"}')` | Vérification par `pg_type.typname` (`vector` ou `_float4`) | Sur Supabase, `assert_table_shape()` compare `format_type()` sous `search_path = pg_catalog` : les types d'extension sortent qualifiés (`public.vector`) et la garde a (correctement) arrêté le lot. À retenir pour toute colonne d'un type d'extension ; une future version de `assert_table_shape()` (nouveau lot, jamais db01 modifié) pourra retirer le préfixe de schéma. |

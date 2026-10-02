@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002110900",
+   "name": "db08_code_db_api_ui_intelligence",
+   "status": "applied",
+   "ms": 15735,
+   "error": null
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002111200",
+   "name": "db11_security_immune",
+   "status": "applied",
+   "ms": 11031,
+   "error": null
+  }
+ ]
+}

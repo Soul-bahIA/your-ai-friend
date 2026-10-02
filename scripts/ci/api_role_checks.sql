@@ -16,6 +16,11 @@ BEGIN
     CREATE ROLE soulbah_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
       NOINHERIT BYPASSRLS;
   END IF;
+  -- Hors superutilisateur (Supabase : postgres a CREATEROLE sans SET automatique, PG16+), SET ROLE exige
+  -- l'appartenance avec l'option SET ; sans effet en CI (superutilisateur). Annulé avec la transaction.
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    EXECUTE format('GRANT soulbah_api TO %I WITH SET TRUE, INHERIT FALSE', current_user);
+  END IF;
 END $$;
 
 -- @@SOULBAH_API_GRANTS@@

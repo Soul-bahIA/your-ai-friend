@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002110800",
+   "name": "db07_project_brain",
+   "status": "applied",
+   "ms": 6734,
+   "error": null
+  }
+ ]
+}

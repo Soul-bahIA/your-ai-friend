@@ -56,7 +56,13 @@ $PY scripts/db/integration_checks.py --target "$T" --out db/dryrun/<date>/checks
 `--stub-vector` (cibles locales seulement) simule pgvector comme la CI quand l'extension manque ; c'est noté
 dans l'historique de la copie. Sur Supabase, pgvector 0.8.0 est présent : l'option est refusée.
 
-## Séquence pour la base Supabase restaurée
+## Séquence pour la base Supabase restaurée — **exécutée le 2026-10-02** (compte rendu : rapport §18)
+
+État au 2026-10-02 18:25 : 49 migrations enregistrées dans `soulbah.schema_migrations` (16 baselinées, 15 du
+dépôt et 18 fichiers de ce dossier appliqués), empreintes conformes (`verify`), CLI alignée (31/31), rôle
+`soulbah_api` créé. Pour une **autre** base restaurée, la séquence ci-dessous reste le mode d'emploi ; sur une
+petite instance, appliquer les lots **un par un** (un essai à blanc de tous les lots en une transaction fait tomber
+la connexion).
 
 La base restaurée n'a aucun historique. L'état réel de chaque migration du dépôt a été établi objet par objet
 (`scripts/db/migration_state.py`, preuve dans `db/baseline/2026-10-02_restored/migration_state.json`) et reste

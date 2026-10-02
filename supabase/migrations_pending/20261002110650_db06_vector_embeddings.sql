@@ -9,7 +9,19 @@
 -- =============================================================================
 
 -- 1. knowledge_chunks (V2) : le modèle devient une référence, la dimension est portée par la ligne.
-SELECT soulbah.assert_table_shape('soulbah.knowledge_chunks', '{"embedding": "vector", "embedding_model": "text", "document_id": "uuid"}');
+SELECT soulbah.assert_table_shape('soulbah.knowledge_chunks', '{"embedding_model": "text", "document_id": "uuid"}');
+-- Type de la colonne vectorielle vérifié par son nom (pg_type.typname), indépendamment du schéma où vit pgvector
+-- (public sur Supabase aujourd'hui, extensions demain — SEC-13) : assert_table_shape() compare format_type() sous
+-- search_path = pg_catalog, qui qualifie les types d'extension (public.vector). real[] = stub local sans pgvector.
+DO $$
+DECLARE tn text;
+BEGIN
+  SELECT t.typname INTO tn FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
+   WHERE a.attrelid = 'soulbah.knowledge_chunks'::regclass AND a.attname = 'embedding' AND NOT a.attisdropped;
+  IF tn IS NULL OR tn NOT IN ('vector', '_float4') THEN
+    RAISE EXCEPTION 'table soulbah.knowledge_chunks : colonne « embedding » de type %, attendu vector (pgvector) — structure incompatible, migration arrêtée', coalesce(tn, 'absente');
+  END IF;
+END $$;
 ALTER TABLE soulbah.knowledge_chunks
   ADD COLUMN IF NOT EXISTS embedding_model_id uuid REFERENCES soulbah.embedding_models(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS embedding_dims     integer;

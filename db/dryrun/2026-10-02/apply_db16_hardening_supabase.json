@@ -1,0 +1,13 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002111700",
+   "name": "db16_hardening",
+   "status": "applied",
+   "ms": 4484,
+   "error": null
+  }
+ ]
+}

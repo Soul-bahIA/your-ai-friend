@@ -1,0 +1,41 @@
+{
+ "target": "postgres.ntvwbafvjgzsjoumtcmb@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+ "dry_run": false,
+ "results": [
+  {
+   "version": "20261002110100",
+   "name": "db01_core",
+   "status": "applied",
+   "ms": 17703,
+   "error": null
+  },
+  {
+   "version": "20261002110200",
+   "name": "db02_projects",
+   "status": "applied",
+   "ms": 9389,
+   "error": null
+  },
+  {
+   "version": "20261002110300",
+   "name": "db03_agents",
+   "status": "applied",
+   "ms": 17641,
+   "error": null
+  },
+  {
+   "version": "20261002110400",
+   "name": "db04_policies_guardrails",
+   "status": "applied",
+   "ms": 27514,
+   "error": null
+  },
+  {
+   "version": "20261002110500",
+   "name": "db05_memory",
+   "status": "applied",
+   "ms": 10764,
+   "error": null
+  }
+ ]
+}

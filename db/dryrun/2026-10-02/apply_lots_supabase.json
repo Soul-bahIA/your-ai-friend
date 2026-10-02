@@ -1,0 +1,23 @@
+{
+ "started_at": "2026-10-02T17:52:50",
+ "lots": [
+  {
+   "version": "20261002110600",
+   "name": "db06_knowledge_research",
+   "dry_run_ok": true,
+   "dry_run_s": 18.0,
+   "dry_run_output": "dry_run_ok                 20261002110600  db06_knowledge_research\nessai à blanc réussi en 13311 ms (transaction annulée, rien d'écrit)\n",
+   "apply_ok": true,
+   "apply_s": 24.0,
+   "apply_output": "applied          14047 ms  20261002110600  db06_knowledge_research\n"
+  },
+  {
+   "version": "20261002110650",
+   "name": "db06_vector_embeddings",
+   "dry_run_ok": false,
+   "dry_run_s": 9.6,
+   "dry_run_output": "failed                     20261002110650  db06_vector_embeddings\nessai à blanc en échec en 2389 ms (transaction annulée, rien d'écrit)\n    ERROR:  table soulbah.knowledge_chunks : colonne « embedding » de type public.vector, attendu vector — structure incompatible, migration arrêtée\nCONTEXTE : PL/pgSQL function soulbah.assert_table_shape(regclass,jsonb) line 19 at RAISE\n"
+  }
+ ],
+ "ok": false
+}
